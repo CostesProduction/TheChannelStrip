@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.17.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.17.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -178,6 +178,11 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.17.1**
+  - **Studio logo halved**. The Costes logo in the sidebar is now half
+    its v2.17 size in both directions (the placement keeps the aspect
+    ratio). The window's minimum height follows (900 / 720 with the
+    analyser visible / hidden).
 - **2.17.0**
   - **Console order reworked**. The sidebar buttons now read, top to
     bottom: **A9099, SSL E, SSL G, SSL J, Bx N, Lindell N, Lindell A,

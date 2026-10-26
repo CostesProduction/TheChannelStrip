@@ -636,9 +636,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // -> 770 / 590.
     // v2.16: two more console buttons (Lindell 80/50 Channel) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
+    // v2.17.1: logo halved -> 900 / 720.
     setSize (1180, 900);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 960 : 780, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 900 : 720, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1022,12 +1023,14 @@ void TheChannelStripAudioProcessorEditor::resized()
     // v2.17: the studio logo sits between the gain-staging section and
     // the host status area. The block height follows the image's aspect
     // ratio at the sidebar width, capped so the sidebar stays compact.
+    // v2.17.1: the logo is half its v2.17 size in both directions (the
+    // placement keeps the aspect ratio, so the width follows the height).
     {
         const auto logoImage = studioLogo.getImage();
         const int logoH = logoImage.isValid()
-            ? juce::jlimit (40, 150, juce::roundToInt ((double) sw * logoImage.getHeight()
-                                                          / logoImage.getWidth()))
-            : 40;
+            ? juce::jlimit (20, 75, juce::roundToInt ((double) sw * logoImage.getHeight()
+                                                      / logoImage.getWidth()) / 2)
+            : 20;
         studioLogo.setBounds (sideX, y + 4, sw, logoH);
         y += logoH + 10;
     }
@@ -1065,8 +1068,8 @@ void TheChannelStripAudioProcessorEditor::layoutHostedHolder()
 // hosted editor is embedded (per console: their GUI sizes differ). The
 // centre column then matches the plugin's width exactly and nothing
 // scrolls. v2.8: without the analyser strip the window is one strip
-// shorter, and the minimum height follows (960 / 780 with the nine
-// console buttons of v2.16 plus the v2.17 studio logo).
+// shorter, and the minimum height follows (900 / 720 with the nine
+// console buttons of v2.16 plus the v2.17.1 studio logo).
 void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
 {
     if (embeddedHostedEditor == nullptr)
@@ -1090,7 +1093,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // onto the analyser. v2.13: two more console buttons -> 770 / 520.
     // v2.16: two more console buttons (Lindell) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
-    const int newH = juce::jlimit (showStrip ? 960 : 780, 1600, targetH);
+    // v2.17.1: logo halved -> 900 / 720.
+    const int newH = juce::jlimit (showStrip ? 900 : 720, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1105,7 +1109,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 960 : 780, 2560, 1600); // v2.17: logo block added
+    setResizeLimits (1024, show ? 900 : 720, 2560, 1600); // v2.17.1: logo block halved
     resized();
 
     if (embeddedHostedEditor != nullptr)
