@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.16.1 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.17.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +28,10 @@ juce_add_plugin(TheChannelStrip
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE)
 
+# v2.17: the studio logo embedded as a binary resource so the plugin
+# bundle is fully self-contained (no filesystem access at runtime).
+juce_add_binary_data(TcsResources SOURCES resources/CostesLogo.png)
+
 target_sources(TheChannelStrip PRIVATE
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
@@ -46,6 +50,7 @@ target_compile_definitions(TheChannelStrip PUBLIC
 
 target_link_libraries(TheChannelStrip
     PRIVATE
+        TcsResources
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

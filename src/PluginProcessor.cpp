@@ -17,34 +17,38 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     return layout;
 }
 
+// v2.17: order reworked at Clement's request - the AMEK 9099 leads,
+// the SSL trio follows, then the Plugin Alliance channel strips
+// (bx_console N, the two Lindells, Focusrite), and the AMEK 200
+// closes the list. Only the display/hosting order changed: saved
+// sessions match consoles by name, and per-console memory is keyed
+// by plugin ident, so nothing else moves.
 const char* const TheChannelStripAudioProcessor::consoleNames[TheChannelStripAudioProcessor::numConsoles] =
 {
+    "bx_console AMEK 9099",
     "bx_console SSL 4000 E",
     "bx_console SSL 4000 G",
     "bx_console SSL 9000 J",
-    "bx_console AMEK 9099",
-    "bx_console AMEK 200",
-    // v2.13: two new hostable consoles at Clement's request
-    "bx_console Focusrite SC",
     "bx_console N",
-    // v2.16: the two Lindell channel strips, at Clement's request
     "Lindell 80 Channel",
-    "Lindell 50 Channel"
+    "Lindell 50 Channel",
+    "bx_console Focusrite SC",
+    "bx_console AMEK 200"
 };
 
 juce::String TheChannelStripAudioProcessor::consoleLabel (int index)
 {
     switch (index)
     {
-        case 0: return "SSL E";
-        case 1: return "SSL G";
-        case 2: return "SSL J";
-        case 3: return "A9099";
-        case 4: return "A200";
-        case 5: return "Focusrite"; // v2.13: bx_console Focusrite SC
-        case 6: return "Bx N";      // v2.13: bx_console N (back from v1)
-        case 7: return "Lindell N"; // v2.16: Lindell 80 Channel
-        case 8: return "Lindell A"; // v2.16: Lindell 50 Channel
+        case 0: return "A9099";     // v2.17: bx_console AMEK 9099 leads the list
+        case 1: return "SSL E";    // bx_console SSL 4000 E
+        case 2: return "SSL G";    // bx_console SSL 4000 G
+        case 3: return "SSL J";    // bx_console SSL 9000 J
+        case 4: return "Bx N";     // v2.13: bx_console N (back from v1)
+        case 5: return "Lindell N"; // v2.16: Lindell 80 Channel
+        case 6: return "Lindell A"; // v2.16: Lindell 50 Channel
+        case 7: return "Focusrite"; // v2.13: bx_console Focusrite SC
+        case 8: return "A200";     // bx_console AMEK 200
         default: return {};
     }
 }
@@ -1016,7 +1020,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.16.1");
+    xml->setAttribute ("version", "2.17.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

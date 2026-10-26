@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.16.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.17.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -10,8 +10,8 @@ APIs, and wraps
 them in a clean, focused workflow:
 
 - **Nine fixed slots** — one button per console, stacked in the **left
-  sidebar** with short labels (SSL E, SSL G, SSL J, A9099, A200,
-  Focusrite, Bx N, Lindell N, Lindell A). Clicking a
+  sidebar** with short labels (A9099, SSL E, SSL G, SSL J, Bx N,
+  Lindell N, Lindell A, Focusrite, A200). Clicking a
   button instantiates that plugin; buttons for plugins that are not
   installed are disabled. Selection is exclusive (radio behaviour), one
   console at a time, and the sidebar shows the hosted console's name.
@@ -178,6 +178,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.17.0**
+  - **Console order reworked**. The sidebar buttons now read, top to
+    bottom: **A9099, SSL E, SSL G, SSL J, Bx N, Lindell N, Lindell A,
+    Focusrite, A200**. Only the display/hosting order changed — saved
+    sessions match consoles by name and per-console memory is keyed by
+    plugin ident, so existing sessions and remembered states load
+    exactly as before.
+  - **Studio logo in the sidebar**. The Costes studio logo is embedded
+    as a binary resource and displayed between the gain-staging section
+    and the host status area. It scales to the sidebar width, aspect
+    ratio preserved. The window's minimum height grows accordingly
+    (960 / 780 with the analyser visible / hidden).
 - **2.16.1**
   - **Runtime latency changes are now forwarded**. The hosted console can
     change its own latency while playing (the Lindell 80/50 Channel

@@ -269,6 +269,10 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> embeddedHostedEditor;
     juce::AudioProcessor* lastEmbeddedInstance = nullptr;
 
+    // v2.17: Clement's studio logo (embedded as a binary resource),
+    // shown between the gain-staging section and the host status area.
+    juce::ImageComponent studioLogo;
+
     juce::Label statusLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TheChannelStripAudioProcessorEditor)
