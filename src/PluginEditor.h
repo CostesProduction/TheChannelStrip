@@ -233,6 +233,10 @@ private:
 
     juce::TextButton rescanButton    { "Rescan" };
 
+    // v2.16.1: last latency value logged to the Terminal (change logging
+    // happens on the message thread, never in processBlock).
+    int lastLoggedLatency = -1;
+
     std::array<juce::TextButton, (size_t) TheChannelStripAudioProcessor::numConsoles> consoleButtons;
     juce::Label tiltLabel { {}, "tilt" };
     // v2.12: the tilt and speed buttons are TextButtons styled like the

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.16.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.16.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -82,7 +82,9 @@ them in a clean, focused workflow:
   with the analyzer shown, 1024×610 with it hidden;
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
-  on to the DAW.
+  on to the DAW, and re-forwarded whenever the plugin changes it at
+  runtime (e.g. toggling oversampling inside the Lindell channels), so
+  delay compensation stays correct during playback.
 - **Gain-reduction forwarding (v2.15.5, Studio One)** — when the hosted
   console reports its gain reduction through PreSonus'
   `IGainReductionInfo` extension, TheChannelStrip forwards it to the host
@@ -176,6 +178,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.16.1**
+  - **Runtime latency changes are now forwarded**. The hosted console can
+    change its own latency while playing (the Lindell 80/50 Channel
+    oversampling does exactly that); previously TheChannelStrip reported
+    the latency once at instantiation, so delay compensation drifted when
+    oversampling was toggled mid-session. The processor now refreshes the
+    hosted plugin's reported latency every block and re-forwards it to the
+    DAW (JUCE relays the change as a `kLatencyChanged` notification, the
+    same path a directly-inserted plugin uses), and the editor logs
+    "latency: now forwarding N samples" to the Terminal on every change.
+    Fixed-latency consoles (the bx_consoles, AMEK 200's 32 samples) are
+    unaffected.
 - **2.16.0**
   - **Two new hosted consoles**: the **Lindell 80 Channel** (button
     "Lindell N") and the **Lindell 50 Channel** (button "Lindell A") join

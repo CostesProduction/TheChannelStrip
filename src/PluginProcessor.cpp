@@ -318,6 +318,9 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     }
 
     // ---- forward the hosted plugin's reported latency to the host ----
+    // v2.16.1: refresh the cached value first - the console can change
+    // its own latency at runtime (oversampling in the Lindell channels).
+    hostedStrip.refreshReportedLatency();
     const int hostedLatency = hostedStrip.getReportedLatency();
     if (hostedLatency != lastReportedLatency)
     {
@@ -1013,7 +1016,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.16.0");
+    xml->setAttribute ("version", "2.16.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

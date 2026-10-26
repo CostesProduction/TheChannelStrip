@@ -46,6 +46,20 @@ public:
         return reportedLatency.load (std::memory_order_relaxed);
     }
 
+    // v2.16.1: the hosted plugin can change its own latency at runtime
+    // (e.g. toggling oversampling inside the Lindell consoles). The
+    // processor calls this from its processBlock so the cached value above
+    // stays current. Cost per block: one atomic load plus one plain int
+    // read - JUCE's hosted VST3 wrapper updates its latency cache when the
+    // plugin signals kLatencyChanged, and our own setLatencySamples on the
+    // TCS side re-triggers kLatencyChanged on the wrapper, so the DAW
+    // re-compensates within a few blocks.
+    void refreshReportedLatency()
+    {
+        if (auto* plugin = getActivePlugin())
+            reportedLatency.store (plugin->getLatencySamples(), std::memory_order_relaxed);
+    }
+
 private:
     struct HostedSlot
     {

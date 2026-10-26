@@ -1099,6 +1099,17 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
         return;
     }
 
+    // v2.16.1: surface runtime latency changes (oversampling toggled
+    // inside a hosted console) in the Terminal log - one line per change.
+    const int latencyNow = proc.getForwardedLatency();
+    if (latencyNow != lastLoggedLatency)
+    {
+        juce::Logger::writeToLog ("[TheChannelStrip] latency: now forwarding "
+                                  + juce::String (latencyNow)
+                                  + " samples to the host");
+        lastLoggedLatency = latencyNow;
+    }
+
     refreshConsoleButtons();
     tryEmbedHostedEditor();
     refreshLufs();

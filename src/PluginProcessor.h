@@ -167,6 +167,10 @@ public:
     // reason when the native mono layout is not used.
     juce::String getChannelReadout() const;
 
+    // v2.16.1: the latency currently forwarded to the host (the editor
+    // logs it to the Terminal whenever it changes).
+    int getForwardedLatency() const { return lastReportedLatency; }
+
 private:
     void runScan();
     void logHostStatus (const juce::String& message);
