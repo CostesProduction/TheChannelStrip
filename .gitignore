@@ -1,0 +1,25 @@
+# Build directories
+build/
+builds/
+cmake-build-*/
+[Bb]uild/
+
+# JUCE auto-downloaded sources
+_deps/
+
+# IDE / toolchain
+.vscode/
+.vs/
+.idea/
+*.xcuserstate
+xcuserdata/
+
+# Build artefacts
+*.o
+*.obj
+*.a
+*.lib
+*.dylib
+*.dll
+*.so
+.DS_Store
