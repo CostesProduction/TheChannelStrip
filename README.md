@@ -1,15 +1,17 @@
 # TheChannelStrip
 
-**Version 2.15.5** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.16.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
-AMEK 200, Focusrite SC, bx_console N) through the public JUCE hosting APIs, and wraps
+AMEK 200, Focusrite SC, bx_console N) plus the Lindell channel strips
+(Lindell 80 Channel, Lindell 50 Channel) through the public JUCE hosting
+APIs, and wraps
 them in a clean, focused workflow:
 
-- **Seven fixed slots** — one button per console, stacked in the **left
+- **Nine fixed slots** — one button per console, stacked in the **left
   sidebar** with short labels (SSL E, SSL G, SSL J, A9099, A200,
-  Focusrite, Bx N). Clicking a
+  Focusrite, Bx N, Lindell N, Lindell A). Clicking a
   button instantiates that plugin; buttons for plugins that are not
   installed are disabled. Selection is exclusive (radio behaviour), one
   console at a time, and the sidebar shows the hosted console's name.
@@ -174,6 +176,16 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.16.0**
+  - **Two new hosted consoles**: the **Lindell 80 Channel** (button
+    "Lindell N") and the **Lindell 50 Channel** (button "Lindell A") join
+    the nine-console lineup, appended after the existing buttons. As with
+    every slot, a button whose plugin is not installed stays disabled, and
+    everything else applies automatically: click-free swap with per-console
+    state memory, Studio One gain-reduction forwarding, native-mono
+    negotiation, analyser and gain-staging readouts. The window's minimum
+    height grows to 840 px (analyser visible) / 660 px (hidden) so the two
+    extra buttons always fit in the sidebar.
 - **2.15.5**
   - **Studio One gain-reduction forwarding**: TheChannelStrip now answers
     Studio One's `PreSonus::IGainReductionInfo` extension query so the

@@ -26,7 +26,10 @@ const char* const TheChannelStripAudioProcessor::consoleNames[TheChannelStripAud
     "bx_console AMEK 200",
     // v2.13: two new hostable consoles at Clement's request
     "bx_console Focusrite SC",
-    "bx_console N"
+    "bx_console N",
+    // v2.16: the two Lindell channel strips, at Clement's request
+    "Lindell 80 Channel",
+    "Lindell 50 Channel"
 };
 
 juce::String TheChannelStripAudioProcessor::consoleLabel (int index)
@@ -40,6 +43,8 @@ juce::String TheChannelStripAudioProcessor::consoleLabel (int index)
         case 4: return "A200";
         case 5: return "Focusrite"; // v2.13: bx_console Focusrite SC
         case 6: return "Bx N";      // v2.13: bx_console N (back from v1)
+        case 7: return "Lindell N"; // v2.16: Lindell 80 Channel
+        case 8: return "Lindell A"; // v2.16: Lindell 50 Channel
         default: return {};
     }
 }
@@ -1008,7 +1013,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.15.5");
+    xml->setAttribute ("version", "2.16.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

@@ -633,9 +633,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // scale labels) -> 700 / 520.
     // v2.13: two more console buttons (Focusrite SC, bx_console N)
     // -> 770 / 590.
+    // v2.16: two more console buttons (Lindell 80/50 Channel) -> 840 / 660.
     setSize (1180, 900);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 770 : 590, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 840 : 660, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1040,7 +1041,8 @@ void TheChannelStripAudioProcessorEditor::layoutHostedHolder()
 // hosted editor is embedded (per console: their GUI sizes differ). The
 // centre column then matches the plugin's width exactly and nothing
 // scrolls. v2.8: without the analyser strip the window is one strip
-// shorter, and the minimum height follows (770 / 580).
+// shorter, and the minimum height follows (840 / 660 with the nine
+// console buttons of v2.16).
 void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
 {
     if (embeddedHostedEditor == nullptr)
@@ -1062,7 +1064,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.8: dynamic minimum so the condensed sidebar always fits.
     // v2.10: +30 px for the A/B row. v2.12: the two scale rows moved
     // onto the analyser. v2.13: two more console buttons -> 770 / 520.
-    const int newH = juce::jlimit (showStrip ? 770 : 590, 1600, targetH);
+    // v2.16: two more console buttons (Lindell) -> 840 / 660.
+    const int newH = juce::jlimit (showStrip ? 840 : 660, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1077,7 +1080,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 770 : 590, 2560, 1600); // v2.13: 7 console buttons
+    setResizeLimits (1024, show ? 840 : 660, 2560, 1600); // v2.16: 9 console buttons
     resized();
 
     if (embeddedHostedEditor != nullptr)

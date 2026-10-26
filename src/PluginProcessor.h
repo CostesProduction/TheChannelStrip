@@ -22,7 +22,9 @@ public:
     // v2.13: seven consoles - the five originals plus the Focusrite SC
     // and the bx_console N (added back at Clement's request; it was
     // dropped in v2.2 because his scan never found it).
-    static constexpr int numConsoles = 7;
+    // v2.16: nine consoles - the two Lindell channel strips were added
+    // (Lindell 80 Channel, Lindell 50 Channel).
+    static constexpr int numConsoles = 9;
 
     // Full plugin names, in UI order.
     static const char* const consoleNames[numConsoles];
