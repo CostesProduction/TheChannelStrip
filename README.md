@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.14.3** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.15.5** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -81,6 +81,14 @@ them in a clean, focused workflow:
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
   on to the DAW.
+- **Gain-reduction forwarding (v2.15.5, Studio One)** — when the hosted
+  console reports its gain reduction through PreSonus'
+  `IGainReductionInfo` extension, TheChannelStrip forwards it to the host
+  so **Studio One displays the console's gate + compressor gain reduction
+  on the channel meter**, exactly as with the console inserted directly.
+  The chain is a pure 1:1 pull (the host asks the wrapper, the wrapper
+  asks the console): no polling thread, no audio-thread cost, and 0.0 dB
+  when nothing is hosted or the console does not expose the extension.
 
 ## Legal
 
@@ -166,6 +174,25 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.15.5**
+  - **Studio One gain-reduction forwarding**: TheChannelStrip now answers
+    Studio One's `PreSonus::IGainReductionInfo` extension query so the
+    hosted console's gain reduction (gate + compressor) is displayed on
+    the channel meter, exactly as with the console inserted directly.
+    The chain is pure pull and 1:1 - when the host asks the wrapper, the
+    wrapper asks the hosted console's own `IGainReductionInfo` (queried
+    through its VST3 `IComponent` / `IEditController` when the console is
+    instantiated) and returns the same value. No polling thread, no
+    audio-thread cost. With no console hosted, or a console without the
+    extension, the answer is 0.0 dB. If a console does not expose the
+    extension, its read-only parameter inventory is dumped to the
+    Terminal for diagnosis (the fallback path for a future version). AU
+    and Standalone builds are unchanged - the extension is VST3-only,
+    like Studio One's meter. Implementation: new `src/GRForwarder.{h,cpp}`
+    connected at the end of `instantiateHosted`, disconnected in
+    `clearHostedPlugin` and the processor destructor, plus the
+    `getVST3ClientExtensions()` hook. Base: the tested 2.14.3 source,
+    unchanged apart from these grafts.
 - **2.14.3**
   - Fix: compilation error in `PluginProcessor.cpp` (`juce::AudioChannelSet`
     has no `isMono()` member - the main-bus mono post-check now compares

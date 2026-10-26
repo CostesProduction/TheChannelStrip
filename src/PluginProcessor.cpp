@@ -63,6 +63,12 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
 TheChannelStripAudioProcessor::~TheChannelStripAudioProcessor()
 {
     saveKnownPluginList();
+
+    // v2.15.5: release the COM references borrowed from the hosted
+    // console before the members are torn down (grForwarder is also
+    // declared after hostedStrip, so it would be destroyed first
+    // anyway - but be explicit about it).
+    grForwarder.disconnect();
 }
 
 juce::String TheChannelStripAudioProcessor::identFor (const juce::PluginDescription& d)
@@ -402,6 +408,9 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
 
 void TheChannelStripAudioProcessor::clearHostedPlugin()
 {
+    // v2.15.5: stop forwarding gain reduction BEFORE the console goes
+    // away, so the host can never pull through a dying instance.
+    grForwarder.disconnect();
     currentPluginIdent = {};
     hostedStrip.clearPlugin();
 }
@@ -880,6 +889,17 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                          + (mono ? ", native mono layout" : "") + ").";
     logHostStatus (message);
 
+    // v2.15.5: the console is fully instantiated - connect the Studio One
+    // gain-reduction forwarder to it (pull-only chain: the host asks the
+    // wrapper, the wrapper asks us, we ask the console). The forwarder
+    // logs either "forwarding to the host" or the exact reason the
+    // console does not expose PreSonus::IGainReductionInfo.
+    if (auto* instance = dynamic_cast<juce::AudioPluginInstance*> (hostedStrip.getActivePlugin()))
+        grForwarder.connect (*instance);
+    else
+        juce::Logger::writeToLog ("[TheChannelStrip] gain reduction: hosted plugin is not an "
+                                  "AudioPluginInstance - nothing to forward");
+
     if (applyPendingState && ! savedHostedStateForRestore.isEmpty())
     {
         if (auto* active = hostedStrip.getActivePlugin())
@@ -988,7 +1008,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.14.3");
+    xml->setAttribute ("version", "2.15.5");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
@@ -1152,6 +1172,14 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
 juce::AudioProcessorEditor* TheChannelStripAudioProcessor::createEditor()
 {
     return new TheChannelStripAudioProcessorEditor (*this);
+}
+
+// v2.15.5: Studio One gain-reduction forwarding (see GRForwarder.h). Only
+// the JUCE VST3 wrapper ever asks for these client extensions; the AU and
+// Standalone wrappers never call this, so they are unaffected.
+juce::VST3ClientExtensions* TheChannelStripAudioProcessor::getVST3ClientExtensions()
+{
+    return grForwarder.getVST3ClientExtensions();
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 #include <map>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "HostedStrip.h"
+#include "GRForwarder.h"
 #include "LufsMeter.h"
 #include "SpectrumAnalyzer.h"
 
@@ -39,6 +40,13 @@ public:
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
+
+    // v2.15.5: Studio One gain-reduction forwarding (see GRForwarder.h).
+    // The JUCE VST3 wrapper queries the returned object whenever the host
+    // asks our edit controller for an interface the wrapper does not
+    // implement itself (that is how Studio One reaches our
+    // IGainReductionInfo). Only the VST3 wrapper ever calls this.
+    juce::VST3ClientExtensions* getVST3ClientExtensions() override;
 
     const juce::String getName() const override { return "TheChannelStrip"; }
     bool acceptsMidi() const override { return false; }
@@ -187,6 +195,12 @@ private:
     HostedStrip hostedStrip;
     LufsMeter lufsIn, lufsOut;
     SpectrumAnalyzer analyzerIn, analyzerOut;
+
+    // v2.15.5: forwards the hosted console's gain reduction to Studio One
+    // (see GRForwarder.h). Declared AFTER hostedStrip on purpose: members
+    // are destroyed in reverse order, so the forwarder (which borrows COM
+    // pointers from the hosted console) is destroyed BEFORE the console.
+    GRForwarder grForwarder;
 
     juce::CriticalSection scanLock;
     juce::String currentPluginIdent;

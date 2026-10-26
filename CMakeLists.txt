@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.14.3 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.15.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,7 +33,8 @@ target_sources(TheChannelStrip PRIVATE
     src/PluginEditor.cpp
     src/HostedStrip.cpp
     src/LufsMeter.cpp
-    src/SpectrumAnalyzer.cpp)
+    src/SpectrumAnalyzer.cpp
+    src/GRForwarder.cpp)
 
 target_compile_definitions(TheChannelStrip PUBLIC
     JUCE_WEB_BROWSER=0
