@@ -503,29 +503,64 @@ void SpectrumPanel::paint (juce::Graphics& g)
     // v2.10: 10-second sliding maximum of the raw output - a thin trace
     // (no fill) on top of OUT, showing where the output peaked over the
     // last 10 s. It resets when the editor is reopened.
-    drawCurve (g, maxOut, juce::Colour (0xff9adcf0).withAlpha (0.70f), 1.2f, false);
+    // v2.23 (épurée): 70% -> 45% alpha - the envelope stays readable
+    // against its own curve without turning the treble into lace.
+    drawCurve (g, maxOut, juce::Colour (0xff9adcf0).withAlpha (0.45f), 1.2f, false);
 
     // v2.6: the measured transfer function, drawn on top without fill.
     drawTransferCurve (g);
 
     // legend (v2.8: centred at the top; the left edge now carries the
     // scale labels and the right edge the EQ range labels)
-    g.setFont (juce::Font (juce::FontOptions (12.0f)));
-    const int legendX = getWidth() / 2 - 130;
+    // v2.23 (épurée): a proper colour-chip row - a small dash in the
+    // trace colour + a NEUTRAL grey label (the words used to be fully
+    // coloured and fought with the curves for attention). The transfer
+    // curve is labelled "EQ", the name the rest of the UI already uses
+    // (hover readout, EQ scale, help); the row is measured and centred
+    // as a whole instead of a magic offset.
+    {
+        struct LegendItem { juce::Colour colour; const char* text; };
 
-    g.setColour (juce::Colour (0xffe2a14f));
-    g.drawText ("IN", legendX, 4, 34, 16, juce::Justification::left);
+        const LegendItem items[] =
+        {
+            { juce::Colour (0xffe2a14f), "IN"  },
+            { juce::Colour (0xff54c8e8), "OUT" },
+            { juce::Colour (0xff7ee08a), "EQ"  },
+            { juce::Colour (0xff9adcf0), "MAX" }
+        };
 
-    g.setColour (juce::Colour (0xff54c8e8));
-    g.drawText ("OUT", legendX + 42, 4, 40, 16, juce::Justification::left);
+        const juce::Font font (juce::FontOptions (11.0f));
+        g.setFont (font);
 
-    // v2.6: measured OUT-IN response of the hosted plugin
-    g.setColour (juce::Colour (0xff7ee08a));
-    g.drawText ("OUT-IN", legendX + 90, 4, 70, 16, juce::Justification::left);
+        constexpr float chipWidth = 12.0f, chipGap = 4.0f, itemGap = 18.0f;
 
-    // v2.10: the 10-second max hold trace
-    g.setColour (juce::Colour (0xff9adcf0));
-    g.drawText ("MAX", legendX + 160, 4, 40, 16, juce::Justification::left);
+        // measure the whole row once, then centre it
+        float total = -itemGap;
+
+        for (const auto& item : items)
+            total += chipWidth + chipGap
+                     + juce::GlyphArrangement::getStringWidth (font, item.text)
+                     + itemGap;
+
+        float x = juce::jmax (8.0f, ((float) getWidth() - total) * 0.5f);
+
+        for (const auto& item : items)
+        {
+            g.setColour (item.colour);
+            g.fillRoundedRectangle (juce::Rectangle<float> (x, 9.5f,
+                                                            chipWidth, 3.0f),
+                                    1.5f);
+            x += chipWidth + chipGap;
+
+            const int textWidth = (int) juce::GlyphArrangement::getStringWidth (font, item.text);
+
+            g.setColour (juce::Colour (0xff8f9bb0));
+            g.drawText (item.text, (int) x, 3, textWidth + 2, 16,
+                        juce::Justification::left);
+
+            x += (float) textWidth + itemGap;
+        }
+    }
 
     // v2.19 (roadmap point 3): the hover readout comes last, above the
     // legend, so it stays readable over everything
@@ -544,8 +579,13 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
     // 10k, 20k). 10 Hz is below the left edge and is skipped; 20 kHz is
     // now inside the panel and gets its line back. Labels only on the
     // classic frequencies (below).
-    g.setColour (juce::Colour (0xff222b3f));
-
+    // v2.23 (point 11, esthétique épurée): the vertical grid is now
+    // TWO-TIER, the classic analyser hierarchy (SPAN & co). The 1-2-5
+    // frequencies (20/50/100/.../10k/20k) carry the brighter line AND
+    // the axis label; every other decade multiple is a much fainter
+    // minor line. The old same-weight grid put ~25 identical lines on
+    // screen - busy without adding information; the two-tier version
+    // guides the eye and makes the labelled ticks pop.
     for (double decade : { 10.0, 100.0, 1000.0, 10000.0 })
     {
         for (int m = 1; m <= 9; ++m)
@@ -556,6 +596,9 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
             if (f < 16.0 || f > 24000.0)
                 continue;
 
+            const bool major = (m == 1 || m == 2 || m == 5);
+
+            g.setColour (juce::Colour (major ? 0xff2a3550 : 0xff1a2233));
             g.drawVerticalLine ((int) xForFrequency (f), 0.0f, h);
         }
     }
@@ -573,7 +616,7 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
         const float db = topDb() - (float) k * dbPerDiv;
 
         g.setColour (std::abs (db) < 0.01f ? juce::Colour (0xff3a4560)
-                                          : juce::Colour (0xff222b3f));
+                                          : juce::Colour (0xff1a2233));
         g.drawHorizontalLine ((int) yForDb (db), 0.0f, w);
     }
 
@@ -601,20 +644,26 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
     g.drawText (lufsTargetLabel(), 40, (int) zeroY - 8, 150, 15,
                 juce::Justification::left);
 
-    // ---- X labels: 20 / 100 / 200 / 1k / 2k / 10k / 20k ----
+    // ---- X labels: the 1-2-5 majors (SPAN convention) ----
     // v2.9: the axis runs from 16 Hz to 24 kHz; both 20 Hz and 20 kHz
     // are inside the panel now, so every label is a plain centred label
     // (the 16 Hz left edge carries no value, like the 24 kHz right
-    // edge). The 20 kHz label is back (v2.8.2 had removed it).
+    // edge). v2.23 (épurée): the labels sit exactly on the brighter
+    // 1-2-5 grid lines - 20/50/100/200/500/1k/2k/5k/10k/20k - a
+    // balanced, complete ladder (the old 20/100/200/1k/2k/10k/20k set
+    // skipped half of its own ticks).
     g.setFont (juce::Font (juce::FontOptions (11.0f)));
 
     const std::pair<double, const char*> xLabels[] =
     {
         { 20.0,     "20" },
+        { 50.0,     "50" },
         { 100.0,    "100" },
         { 200.0,    "200" },
+        { 500.0,    "500" },
         { 1000.0,   "1k" },
         { 2000.0,   "2k" },
+        { 5000.0,   "5k" },
         { 10000.0,  "10k" },
         { 20000.0,  "20k" }
     };
@@ -708,12 +757,25 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
         fill.lineTo (0.0f, b.getBottom());
         fill.closeSubPath();
 
-        g.setColour (colour.withAlpha (0.20f));
+        // v2.23 (épurée): the fill fades out towards the bottom of the
+        // panel instead of a flat tint - the curve keeps its soft glow
+        // while the low end of the panel stays airy; the eye lands on
+        // the line, not on the block of colour.
+        g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.22f),
+                                                 0.0f, 0.0f,
+                                                 colour.withAlpha (0.02f),
+                                                 0.0f, b.getBottom(),
+                                                 false));
         g.fillPath (fill);
     }
 
     g.setColour (colour);
-    g.strokePath (path, juce::PathStrokeType (lineThickness));
+    // v2.23 (épurée): curved joins + rounded caps - the quality stroke
+    // for analyser traces; no more miter spikes where the curve turns
+    // steeply (filter knees, panel edges).
+    g.strokePath (path, juce::PathStrokeType (lineThickness,
+                                              juce::PathStrokeType::curved,
+                                              juce::PathStrokeType::rounded));
 }
 
 // v2.6: measured transfer function of the hosted plugin (OUT minus IN).
@@ -759,13 +821,37 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
         }
     }
 
-    // v2.7: a faint anchor line at the EQ 0 dB, so the curve reads against
+    // v2.7: a reference line at the EQ 0 dB, so the curve reads against
     // it like a classic EQ display (the spectrum grid's 0 dB is elsewhere).
-    g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.22f));
-    g.drawHorizontalLine ((int) yForEqDb (0.0f), 0.0f, (float) getWidth());
+    // v2.23 (épurée): the anchor is now a thin DASHED line - the classic
+    // reference-line convention of EQ displays - instead of a solid
+    // tinted band, and the curve itself is thinner (1.8 px, with the
+    // same curved joins + rounded caps as the spectra). The old 2.4 px
+    // stroke was the loudest thing on the panel; épurée means the
+    // measurement reads, not shouts.
+    {
+        // createDashedStroke is a separate PathStrokeType method in
+        // JUCE (the constructor takes no dash pattern): bake the dash
+        // into a path, then stroke that path.
+        juce::Path anchor;
+        const float y = yForEqDb (0.0f);
+        anchor.startNewSubPath (0.0f, y);
+        anchor.lineTo ((float) getWidth(), y);
+
+        const float dashPattern[] = { 4.0f, 4.0f };
+        const juce::PathStrokeType dashStroke (1.0f);
+
+        juce::Path dashed;
+        dashStroke.createDashedStroke (dashed, anchor, dashPattern, 2);
+
+        g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.35f));
+        g.strokePath (dashed, dashStroke);
+    }
 
     g.setColour (juce::Colour (0xff7ee08a));
-    g.strokePath (path, juce::PathStrokeType (2.4f));
+    g.strokePath (path, juce::PathStrokeType (1.8f,
+                                              juce::PathStrokeType::curved,
+                                              juce::PathStrokeType::rounded));
 
     // the EQ scale labels, match the curve's range (v2.8: dynamic,
     // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
@@ -774,6 +860,9 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     // longer shares the top-right corner with the hover readout (which
     // keeps its own clear margin, see drawHoverReadout).
     g.setFont (juce::Font (juce::FontOptions (10.0f)));
+    // v2.23 (épurée): an explicit SOFTER green - the labels used to
+    // inherit the full-strength curve colour and competed with it
+    g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.75f));
 
     for (float db : { range, 0.0f, -range })
     {

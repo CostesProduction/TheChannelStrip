@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.22.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.23.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -239,6 +239,38 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.23.0**
+  - **Analyser visual pass - épurée (roadmap point 11, the aesthetic
+    half).** Same engine, same colours, same interactions - everything
+    below is pure drawing quality, in the spirit of "beau ne veut pas
+    dire baroque":
+    - **Two-tier grid (SPAN convention).** The 1-2-5 frequencies
+      (20/50/100/200/500/1k/2k/5k/10k/20k) carry the brighter line AND
+      an axis label; the other decade multiples become much fainter
+      minor lines (and the horizontal divisions were dimmed to match).
+      The old same-weight grid drew ~25 identical lines - busy without
+      adding information.
+    - **Curves with curved joins + rounded caps** (IN/OUT/EQ/MAX): no
+      more miter spikes where a curve turns steeply; the traces read as
+      one continuous gesture.
+    - **OUT fill fades to transparent** towards the bottom of the
+      panel (vertical gradient) instead of a flat tint - the curve
+      keeps its glow, the low end stays airy.
+    - **EQ curve: 2.4 px -> 1.8 px**, and its 0 dB anchor is now a thin
+      DASHED line (the classic reference-line convention of EQ
+      displays) instead of a solid tinted band. The measurement reads,
+      it no longer shouts.
+    - **Legend rebuilt as a colour-chip row**: a small dash in the
+      trace colour + a neutral grey label (the words "IN"/"OUT" used
+      to be fully coloured and competed with the curves). The transfer
+      curve is labelled **"EQ"** - the name the hover readout, the EQ
+      scale and the help already use. The row is measured and centred
+      as a whole.
+    - **MAX envelope at 45% alpha** (was 70%): readable against its
+      own curve without turning the treble into lace.
+  - No behaviour change: the measurement, gates, ballistics, readout
+    and interactions are untouched (the harness passes as-is).
 
 - **2.22.0**
   - **Cross-spectrum transfer measurement + coherence gate (the real
