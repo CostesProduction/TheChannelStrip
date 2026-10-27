@@ -1039,8 +1039,9 @@ void HostedEditorHolder::paint (juce::Graphics& g)
 // moving the mouse outlines the control under the cursor and shows a
 // small bubble with its help text - a few words, the control's entry
 // in the editor's helpTexts map (since v2.31 the texts live ONLY there,
-// Clement's remark 1: no control carries a standing tooltip outside the
-// mode, except "?" itself). ANY click anywhere, or Esc, leaves the
+// Clement's remark 1 - and since v2.31.1 not even the ? button keeps
+// one: the editor carries no standing tooltip at all outside the
+// mode. ANY click anywhere, or Esc, leaves the
 // mode; the overlay swallows the click, so a button is never triggered
 // from inside the mode. Nothing else changes: no veil over the UI, no
 // wall of text, and nothing at all while the mode is off. It replaces
@@ -1339,7 +1340,8 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     hostedNameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
     // v2.31 (Clement's remark 1): the label's help text moved from a
     // standing tooltip into helpTexts - outside the help mode the
-    // sidebar stays silent now (only "?" keeps its own tooltip).
+    // sidebar stays silent now (since v2.31.1 nothing in the editor
+    // carries a standing tooltip at all, not even the ? button).
     helpTexts[&hostedNameLabel] =
         "The hosted console plugin, once one is selected.";
     addAndMakeVisible (hostedNameLabel);
@@ -1468,14 +1470,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // row (freed by the removed export button) and enters the
     // interactive help mode: hovering any control then shows a small
     // contextual bubble; any click, or Esc, leaves the mode.
-    // v2.31: its tooltip is now the editor's ONLY standing one
-    // (Clement's remark 1) - every other explanation moved into
-    // helpTexts below and shows up in the interactive help mode
-    // alone, so the sidebar stops dispensing help while the mode
-    // is off.
+    // v2.31.1 (Clement's follow-up): the \"?\" button carried the
+    // editor's LAST standing tooltip, and the standing TooltipWindow
+    // drew it half cut off in the sidebar - so it goes too. Its text
+    // moved into helpTexts like everyone else's: the editor now
+    // carries NO standing tooltip at all, and the only hint that the
+    // \"?\" opens the help is the \"?\" itself.
     styleConsoleButton (helpButton);
-    helpButton.setTooltip ("Interactive help: hover anything for a short"
-                           " explanation. A click or Esc leaves it.");
+    helpTexts[&helpButton] = "Interactive help: hover anything for a short"
+                             " explanation. A click or Esc leaves it.";
     helpButton.onClick = [this] { enterHelpMode(); };
     addAndMakeVisible (helpButton);
 
@@ -1484,6 +1487,9 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // juce::TooltipWindow is active (v2.12) and would show any real
     // tooltip on plain hover - these texts belong to the help mode
     // alone (and the analyser's would cover its hover readout again).
+    // v2.31.1: this is now the rule for EVERY control - no setTooltip
+    // call remains in the editor at all, so the standing window has
+    // nothing left to show outside the mode.
     helpTexts[&presetCombo] =
         "Pick a preset to load it on its console (switching consoles when"
         " needed). A \"*\" means its knobs have moved.";
@@ -2217,8 +2223,9 @@ void TheChannelStripAudioProcessorEditor::exitHelpMode()
 // v2.30 -> v2.31: the bubble text for whatever sits under the cursor:
 // the deepest component that carries one, walking up to the editor.
 // Since v2.31 (Clement's remark 1) the help texts live ONLY here: the
-// controls carry no standing tooltips any more (only "?" keeps its
-// own, so the TooltipWindow stays quiet outside the mode) and every
+// controls carry no standing tooltips any more - and since v2.31.1
+// not even ? keeps one: the standing TooltipWindow has nothing left
+// to show, outside the mode. Every
 // sidebar explanation moved into helpTexts. The analyser is
 // position-aware (remark 2): its three clickable zones - the left dB
 // scale, the right EQ scale and the LUFS reference at 0 dB - each

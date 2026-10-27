@@ -284,7 +284,8 @@ private:
     // v2.30: the bubble text for a hovered component (the deepest
     // component, or one of its parents, that carries a help entry).
     // v2.31: the help texts live ONLY here now (Clement's remark 1):
-    // no control carries a standing tooltip any more (except "?"),
+    // no control carries a standing tooltip any more - not even the
+    // ? button, whose half-cut standing hint went away in v2.31.1 -
     // so the standing TooltipWindow stays quiet outside the mode.
     // The editor-local cursor position makes the analyser
     // position-aware (remark 2): its three clickable zones - the
@@ -438,7 +439,8 @@ private:
 
     // v2.30 -> v2.31: the help-mode bubble texts (since remark 1 the
     // ONLY home of every sidebar and analyser explanation - the
-    // controls carry no standing tooltips any more). Filled in the
+    // controls carry no standing tooltips any more; since v2.31.1
+    // not even the ? button keeps one). Filled in the
     // editor's constructor, read only by the help overlay.
     std::map<juce::Component*, juce::String> helpTexts;
 

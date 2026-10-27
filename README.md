@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.31.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.31.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -273,6 +273,14 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.31.1**
+  - **No standing help at all, not even on « ? ».** The « ? » button
+    kept the editor's last standing tooltip, which the TooltipWindow
+    rendered half cut off in the narrow sidebar. It is gone: its text
+    moved into the help-mode bubbles like every other control's, so
+    outside the help mode nothing pops up anywhere in the editor —
+    hover the « ? » inside the mode for the same explanation instead.
 
 - **2.31.0**
   - **Help lives in the help mode alone.** Outside the mode, the
