@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.26.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.26.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -253,6 +253,17 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.26.1**
+  - **Preset buttons as icons, on a single line.** The four preset
+    buttons drop their text for small vector icons (drawn in code,
+    matching the shell's colour scheme): a **floppy** (save), a
+    **bin** (delete), a **tray with an outgoing arrow** (export) and
+    a **tray with an incoming arrow** (import). They now sit on one
+    row next to the preset list. No hover tooltips anywhere in the
+    PRESETS section: the « **?** » panel documents the list and all
+    four icons. The sidebar's minimum height drops accordingly
+    (973 px with the analyser strip, 793 px without).
 
 - **2.26.0**
   - **Named presets (roadmap point 4).** A PRESETS section in the

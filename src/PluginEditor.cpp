@@ -20,6 +20,115 @@ namespace
         b.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xffffffff));
     }
 
+    // v2.26.1: replaces the four preset buttons' text with small vector
+    // icons (floppy = save, bin = delete, tray with an outgoing arrow =
+    // export, tray with an incoming arrow = import - thick minimal
+    // strokes, in Clément's reference style). One instance per button,
+    // each drawing its own icon; the buttons keep the styleConsoleButton
+    // colours, so the icon follows the same text colour as before.
+    class PresetButtonLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        enum class Icon { floppy, trash, exportOut, importIn };
+
+        explicit PresetButtonLookAndFeel (Icon iconToDraw) : icon (iconToDraw) {}
+
+        void drawButtonText (juce::Graphics& g, juce::TextButton& b,
+                            bool /*shouldDrawButtonAsHighlighted*/,
+                            bool shouldDrawButtonAsDown) override
+        {
+            g.setColour (b.findColour (shouldDrawButtonAsDown
+                            ? juce::TextButton::textColourOnId
+                            : juce::TextButton::textColourOffId));
+
+            // Each icon is authored in a 16 x 13 box, then centred and
+            // scaled to fit the button.
+            const auto area = b.getLocalBounds().toFloat().reduced (4.0f);
+            const float scale = juce::jmin (area.getWidth()  / 16.0f,
+                                           area.getHeight() / 13.0f);
+            const float w  = 16.0f * scale;
+            const float h  = 13.0f * scale;
+            const float x0 = area.getX() + (area.getWidth()  - w) * 0.5f;
+            const float y0 = area.getY() + (area.getHeight() - h) * 0.5f;
+            auto p = [x0, y0, scale] (float x, float y)
+            { return juce::Point<float> (x0 + x * scale, y0 + y * scale); };
+
+            juce::Path path;
+            switch (icon)
+            {
+                case Icon::floppy:
+                    // body with a cut top-right corner, the metal
+                    // shutter, and the label slot at the bottom
+                    path.startNewSubPath (p (2, 1));
+                    path.lineTo (p (10, 1));
+                    path.lineTo (p (14, 5));
+                    path.lineTo (p (14, 12));
+                    path.lineTo (p (2, 12));
+                    path.closeSubPath();
+                    path.startNewSubPath (p (10, 2));
+                    path.lineTo (p (10, 5));
+                    path.lineTo (p (13, 5));
+                    path.startNewSubPath (p (5, 12));
+                    path.lineTo (p (5, 8.5f));
+                    path.lineTo (p (11, 8.5f));
+                    path.lineTo (p (11, 12));
+                    break;
+
+                case Icon::trash:
+                    // handle, lid, tapered body, two inner ribs
+                    path.startNewSubPath (p (6, 1));
+                    path.lineTo (p (6, 3));
+                    path.lineTo (p (10, 3));
+                    path.lineTo (p (10, 1));
+                    path.closeSubPath();
+                    path.startNewSubPath (p (3, 3.5f));
+                    path.lineTo (p (13, 3.5f));
+                    path.startNewSubPath (p (4.5f, 3.5f));
+                    path.lineTo (p (5.3f, 12));
+                    path.lineTo (p (10.7f, 12));
+                    path.lineTo (p (11.5f, 3.5f));
+                    path.startNewSubPath (p (6.3f, 5.8f));
+                    path.lineTo (p (6.3f, 9.8f));
+                    path.startNewSubPath (p (9.7f, 5.8f));
+                    path.lineTo (p (9.7f, 9.8f));
+                    break;
+
+                case Icon::exportOut:
+                    // open tray (no top edge), arrow rising out of it
+                    path.startNewSubPath (p (3, 4));
+                    path.lineTo (p (3, 12));
+                    path.lineTo (p (13, 12));
+                    path.lineTo (p (13, 4));
+                    path.startNewSubPath (p (8, 10));
+                    path.lineTo (p (8, 1));
+                    path.startNewSubPath (p (5.3f, 3.7f));
+                    path.lineTo (p (8, 1));
+                    path.lineTo (p (10.7f, 3.7f));
+                    break;
+
+                case Icon::importIn:
+                    // same tray, arrow descending into it
+                    path.startNewSubPath (p (3, 4));
+                    path.lineTo (p (3, 12));
+                    path.lineTo (p (13, 12));
+                    path.lineTo (p (13, 4));
+                    path.startNewSubPath (p (8, 1));
+                    path.lineTo (p (8, 10));
+                    path.startNewSubPath (p (5.3f, 7.3f));
+                    path.lineTo (p (8, 10));
+                    path.lineTo (p (10.7f, 7.3f));
+                    break;
+            }
+
+            g.strokePath (path, juce::PathStrokeType (1.6f,
+                                                      juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
+        }
+
+    private:
+        Icon icon;
+    };
+
     // v2.26: the short console label for a preset entry ("SSL E - My
     // preset"). A consoleName that is not one of the nine (an exotic
     // plugin the preset was made for) is truncated instead of resolved.
@@ -919,10 +1028,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.16: two more console buttons (Lindell 80/50 Channel) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
-    // v2.26: the presets section (combo + two button rows) -> 1000 / 820.
-    setSize (1180, 1000);
+    // v2.26.1: presets section now one icon row -> 973 / 793.
+    setSize (1180, 973);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 1000 : 820, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 973 : 793, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1024,9 +1133,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     }
 
     // ---- v2.26 (roadmap point 4): the presets section ----
-    // One combo box listing every preset on disk, then Save/Delete and
-    // Export/Import. Selecting an entry loads it (switching consoles
-    // when needed); every action reports to the status area.
+    // One combo box listing every preset on disk, then a single row of
+    // four icon buttons (v2.26.1). Selecting an entry loads it
+    // (switching consoles when needed); every action reports to the
+    // status area.
     presetLabel.setText ("PRESETS", juce::dontSendNotification);
     presetLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     presetLabel.setJustificationType (juce::Justification::centred);
@@ -1039,12 +1149,24 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     presetCombo.setColour (juce::ComboBox::outlineColourId,   juce::Colour (0xff5f6b82));
     presetCombo.setColour (juce::ComboBox::arrowColourId,     juce::Colour (0xff8f9bb0));
     presetCombo.setTextWhenNothingSelected ("(no presets)");
-    presetCombo.setTooltip ("Every preset on disk, as \"Console - Name\". Select one to load it:"
-                            " if its console is not the one hosted, the shell switches to that"
-                            " console first. The preset holds the console's knobs only - display"
-                            " settings (tilt, scales, LUFS) travel with the session.");
     presetCombo.onChange = [this] { onPresetSelected(); };
     addAndMakeVisible (presetCombo);
+
+    // v2.26.1: the four preset buttons carry vector icons instead of
+    // text (floppy = save, bin = delete, tray with outgoing arrow =
+    // export, tray with incoming arrow = import). Each gets its own
+    // look-and-feel that draws the icon where the text would be; the
+    // styleConsoleButton colours are unchanged. No tooltips on these
+    // buttons or the combo: the "?" panel documents the section.
+    presetButtonLaFs[0] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::floppy);
+    presetButtonLaFs[1] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::trash);
+    presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::exportOut);
+    presetButtonLaFs[3] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
+
+    savePresetButton.setLookAndFeel    (presetButtonLaFs[0].get());
+    deletePresetButton.setLookAndFeel  (presetButtonLaFs[1].get());
+    exportPresetButton.setLookAndFeel (presetButtonLaFs[2].get());
+    importPresetButton.setLookAndFeel (presetButtonLaFs[3].get());
 
     for (auto* b : { &savePresetButton, &deletePresetButton,
                     &exportPresetButton, &importPresetButton })
@@ -1057,15 +1179,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     deletePresetButton.onClick = [this] { confirmDeletePreset(); };
     exportPresetButton.onClick = [this] { exportSelectedPreset(); };
     importPresetButton.onClick = [this] { importPresetFile(); };
-
-    savePresetButton.setTooltip ("Save the hosted console's current settings as a named"
-                                 " preset file (.tcsPreset). An existing preset of the same"
-                                 " name is overwritten.");
-    deletePresetButton.setTooltip ("Delete the preset selected in the list above (asks first).");
-    exportPresetButton.setTooltip ("Copy the preset selected in the list to a file anywhere"
-                                   " on disk - for sharing between machines or projects.");
-    importPresetButton.setTooltip ("Import a .tcsPreset file from anywhere into the preset"
-                                   " folder, so it appears in the list.");
 
     refreshPresetList();
 
@@ -1334,19 +1447,19 @@ void TheChannelStripAudioProcessorEditor::resized()
     y += 18;
 
     // ---- v2.26 (roadmap point 4): the presets section (a heading, the
-    //      global preset list, then Save/Delete and Export/Import) ----
+    //      global preset list, then one row of four icon buttons) ----
     presetLabel.setBounds (sideX, y, sw, 15);
     y += 17;
 
     presetCombo.setBounds (sideX, y, sw, 22);
     y += 26;
 
-    savePresetButton.setBounds   (sideX,      y, 64, 22);
-    deletePresetButton.setBounds (sideX + 68, y, 64, 22);
-    y += 27;
-
-    exportPresetButton.setBounds (sideX,      y, 64, 22);
-    importPresetButton.setBounds (sideX + 68, y, 64, 22);
+    // v2.26.1: one row of four 30 px icon buttons, 3 px apart
+    // (30 + 3 * 33 = 129 <= the 132 px sidebar width).
+    savePresetButton.setBounds   (sideX,       y, 30, 22);
+    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
+    exportPresetButton.setBounds (sideX + 66, y, 30, 22);
+    importPresetButton.setBounds (sideX + 99, y, 30, 22);
     y += 22 + 8;
 
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
@@ -1463,8 +1576,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.16: two more console buttons (Lindell) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
-    // v2.26: the presets section (combo + two button rows) -> 1000 / 820.
-    const int newH = juce::jlimit (showStrip ? 1000 : 820, 1600, targetH);
+    // v2.26.1: presets section now one icon row -> 973 / 793.
+    const int newH = juce::jlimit (showStrip ? 973 : 793, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1479,7 +1592,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 1000 : 820, 2560, 1600); // v2.26: presets section
+    setResizeLimits (1024, show ? 973 : 793, 2560, 1600); // v2.26.1: presets section
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -1698,7 +1811,18 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
     addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
     addSection ("GAIN STAGING",       correctionLabel.getTooltip());
     addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
-    addSection ("PRESETS",            presetCombo.getTooltip());
+    addSection ("PRESETS",
+                "The list shows every preset on disk as \"Console - Name\". Select one to load "
+                "it: if its console is not the one hosted, the shell switches to that console "
+                "first. The preset holds the console's knobs only - display settings (tilt, "
+                "scales, LUFS) travel with the session. The four buttons beside the list are "
+                "icons: the floppy saves the hosted console's current settings as a named "
+                "preset file (.tcsPreset, a preset of the same name is overwritten); the bin "
+                "deletes the preset selected in the list (it asks first); the tray with the "
+                "outgoing arrow exports the selected preset to a file anywhere on disk, for "
+                "sharing between machines or projects; the tray with the incoming arrow "
+                "imports a .tcsPreset file from anywhere into the preset folder, so it "
+                "appears in the list.");
     addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
     addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
 

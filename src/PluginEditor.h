@@ -289,16 +289,21 @@ private:
 
     // ---- v2.26 (roadmap point 4): the presets sidebar section ----
     // One combo box listing every preset on disk ("Console - Name"),
-    // then two rows of two buttons: Save/Delete, Export/Import. The
-    // combo selection loads the preset (switching consoles if needed);
-    // the buttons act on the selected entry, except Save (acts on the
-    // hosted console's current state).
+    // then a single row of four icon buttons (v2.26.1: floppy = save,
+    // bin = delete, tray with outgoing arrow = export, tray with incoming
+    // arrow = import - no text, no tooltips; the "?" panel documents
+    // them). The combo selection loads the preset (switching consoles if
+    // needed); the buttons act on the selected entry, except Save (acts
+    // on the hosted console's current state).
+    // v2.26.1: the icon look-and-feels MUST be declared before the
+    // buttons they are attached to, so they are destroyed after them.
+    std::array<std::unique_ptr<juce::LookAndFeel>, 4> presetButtonLaFs;
     juce::Label presetLabel;
     juce::ComboBox presetCombo;
-    juce::TextButton savePresetButton    { "Save" };
-    juce::TextButton deletePresetButton  { "Delete" };
-    juce::TextButton exportPresetButton  { "Export" };
-    juce::TextButton importPresetButton  { "Import" };
+    juce::TextButton savePresetButton;
+    juce::TextButton deletePresetButton;
+    juce::TextButton exportPresetButton;
+    juce::TextButton importPresetButton;
     // the combo entries, refreshed by refreshPresetList (itemId is
     // index+1 into this array)
     juce::Array<TheChannelStripAudioProcessor::PresetInfo> presetList;
