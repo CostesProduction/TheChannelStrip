@@ -2052,7 +2052,22 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
         btn.setToggleState (active, juce::dontSendNotification);
 
         if (active)
+        {
             activeName = slot.desc.name;
+
+            // v2.31.2 (Clement's request): the console in use gets an
+            // unmistakable SELECTION cue - the project's signature
+            // cyan (the OUT curve / correction readout colour) as the
+            // fill, with dark navy text for contrast. The other
+            // available slots keep the muted navy base, the
+            // unavailable ones their dim style - three clearly
+            // distinct states at a glance.
+            const juce::Colour activeBg (0xff54c8e8);
+            btn.setColour (juce::TextButton::buttonColourId,    activeBg);
+            btn.setColour (juce::TextButton::buttonOnColourId,  activeBg);
+            btn.setColour (juce::TextButton::textColourOffId,   juce::Colour (0xff0e1522));
+            btn.setColour (juce::TextButton::textColourOnId,    juce::Colour (0xff0e1522));
+        }
     }
 
     // v2.3: the sidebar shows the hosted console's name under the buttons.
