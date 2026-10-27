@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.28.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.29.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -17,13 +17,21 @@ them in a clean, focused workflow:
   situation to the status area. Selection is exclusive (radio
   behaviour), one console at a time, and the sidebar shows the hosted
   console's name.
-- **Named presets** — a PRESETS section in the sidebar lists every
-  preset on disk as « Console - Name ». Selecting one **loads it on its
-  console** (switching to that console first if another one is
-  hosted). **Save** stores the hosted console's current settings
-  under a name you choose, **Delete** removes the selected preset
-  (with confirmation), **Export** copies it to a file anywhere for
-  sharing/backup, **Import** brings an external preset file in. A
+- **Named presets** — a PRESETS section at the **top of the sidebar**
+  lists every preset at the **root** of the preset folder as
+  « Console - Name » — that root is the **general list**, always
+  available; **sub-folders are your albums and are never listed**.
+  Selecting a preset **loads it on its console** (switching to that
+  console first if another one is hosted). Three actions around the
+  list: **Save** (the floppy) writes the hosted console's current
+  state to a `.tcsPreset` file **wherever you choose** — into the
+  root (it becomes the console's current preset right away) or into a
+  sub-folder (stays out of the list); **Load** (the tray with the
+  incoming arrow) loads any `.tcsPreset` file from anywhere and
+  copies it into the root so it joins the list; **Delete** (the bin)
+  removes the selected preset, or — with nothing selected — opens a
+  browser to delete any preset file, sub-folders included (always
+  with confirmation). A
   preset holds the **console's own state only** — display settings
   (tilt, scales, LUFS reference) travel with the session, not with
   presets. Presets live as individual `.tcsPreset` files in the
@@ -253,6 +261,41 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.29.0**
+  - **Presets, three actions.** The section is rebuilt around the
+    three things presets are actually for — no more separate Export
+    button:
+    - **Save (the floppy)** opens a native *Save As* dialog and writes
+      the **hosted console's current state** wherever you choose —
+      into the root of the preset folder, or into a sub-folder
+      (an album), or anywhere else on disk. The dialog opens on the
+      preset folder with the **current preset's name pre-filled**.
+    - **Load (the tray with the incoming arrow)** opens a file browser,
+      **loads** the chosen `.tcsPreset` into the hosted console
+      (switching consoles first if it was made for another one) and
+      **copies it into the root of the preset folder**, so it joins
+      the list. Loading a file that is already in the folder just
+      loads it.
+    - **Delete (the bin)** deletes the preset **selected in the
+      list** after a confirmation; with **nothing selected** it
+      becomes a *browse-to-delete*: pick any `.tcsPreset` file
+      anywhere — sub-folders included — confirm, and it is gone.
+      Deleting the current preset's own file disowns it, exactly
+      like a list delete.
+  - **Preset folder architecture: root = general, sub-folders =
+    albums.** The selector lists the `.tcsPreset` files at the **root**
+    of the preset folder — that is the general list, always available.
+    **Sub-folders are never listed**: they are your albums; presets
+    saved there stay reachable only through Load. Saves into the
+    root become the console's **current preset** right away (and are
+    listed); saves anywhere else never touch the tracking.
+  - **The PRESETS section moved to the top of the sidebar**, right
+    under the shell's title and above the console buttons — the
+    preset list is the most-used control and reads best first.
+  - Preset files are written with version tag `2.29.0`; the offline
+    test harness covers the new Save/Load/Delete flows (sub-folder
+    saves, browse-deletes, disown-on-delete, root-save tracking).
 
 - **2.28.0**
   - **Import loads the preset.** Importing a `.tcsPreset` file used to

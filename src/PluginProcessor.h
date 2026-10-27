@@ -73,8 +73,8 @@ public:
     juce::String getCurrentPluginIdent() const { return currentPluginIdent; }
     // Last hosting event (scan result / instantiation error). Sticky.
     juce::String getHostStatus();
-    // v2.27: status posts from the editor (e.g. export with no current
-    // preset) share the processor's status area.
+    // v2.27: status posts from the editor (e.g. a failed Save-to-file)
+    // share the processor's status area.
     void logHostStatus (const juce::String& message);
     // True while a background scan is running (lets the UI skip the lock).
     bool isScanning() const { return scanning.load (std::memory_order_relaxed); }
@@ -142,16 +142,30 @@ public:
     juce::File getPresetsDir() const;
     // Every preset file currently on disk, sorted by name.
     juce::Array<PresetInfo> getAvailablePresets();
-    // Save the currently hosted console's state under the given name
-    // (an existing preset of the same name is overwritten).
+    // Save the hosted console's current state under the given name, as
+    // a file in the ROOT of the preset folder (a "general" preset -
+    // listed in the selector every time). An existing preset of the
+    // same name is overwritten; the preset becomes the console's
+    // current one.
     bool savePreset (const juce::String& presetName);
+    // v2.29: Save proper - the hosted console's CURRENT state written
+    // to any file chosen in a save dialog (the old export's dialog,
+    // the old save's content). Saved into the preset folder's ROOT it
+    // is a general preset: listed every time, and it becomes the
+    // console's current one ("Save As" semantics). Saved anywhere else
+    // (a sub-folder = an album, another disk) it is NOT listed and the
+    // current-preset tracking is left untouched.
+    bool savePresetTo (const juce::File& destination);
     // Load a preset: if its console is hosted, apply directly; if not,
     // switch to that console and apply it once the instance is ready.
     bool applyPreset (const juce::String& presetName);
-    // Delete a preset file.
+    // Delete a preset from the preset folder's root, by name.
     bool deletePreset (const juce::String& presetName);
-    // Copy a preset file to an arbitrary location (sharing/backup).
-    bool exportPreset (const juce::String& presetName, const juce::File& destination);
+    // v2.29: delete any preset file on disk (the browse-to-delete
+    // fallback for files the selector does not list - sub-folders).
+    // If the deleted file was the hosted console's current preset, the
+    // name is disowned (the console keeps its sound).
+    bool deletePresetFile (const juce::File& file);
     // Copy an external .tcsPreset file into the Presets folder, then
     // load it: it becomes the console's current preset (v2.28.0),
     // exactly as if it had been picked in the selector. The copy can
@@ -257,6 +271,11 @@ private:
     // currentPluginIdent changes, so a knob move made just before a
     // switch stars the preset of the console it belongs to.
     void flushPresetDirtyIntoCurrentConsole();
+
+    // v2.29: shared by deletePreset and deletePresetFile - if the
+    // given file is the hosted console's current preset's own file,
+    // disown the name (the console keeps its sound, no preset name).
+    void disownPresetIfItsFileIs (const juce::File& file);
 
     // ---- v2.26: preset file helpers ----
     // deterministic name -> filename mapping (the user-given name is

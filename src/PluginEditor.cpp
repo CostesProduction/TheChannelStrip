@@ -20,16 +20,16 @@ namespace
         b.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xffffffff));
     }
 
-    // v2.26.1: replaces the four preset buttons' text with small vector
-    // icons (floppy = save, bin = delete, tray with an outgoing arrow =
-    // export, tray with an incoming arrow = import - thick minimal
+    // v2.26.1: replaces the preset buttons' text with small vector
+    // icons (floppy = save, bin = delete, tray with an incoming arrow =
+    // load - thick minimal
     // strokes, in Clément's reference style). One instance per button,
     // each drawing its own icon; the buttons keep the styleConsoleButton
     // colours, so the icon follows the same text colour as before.
     class PresetButtonLookAndFeel : public juce::LookAndFeel_V4
     {
     public:
-        enum class Icon { floppy, trash, exportOut, importIn };
+        enum class Icon { floppy, trash, importIn };
 
         explicit PresetButtonLookAndFeel (Icon iconToDraw) : icon (iconToDraw) {}
 
@@ -91,19 +91,6 @@ namespace
                     path.lineTo (p (6.3f, 9.8f));
                     path.startNewSubPath (p (9.7f, 5.8f));
                     path.lineTo (p (9.7f, 9.8f));
-                    break;
-
-                case Icon::exportOut:
-                    // open tray (no top edge), arrow rising out of it
-                    path.startNewSubPath (p (3, 4));
-                    path.lineTo (p (3, 12));
-                    path.lineTo (p (13, 12));
-                    path.lineTo (p (13, 4));
-                    path.startNewSubPath (p (8, 10));
-                    path.lineTo (p (8, 1));
-                    path.startNewSubPath (p (5.3f, 3.7f));
-                    path.lineTo (p (8, 1));
-                    path.lineTo (p (10.7f, 3.7f));
                     break;
 
                 case Icon::importIn:
@@ -1143,10 +1130,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     }
 
     // ---- v2.26 (roadmap point 4): the presets section ----
-    // One combo box listing every preset on disk, then a single row of
-    // four icon buttons (v2.26.1). Selecting an entry loads it
-    // (switching consoles when needed); every action reports to the
-    // status area.
+    // One combo box listing every preset at the root of the preset
+    // folder, then a single row of three icon buttons (v2.29): floppy
+    // = save the current state to a file anywhere, bin = delete the
+    // selection (or browse when nothing is selected), tray with the
+    // incoming arrow = load a .tcsPreset file from anywhere. Selecting
+    // an entry loads it (switching consoles when needed); every action
+    // reports to the status area.
     presetLabel.setText ("PRESETS", juce::dontSendNotification);
     presetLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     presetLabel.setJustificationType (juce::Justification::centred);
@@ -1162,32 +1152,30 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     presetCombo.onChange = [this] { onPresetSelected(); };
     addAndMakeVisible (presetCombo);
 
-    // v2.26.1: the four preset buttons carry vector icons instead of
-    // text (floppy = save, bin = delete, tray with outgoing arrow =
-    // export, tray with incoming arrow = import). Each gets its own
+    // v2.26.1: the preset buttons carry vector icons instead of
+    // text. v2.29: three of them (floppy = save, bin = delete, tray
+    // with an incoming arrow = load - the old export merged into
+    // Save, the old import became Load). Each gets its own
     // look-and-feel that draws the icon where the text would be; the
     // styleConsoleButton colours are unchanged. No tooltips on these
     // buttons or the combo: the "?" panel documents the section.
     presetButtonLaFs[0] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::floppy);
     presetButtonLaFs[1] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::trash);
-    presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::exportOut);
-    presetButtonLaFs[3] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
+    presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
 
     savePresetButton.setLookAndFeel    (presetButtonLaFs[0].get());
     deletePresetButton.setLookAndFeel  (presetButtonLaFs[1].get());
-    exportPresetButton.setLookAndFeel (presetButtonLaFs[2].get());
-    importPresetButton.setLookAndFeel (presetButtonLaFs[3].get());
+    importPresetButton.setLookAndFeel (presetButtonLaFs[2].get());
 
     for (auto* b : { &savePresetButton, &deletePresetButton,
-                    &exportPresetButton, &importPresetButton })
+                    &importPresetButton })
     {
         styleConsoleButton (*b);
         addAndMakeVisible (*b);
     }
 
-    savePresetButton.onClick   = [this] { showSavePresetDialog(); };
+    savePresetButton.onClick   = [this] { savePresetToFile(); };
     deletePresetButton.onClick = [this] { confirmDeletePreset(); };
-    exportPresetButton.onClick = [this] { exportCurrentPreset(); };
     importPresetButton.onClick = [this] { importPresetFile(); };
 
     refreshPresetList();
@@ -1443,6 +1431,24 @@ void TheChannelStripAudioProcessorEditor::resized()
     titleLabel.setBounds (sideX, y, sw, 32);
     y += 38;
 
+    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
+    //      global preset list, then one row of three icon buttons).
+    //      v2.29: it moved to the TOP, right under the shell's title -
+    //      presets are the most-used controls, and the section reads
+    //      best above the console buttons. ----
+    presetLabel.setBounds (sideX, y, sw, 15);
+    y += 17;
+
+    presetCombo.setBounds (sideX, y, sw, 22);
+    y += 26;
+
+    // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
+    // save, bin = delete, tray with the incoming arrow = load).
+    savePresetButton.setBounds   (sideX,      y, 30, 22);
+    deletePresetButton.setBounds (sideX + 33, y, 30, 22);
+    importPresetButton.setBounds (sideX + 66, y, 30, 22);
+    y += 22 + 8;
+
     for (size_t i = 0; i < consoleButtons.size(); ++i)
     {
         consoleButtons[i].setBounds (sideX, y, sw, 28);
@@ -1455,22 +1461,6 @@ void TheChannelStripAudioProcessorEditor::resized()
     // v2.14.1: channel-format readout sits right under the console name.
     channelLabel.setBounds (sideX, y, sw, 14);
     y += 18;
-
-    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
-    //      global preset list, then one row of four icon buttons) ----
-    presetLabel.setBounds (sideX, y, sw, 15);
-    y += 17;
-
-    presetCombo.setBounds (sideX, y, sw, 22);
-    y += 26;
-
-    // v2.26.1: one row of four 30 px icon buttons, 3 px apart
-    // (30 + 3 * 33 = 129 <= the 132 px sidebar width).
-    savePresetButton.setBounds   (sideX,       y, 30, 22);
-    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
-    exportPresetButton.setBounds (sideX + 66, y, 30, 22);
-    importPresetButton.setBounds (sideX + 99, y, 30, 22);
-    y += 22 + 8;
 
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
     for (size_t j = 0; j < speedButtons.size(); ++j)
@@ -1837,27 +1827,29 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
     addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
     addSection ("PRESETS",
                 "The list shows every .tcsPreset file at the ROOT of the preset folder "
-                "(sub-folders are ignored - that is what import/export is for) as "
-                "\"Console - Name\". Select one to load it: if its console is not the "
-                "one hosted, the shell switches to that console first. The combo always "
-                "mirrors the hosted console's current preset - switching consoles "
-                "updates the name, and shows none when the console was not loaded from "
-                "a preset. The name comes back with the session too, along with the "
-                "\"*\" that marks a preset whose console knobs have moved since it was "
-                "loaded or saved - reloading the preset or saving over it clears the "
-                "\"*\". The preset holds the console's knobs only - display settings "
-                "(tilt, scales, LUFS) travel with the session. The four buttons beside "
-                "the list are icons: the floppy saves the hosted console's current "
-                "settings as a named preset file (.tcsPreset) - the name field is "
-                "focused and pre-filled with the current preset's name, selected, and "
-                "a preset of the same name is overwritten; the bin deletes the preset "
-                "selected in the list (it asks first); the tray with the outgoing "
-                "arrow exports the hosted console's CURRENT preset, with that "
-                "preset's own name pre-filled, for sharing between machines or "
-                "projects; the tray with the incoming arrow imports a .tcsPreset file "
-                "from anywhere into the preset folder and loads it right away - it "
-                "becomes the console's current preset (switching consoles first if "
-                "it was made for another one).");
+                "as \"Console - Name\" - the root is the general list, always loaded. "
+                "Sub-folders are NOT listed: they are your albums, and presets saved "
+                "there stay out of the list. Select an entry to load it: if its "
+                "console is not the one hosted, the shell switches to that console "
+                "first. The combo always mirrors the hosted console's current preset "
+                "- switching consoles updates the name, and shows none when the "
+                "console was not loaded from a preset. The name comes back with the "
+                "session too, along with the \"*\" that marks a preset whose console "
+                "knobs have moved since it was loaded or saved - reloading the preset "
+                "or saving over it clears the \"*\". The preset holds the console's "
+                "knobs only - display settings (tilt, scales, LUFS) travel with the "
+                "session. The three buttons beside the list are icons: the floppy "
+                "SAVES the hosted console's current state to a .tcsPreset file "
+                "wherever you choose (like a Save As - the dialog opens on the preset "
+                "folder with the current preset's name pre-filled); saving into the "
+                "root makes it the console's current preset right away, saving into "
+                "a sub-folder keeps it out of the list; the bin DELETES the preset "
+                "selected in the list (it asks first), or with nothing selected it "
+                "opens a file browser so any .tcsPreset can be deleted, including "
+                "inside sub-folders (it asks first too); the tray with the incoming "
+                "arrow LOADS a .tcsPreset file from anywhere: it loads straight away "
+                "and is copied into the root of the preset folder so it joins the "
+                "list (switching consoles first if it was made for another one).");
     addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
     addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
 
@@ -1867,7 +1859,10 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
 }
 
 // ---------------------------------------------------------------------------
-// v2.26 (roadmap point 4): named presets - the sidebar section
+// v2.26 (roadmap point 4): named presets - the sidebar section.
+// v2.29: three actions around the list (save-to-file, delete with a
+// browse fallback, load-from-file); the root of the preset folder is
+// the general list, sub-folders are albums and stay out of it.
 // ---------------------------------------------------------------------------
 void TheChannelStripAudioProcessorEditor::refreshPresetList()
 {
@@ -1935,56 +1930,55 @@ void TheChannelStripAudioProcessorEditor::onPresetSelected()
     }
 }
 
-void TheChannelStripAudioProcessorEditor::showSavePresetDialog()
+// v2.29: Save = where. A native save dialog opens in the preset folder
+// with the current preset's name pre-filled (or empty when the console
+// never came from a preset): save into the folder's ROOT and the preset
+// is general - listed in the selector and it becomes the console's
+// current one; save into a sub-folder (an album) or anywhere else and
+// it stays off the list. The old name-dialog and the old export merged
+// into this one action.
+void TheChannelStripAudioProcessorEditor::savePresetToFile()
 {
-    // a small modal asking for the preset name. Async (a plugin must
-    // never block the message thread); the window deletes itself after
-    // the callback has run.
-    // v2.27: the field is pre-filled with the current preset's name
-    // (overwriting the preset you are on is the common case) and gets
-    // the keyboard focus straight away - one click saved.
-    auto* aw = new juce::AlertWindow ("Save preset",
-                                      "Name for the hosted console's current settings:",
-                                      juce::MessageBoxIconType::NoIcon);
-    aw->addTextEditor ("name", proc.getCurrentPresetName(), {});
-    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
-    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    const auto current = proc.getCurrentPresetName();
 
-    aw->enterModalState (true,
-                         juce::ModalCallbackFunction::create ([this, aw] (int result)
-                         {
-                             if (result == 1)
-                             {
-                                 const auto name = aw->getTextEditorContents ("name").trim();
+    const auto start = current.isNotEmpty()
+        ? proc.getPresetsDir().getChildFile (current + ".tcsPreset")
+        : proc.getPresetsDir();
 
-                                 // v2.27: a successful save makes the
-                                 // preset the console's current one -
-                                 // the combo box follows (remark 2).
-                                 if (name.isNotEmpty() && proc.savePreset (name))
-                                     refreshPresetList();
-                             }
-                         }),
-                         true);
+    // the FileChooser must outlive launchAsync, hence the member
+    presetFileChooser = std::make_unique<juce::FileChooser> (
+        "Save the current console state as a preset",
+        start, "*.tcsPreset");
 
-    // v2.27: put the caret straight into the name field. Deferred by
-    // one message so the window is fully on screen; the SafePointer
-    // keeps the async call safe if the user closes it first. The field
-    // selects its pre-filled content, so typing replaces it at once.
-    juce::Component::SafePointer<juce::AlertWindow> awSafe (aw);
-    juce::MessageManager::callAsync ([awSafe]()
-    {
-        if (awSafe != nullptr)
-            if (auto* te = awSafe->getTextEditor ("name"))
-                te->grabKeyboardFocus();
-    });
+    presetFileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                        | juce::FileBrowserComponent::canSelectFiles,
+                                    [this] (const juce::FileChooser& fc)
+                                    {
+                                        const auto dest = fc.getResult();
+
+                                        if (dest == juce::File())
+                                            return; // cancelled
+
+                                        if (proc.savePresetTo (dest.withFileExtension ("tcsPreset")))
+                                            refreshPresetList();
+                                    });
 }
 
+// v2.29: Delete acts on the selector's selection; with nothing selected
+// it becomes the browse-to-delete fallback: any .tcsPreset file
+// anywhere (sub-folder included - the selector never lists those) can
+// be picked and deleted, after a confirmation. The path covers album
+// presets the list cannot reach; a root preset deleted this way
+// disowns the console's current preset name exactly like a list delete.
 void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
 {
     const int id = presetCombo.getSelectedId();
 
     if (id < 1 || id - 1 >= presetList.size())
-        return; // nothing selected: harmless no-op
+    {
+        browseDeletePresetFile();
+        return;
+    }
 
     const auto name = presetList[id - 1].name;
 
@@ -2005,44 +1999,45 @@ void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
                                             }));
 }
 
-void TheChannelStripAudioProcessorEditor::exportCurrentPreset()
+void TheChannelStripAudioProcessorEditor::browseDeletePresetFile()
 {
-    // v2.27: export acts on the hosted console's CURRENT preset - the
-    // one the combo box shows - and the dialog opens with that
-    // preset's own name pre-filled, so the exported file matches it.
-    const auto name = proc.getCurrentPresetName();
-
-    if (name.isEmpty())
-    {
-        proc.logHostStatus ("No preset is loaded on the hosted console - load or save"
-                            " one first, then export it.");
-        return;
-    }
-
-    // the FileChooser must outlive launchAsync, hence the member
+    // v2.29: the browse-to-delete half of Delete (see confirmDeletePreset)
     presetFileChooser = std::make_unique<juce::FileChooser> (
-        "Export preset '" + name + "'",
-        proc.getPresetsDir().getChildFile (name + ".tcsPreset"),
+        "Delete a preset file",
+        proc.getPresetsDir(),
         "*.tcsPreset");
 
-    presetFileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+    presetFileChooser->launchAsync (juce::FileBrowserComponent::openMode
                                         | juce::FileBrowserComponent::canSelectFiles,
-                                    [this, name] (const juce::FileChooser& fc)
+                                    [this] (const juce::FileChooser& fc)
                                     {
-                                        const auto dest = fc.getResult();
+                                        const auto file = fc.getResult();
 
-                                        if (dest == juce::File())
+                                        if (file == juce::File())
                                             return; // cancelled
 
-                                        proc.exportPreset (name,
-                                                           dest.withFileExtension ("tcsPreset"));
+                                        juce::AlertWindow::showOkCancelBox (
+                                            juce::MessageBoxIconType::WarningIcon,
+                                            "Delete preset file",
+                                            "Delete '" + file.getFullPathName()
+                                                + "'? This cannot be undone.",
+                                            "Delete",
+                                            "Cancel",
+                                            this,
+                                            juce::ModalCallbackFunction::create (
+                                                [this, file] (int result)
+                                                {
+                                                    if (result == 1
+                                                        && proc.deletePresetFile (file))
+                                                        refreshPresetList();
+                                                }));
                                     });
 }
 
 void TheChannelStripAudioProcessorEditor::importPresetFile()
 {
     presetFileChooser = std::make_unique<juce::FileChooser> (
-        "Import a preset",
+        "Load a preset",
         juce::File(),
         "*.tcsPreset");
 

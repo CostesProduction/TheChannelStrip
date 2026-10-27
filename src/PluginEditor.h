@@ -265,15 +265,18 @@ private:
     void syncPresetComboSelection();
     // the combo selection changed -> load that preset
     void onPresetSelected();
-    // the floppy -> small modal asking for a name (v2.27: the name
-    // field is focused straight away and pre-filled with the current
-    // preset's name, selected), then proc.savePreset
-    void showSavePresetDialog();
-    // the bin -> confirmation, then proc.deletePreset
+    // v2.29: the floppy -> native save dialog (like a Save As), the
+    // name pre-filled with the current preset's, then proc.savePresetTo
+    // - the console's current state can be saved anywhere; saving into
+    // the root of the preset folder makes it the current preset
+    void savePresetToFile();
+    // the bin -> with a selection: confirmation, then proc.deletePreset;
+    // v2.29: with nothing selected -> browse-to-delete below
     void confirmDeletePreset();
-    // the outgoing-arrow tray -> export the hosted console's CURRENT
-    // preset (v2.27: the dialog pre-fills the preset's own name)
-    void exportCurrentPreset();
+    // v2.29: the browse-to-delete half of the bin - pick any
+    // .tcsPreset file (sub-folders included), confirm, then
+    // proc.deletePresetFile
+    void browseDeletePresetFile();
     // the incoming-arrow tray -> native open dialog, then proc.importPreset
     void importPresetFile();
 
@@ -293,22 +296,24 @@ private:
     juce::Label channelLabel;
 
     // ---- v2.26 (roadmap point 4): the presets sidebar section ----
-    // One combo box listing every preset on disk ("Console - Name"),
-    // then a single row of four icon buttons (v2.26.1: floppy = save,
-    // bin = delete, tray with outgoing arrow = export, tray with incoming
-    // arrow = import - no text, no tooltips; the "?" panel documents
-    // them). The combo selection loads the preset (switching consoles
-    // if needed). v2.27: the combo mirrors the hosted console's
-    // CURRENT preset ("*" when its knobs have moved), Save and Export
-    // act on the hosted console, Delete acts on the selected entry.
+    // One combo box listing every preset at the ROOT of the preset
+    // folder ("Console - Name" - the root is the general list;
+    // sub-folders are albums and stay out of it), then a single row of
+    // three icon buttons (v2.29: floppy = save the current state to a
+    // file anywhere, bin = delete the selection or browse, tray with
+    // incoming arrow = load a .tcsPreset file - no text, no tooltips;
+    // the "?" panel documents them). The combo selection loads the
+    // preset (switching consoles if needed). v2.27: the combo mirrors
+    // the hosted console's CURRENT preset ("*" when its knobs have
+    // moved); v2.29: the section sits at the TOP of the sidebar, right
+    // under the shell's title.
     // v2.26.1: the icon look-and-feels MUST be declared before the
     // buttons they are attached to, so they are destroyed after them.
-    std::array<std::unique_ptr<juce::LookAndFeel>, 4> presetButtonLaFs;
+    std::array<std::unique_ptr<juce::LookAndFeel>, 3> presetButtonLaFs;
     juce::Label presetLabel;
     juce::ComboBox presetCombo;
     juce::TextButton savePresetButton;
     juce::TextButton deletePresetButton;
-    juce::TextButton exportPresetButton;
     juce::TextButton importPresetButton;
     // the combo entries, refreshed by refreshPresetList (itemId is
     // index+1 into this array)
