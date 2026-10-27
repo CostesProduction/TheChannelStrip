@@ -1020,7 +1020,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.18.2");
+    xml->setAttribute ("version", "2.21.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

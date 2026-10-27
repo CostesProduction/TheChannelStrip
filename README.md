@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.18.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.21.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -43,6 +43,20 @@ them in a clean, focused workflow:
   at the 16 Hz left edge) with a graduation at every 20/30/.../90,
   100/200/.../900, 1k/.../9k, 10k, 20k tick and labels on the classic
   frequencies (20, 100, 200, 1k, 2k, 10k, 20 kHz).
+  **v2.19 hover readout**: moving the mouse over the analyser draws a
+  subtle vertical hairline at the cursor and a fixed top-right readout
+  with the frequency under the cursor and the IN / OUT / EQ levels
+  there, colour-matched to the legend — exactly the values the curves
+  show at that position (same tilt and loudness calibration; bins with
+  no energy read "--", and EQ only appears once that bin has been
+  measured). Pure display, no cursor lock and no freeze. **v2.20**: the
+  IN curve is drawn without its area fill (only OUT keeps its tint),
+  each display bin now aggregates the ENERGY of the FFT bins it covers
+  (the treble reads where reference analysers put it, and both curves
+  get one light spatial smoothing pass), the EQ scale labels sit flush
+  at the far right edge with the readout keeping a clear margin, and
+  the "?" button next to the studio logo opens every tool tip in one
+  window.
 - **Measured transfer function (v2.6)** — a third curve, **OUT-IN**, shows
   what the hosted console actually does to your signal (EQ, dynamics and
   saturation combined), computed live from the two existing analyzer
@@ -54,7 +68,14 @@ them in a clean, focused workflow:
   a slow input-energy-weighted smoothing (~0.4 s at full energy) so the
   curve stays stable and readable. v2.8 makes that scale selectable:
   **4 dB per division (+/-18 dB) or 2 dB per division (+/-9 dB)**, from
-  the sidebar.
+  the sidebar. **v2.21 makes it a measurement-grade estimate**: the
+  input and output band energies are averaged in the power domain over
+  time and the curve is the ratio of the two averages (the classic
+  dual-FFT transfer-function method), and a bin is only refreshed while
+  its input sits within 45 dB of the program's peak (Smaart-style
+  validity gate) - bands with no honest signal to measure through hold
+  their last value instead of reporting noise-over-noise, which used to
+  draw phantom rises in the empty treble of LP-filtered mixes.
 - **Display toggle (v2.8)** — a "Display" checkbox in the sidebar hides or
   shows the analyzer strip entirely; the window re-fits (smaller without
   the strip), so the space is genuinely freed. The choice is saved with
@@ -145,8 +166,9 @@ hosted plugins — no third-party plugin is needed:
 It prints one line per test and one `FAIL` per failed check, exits 0
 when everything passes (`ALL TESTS PASSED`). Covered: processor basics
 and console inventory, bit-exact dry passthrough (stereo and mono),
-measurement gating, LUFS short-term metering, spectrum peak location,
-state save/restore, latency forwarding (static and runtime changes),
+measurement gating, LUFS short-term metering, spectrum peak location
+(1 kHz and 10 kHz),
+the hover readout mapping and formatting, state save/restore, latency forwarding (static and runtime changes),
 click-free console swapping, native mono vs stereo-bridge hosting, and
 stereo ↔ mono hot switching without re-creating the instance.
 
@@ -210,6 +232,75 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.21.1**
+  - **Measurement-grade EQ curve + weak-band accuracy (LP-filtered
+    mixes, kicks).** The measured EQ (green) is now a true
+    **transfer-function estimate**, built the way professional dual-FFT
+    measurement (Smaart & co) does it: per-bin **input and output
+    energies averaged in the power domain**, the curve being the ratio
+    of the two averages - uncorrelated junk (leakage, the hosted
+    console's noise / dither floor) averages down instead of voting on
+    the curve. A **relative validity gate** (a bin is measured only
+    while its input is within 45 dB of the program's peak, absolute
+    floor at -75 dB - the counterpart of Smaart's "coherence blanking")
+    replaces the old absolute -80 dB gate: bands with no honest signal
+    to measure through (the empty treble of a lowpassed mix or a kick)
+    now HOLD their last value instead of reporting noise-over-noise -
+    this is what drew **phantom rises above 8 kHz** on LP-filtered
+    material. The persistence (v2.12), frequency-dependent settling and
+    confidence weighting are unchanged. The v2.7 5-bin dB pre-smoothing
+    is gone (it biased every filter knee on the display). The EQ and
+    its gate read the **raw band energies** - the v2.20 display
+    smoothing stays purely cosmetic, so an isolated weak band is no
+    longer dragged toward the floor by its empty neighbours.
+  - **Blackman-Harris FFT window** (4-term, sidelobes at -92 dB
+    instead of Hann's -31 dB, normalisation recomputed from the actual
+    window sum so tones read at the exact same level). Weak treble
+    bands next to strong program material no longer read several dB
+    above their true content - the "20 kHz node too high" on
+    lowpassed mixes.
+  - New harness test group (15 tests now): a strong 500 Hz + weak
+    10 kHz two-tone passthrough must read a flat 0 dB EQ at both
+    frequencies, and bass-only material must leave the treble
+    unmeasured.
+- **2.20.0**
+  - **Treble accuracy + UI polish (7-point pass).**
+    (1) A **"?" help button** next to the studio logo opens every tool
+    tip in one window; the analyser itself no longer shows a tooltip on
+    hover (it was hiding the readout). (2) The **IN curve is drawn
+    without its area fill** — only OUT keeps its soft tint.
+    (3/4/5) The per-display-bin value is now the band's **energy (RMS
+    of the covered FFT bins)** instead of their arithmetic mean: above
+    ~5 kHz one display bin spans a dozen+ FFT bins, and the mean of
+    fluctuating magnitudes reads ~3 dB below the band's true energy —
+    the treble now sits where reference analysers put it, and the EQ
+    curve's high end is far more stable. (6) The EQ scale labels moved
+    **flush to the right edge** (mirroring the dB labels at the far
+    left) and the hover readout keeps a 44 px margin — no more
+    collision. (7) One light **spatial smoothing pass** across
+    neighbouring display bins ([0.25, 0.5, 0.25]) on both spectra, the
+    "small smoothness" feel of classic analysers; IN and OUT are
+    smoothed identically so the EQ difference stays honest. The
+    harness gained a 10 kHz peak-location test (14 tests now).
+- **2.19.0**
+  - **Hover readout on the analyser (roadmap point 3).** Moving the
+    mouse over the spectrum panel shows the frequency under the cursor
+    and the IN / OUT / EQ levels at that position, in a fixed top-right
+    label colour-matched to the legend, with a subtle vertical hairline
+    at the cursor. The IN/OUT numbers go through the exact same tilt
+    and loudness-offset transform as the drawn curves, so the readout
+    always matches what is on screen; unmeasured bins read "--" and the
+    EQ value only appears once a bin has carried energy (v2.12
+    persistence). No cursor lock, no freeze - pure display. The
+    frequency mapping and the value formatting are covered by a new
+    check group in the offline test harness (13 tests now).
+- **2.18.3**
+  - **Lighter studio logo asset.** The `CostesLogo.png` resource is
+    downsized locally from 755 KB to roughly 80-100 KB (the full
+    resolution was about ten times more than the displayed ~66 px
+    height needs). No code change; since the logo is compiled into the
+    binary data, the VST3/AU/Standalone artefacts are about 700 KB
+    lighter. A clean rebuild is required (binary data regeneration).
 - **2.18.2**
   - **Test harness expectation fix (LUFS check).** The v2.18.1 suite
     failed one check: it expected a stereo 1 kHz sine at -23 dBFS RMS

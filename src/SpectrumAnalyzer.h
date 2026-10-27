@@ -28,6 +28,10 @@ public:
     void processAudio (const juce::AudioBuffer<float>& buffer);
 
     void copyScopeData (float* destination, int numBins) const;
+    // v2.21.1: RAW band energies, BEFORE the cosmetic spatial pass - the
+    // honest measurement data (the EQ curve and its validity gate read
+    // this, not the display-smoothed values; see SpectrumPanel).
+    void copyRawScopeData (float* destination, int numBins) const;
     double getBinFrequency (int bin) const
     {
         return binFrequencies[(size_t) juce::jlimit (0, numScopeBins - 1, bin)];
@@ -40,9 +44,15 @@ private:
     double sampleRate = 48000.0;
 
     std::array<float, (size_t) fftSize> window {};
+    // v2.21: sum of the window taps, computed in prepare(). The dB
+    // normalisation divides by windowSum / 2 (for the old Hann window
+    // that sum is 0.5 * fftSize, so the scale is unchanged).
+    double windowSum = 0.5 * (double) fftSize;
     std::array<float, (size_t) fftSize> fifo {};
     std::array<float, (size_t) (2 * fftSize)> fftData {};
     std::array<std::atomic<float>, (size_t) numScopeBins> scopeData {};
+    // v2.21.1: pre-smoothing copy of the band energies (measurement data)
+    std::array<std::atomic<float>, (size_t) numScopeBins> rawScopeData {};
     std::array<double, (size_t) numScopeBins> binFrequencies {};
 
     std::atomic<int> fifoPos { 0 };

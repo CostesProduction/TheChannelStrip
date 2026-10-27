@@ -45,11 +45,13 @@ public:
     explicit SpectrumPanel (TheChannelStripAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
-    // v2.12: clicking the left dB scale column toggles the spectrum
-    // range (10/6 dB per division) and clicking the right green EQ
-    // label column toggles the EQ range (4/2 dB per division). The
-    // editor wires the two std::function members below; clicks that
-    // land in neither column are ignored.
+    // v2.19 (roadmap point 3): hovering the analyser shows a readout of
+    // the frequency under the cursor plus the IN / OUT / EQ levels at
+    // that frequency. mouseMove just records the cursor and repaints;
+    // mouseExit hides the readout again. No cursor lock, no freeze -
+    // pure display.
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void setTilt (float newTiltDbPerOct);
     void setDbPerDiv (float dbPerDivision);   // v2.9: 10 or 6
@@ -59,6 +61,15 @@ public:
     // absolute). Changing it re-snaps the calibration immediately.
     void setLufsTarget (float targetLufs);
 
+    // v2.19 (roadmap point 3): hover readout helpers - STATIC and free
+    // of any component state so the offline test harness (TcsTests) can
+    // exercise the frequency mapping and the value formatting without a
+    // live editor. frequencyForX is the exact inverse of the private
+    // xForFrequency (the same 16 Hz - 24 kHz log axis).
+    static double frequencyForX (double x, double width);
+    static juce::String formatFrequency (double freq);
+    static juce::String formatReadoutDb (float db);
+
     // v2.12: scale toggle hooks (called when the user clicks one of the
     // two scale columns; see mouseDown).
     std::function<void()> onAnalyzerScaleClicked;
@@ -67,6 +78,13 @@ public:
     // v2.13: called when the user clicks the loudness-reference label
     // at the 0 dB line (cycles Record/Mix/Master).
     std::function<void()> onLufsTargetClicked;
+
+    // v2.21: harness hooks. The offline test suite drives the panel's
+    // analysis directly (no visible editor, no running timer) and
+    // inspects the measured EQ curve bin by bin.
+    void runAnalysisTick();
+    float getEqDbAtBin (int bin) const;
+    bool isEqBinMeasured (int bin) const;
 
 private:
     void timerCallback() override;
@@ -78,10 +96,19 @@ private:
     float yForDb (float db) const;
     float yForEqDb (float db) const; // v2.8: dedicated EQ scale (+/- 4.5 divisions)
     float xForBin (int bin) const;
+    // v2.9: the text drawn at the 0 dB line, e.g. "Mix (-23 LUFS)"
+    juce::String lufsTargetLabel() const;
     // v2.9: x position of a frequency on the 16 Hz - 24 kHz log axis
     float xForFrequency (double freq) const;
-    // v2.13: the text drawn at the 0 dB line, e.g. "Mix (-23 LUFS)"
-    juce::String lufsTargetLabel() const;
+    // v2.19 (roadmap point 3): the scope bin whose centre frequency is
+    // closest to the hovered x position (256 bins, linear scan - the
+    // analyser's bins are already log-spaced for display).
+    int binForX (float x) const;
+    // v2.19: the hover readout itself - a subtle vertical hairline at
+    // the cursor and a fixed top-right label (frequency + IN/OUT/EQ
+    // levels, colour-matched to the legend). Drawn last so it stays
+    // readable above everything.
+    void drawHoverReadout (juce::Graphics& g) const;
 
     // v2.9: the axis is 9 divisions deep, top = 3 x dB/div and bottom =
     // -6 x dB/div (both relative to the -23 LUFS reference), so the 0 dB
@@ -118,6 +145,19 @@ private:
     // (like smoothDiff) and resets with the panel, on editor reopen.
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMeasured;
 
+    // v2.21: transfer-function estimators in the POWER domain. The old
+    // code averaged the per-frame OUT-IN difference in dB, which let
+    // near-floor bins (leakage skirt, console noise/dither floor) vote
+    // on the curve and drew phantom rises in weak treble bands.
+    // Averaging the input and output energies separately over time,
+    // then taking the ratio of the two averages, is the classic
+    // dual-FFT transfer-function estimate (what Smaart-class
+    // measurement does with power / coherence-weighted averaging):
+    // uncorrelated junk averages DOWN instead of voting, and the
+    // ratio only reflects what the two signals genuinely share.
+    std::array<double, SpectrumAnalyzer::numScopeBins> eqInPower;
+    std::array<double, SpectrumAnalyzer::numScopeBins> eqOutPower;
+
     // v2.10: 10-second sliding maximum of the raw output, as a thin
     // overlay trace on the OUT curve. The ring buffer stores the last
     // 300 raw frames (10 s at 30 Hz); maxOut is recomputed from it at
@@ -138,6 +178,12 @@ private:
     // the processor (persisted) and cycled by clicking the reference
     // label (see lufsTargetLabel/mouseDown).
     float lufsTargetDb = -23.0f;
+
+    // v2.19 (roadmap point 3): hover state - the last cursor position
+    // inside the panel and whether it is inside at all. UI thread only,
+    // written by mouseMove/mouseExit and read in paint.
+    juce::Point<int> hoverPos;
+    bool mouseInside = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrumPanel)
 };
@@ -210,6 +256,9 @@ private:
     void layoutHostedHolder();
     void fitWindowToHostedEditor(); // v2.4: frame the hosted editor exactly
     void applyAnalyserVisibility(); // v2.8: show/hide the analyser strip
+    // v2.20 (point 1): one window that gathers every tool tip (opened
+    // by the "?" button next to the studio logo).
+    void showHelpPopup();
 
     // v1.0.4: renamed from "processor" to avoid shadowing the inherited
     // AudioProcessorEditor::processor member (-Wshadow-field).
@@ -272,6 +321,9 @@ private:
     // v2.17: Clement's studio logo (embedded as a binary resource),
     // shown between the gain-staging section and the host status area.
     juce::ImageComponent studioLogo;
+
+    // v2.20 (point 1): the "?" button opens the all-in-one help window.
+    juce::TextButton helpButton { "?" };
 
     juce::Label statusLabel;
 

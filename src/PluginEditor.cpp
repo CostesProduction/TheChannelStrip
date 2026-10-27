@@ -41,6 +41,9 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     // v2.12: the EQ curve starts with nothing measured; it is drawn for
     // exactly the bins that have carried input energy at least once.
     eqMeasured.fill (false);
+    // v2.21: power-domain estimators start at the numerical floor
+    eqInPower.fill  (1.0e-12);
+    eqOutPower.fill (1.0e-12);
     // v2.10: the 10-second max hold starts empty (silent).
     maxOut.fill (-100.0f);
     maxRing.assign ((size_t) maxHoldFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
@@ -132,6 +135,142 @@ void SpectrumPanel::timerCallback()
     repaint();
 }
 
+// v2.19 (roadmap point 3): the hover readout. mouseMove just records the
+// cursor position and repaints - the readout itself is drawn in paint()
+// from the SAME smoothed arrays and the SAME display transform as the
+// curves, so the numbers always agree with what is on screen. mouseExit
+// hides it again (the readout never lingers after the mouse leaves).
+void SpectrumPanel::mouseMove (const juce::MouseEvent& e)
+{
+    hoverPos = e.getPosition();
+    mouseInside = true;
+    repaint();
+}
+
+void SpectrumPanel::mouseExit (const juce::MouseEvent&)
+{
+    mouseInside = false;
+    repaint();
+}
+
+// v2.19: the exact inverse of xForFrequency - same 16 Hz - 24 kHz log
+// axis, so frequencyForX (xForFrequency (f)) == f. Static and pure so
+// the offline test harness can verify the mapping without an editor.
+double SpectrumPanel::frequencyForX (double x, double width)
+{
+    constexpr double minHz = 16.0;
+    constexpr double span  = 3.1760912590556813; // log10 (24000 / 16)
+
+    if (width <= 0.0)
+        return minHz;
+
+    const double x01 = juce::jlimit (0.0, 1.0, x / width);
+    return minHz * std::pow (10.0, span * x01);
+}
+
+// v2.19: frequency as a compact readout string ("45 Hz", "1.23 kHz").
+// Below 1 kHz the value is rounded to the nearest hertz; above, two
+// decimals of kHz - the convention every analyser uses.
+juce::String SpectrumPanel::formatFrequency (double freq)
+{
+    freq = juce::jlimit (16.0, 24000.0, freq);
+
+    if (freq < 1000.0)
+        return juce::String (juce::roundToInt (freq)) + " Hz";
+
+    return juce::String (freq / 1000.0, 2) + " kHz";
+}
+
+// v2.19: one decimal for the levels; bins with no energy (the -100 dB
+// floor of the smoothing arrays) read "--" instead of a meaningless
+// "-100.0".
+juce::String SpectrumPanel::formatReadoutDb (float db)
+{
+    if (db <= -95.0f)
+        return "--";
+
+    return juce::String (db, 1);
+}
+
+// v2.19: the scope bin whose centre frequency is nearest the hovered
+// frequency. 256 bins, linear scan on the UI thread - trivial, and the
+// scope bins are already log-spaced for the display.
+int SpectrumPanel::binForX (float x) const
+{
+    const double freq = frequencyForX (x, (double) getWidth());
+    int best = 0;
+    double bestDist = 1.0e30;
+
+    for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
+    {
+        const double dist = std::abs (processor.getAnalyzerIn().getBinFrequency (bin) - freq);
+
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            best = bin;
+        }
+    }
+
+    return best;
+}
+
+// v2.19: draws the hairline at the cursor plus the fixed top-right
+// readout: frequency under the cursor, then the IN / OUT levels and -
+// when that bin has been measured at least once (v2.12 persistence) -
+// the EQ (OUT-IN) value. The IN/OUT numbers go through the exact same
+// tilt + loudness-offset transform as the curves, so they match the
+// pixel under the hairline; the EQ value is the raw measured difference
+// (tilt and offset cancel in OUT-IN). Colour-matched to the legend.
+void SpectrumPanel::drawHoverReadout (juce::Graphics& g) const
+{
+    const int x = juce::jlimit (0, getWidth() - 1, hoverPos.x);
+    const int bin = binForX ((float) x);
+
+    // subtle vertical hairline at the cursor, inside the panel only
+    g.setColour (juce::Colour (0x408f9bb0));
+    g.drawVerticalLine (x, 0.0f, (float) getHeight());
+
+    const float binFreq = (float) processor.getAnalyzerIn().getBinFrequency (bin);
+    const float tiltDb  = tilt * (std::log2 (binFreq / 1000.0f));
+    const float dbIn    = smoothIn  [(size_t) bin] - tiltDb - lufsOffsetDb;
+    const float dbOut   = smoothOut [(size_t) bin] - tiltDb - lufsOffsetDb;
+
+    const juce::Font font (juce::FontOptions (12.0f, juce::Font::bold));
+
+    struct Segment { juce::String text; juce::Colour colour; };
+    juce::Array<Segment> segments;
+
+    segments.add (Segment { formatFrequency (frequencyForX (x, (double) getWidth())),
+                            juce::Colour (0xffc8d2e6) });
+    segments.add (Segment { "IN "  + formatReadoutDb (dbIn),  juce::Colour (0xffe2a14f) });
+    segments.add (Segment { "OUT " + formatReadoutDb (dbOut), juce::Colour (0xff54c8e8) });
+
+    if (eqMeasured[(size_t) bin])
+        segments.add (Segment { "EQ " + formatReadoutDb (smoothDiff[(size_t) bin]),
+                                juce::Colour (0xff7ee08a) });
+
+    // right-aligned at the top, clear of the centred legend and of the
+    // left scale column; each token is drawn in its own colour.
+    // v2.20 (point 6): the right margin grew from 10 to 44 px so the
+    // readout keeps clear of the EQ scale labels at the far right.
+    int totalWidth = 0;
+
+    for (const auto& s : segments)
+        totalWidth += 6 + juce::GlyphArrangement::getStringWidth (font, s.text);
+
+    int cursorX = getWidth() - 44 - totalWidth;
+    g.setFont (font);
+
+    for (const auto& s : segments)
+    {
+        const int w = juce::GlyphArrangement::getStringWidth (font, s.text);
+        g.setColour (s.colour);
+        g.drawText (s.text, cursorX, 4, w + 8, 16, juce::Justification::left);
+        cursorX += 6 + w;
+    }
+}
+
 void SpectrumPanel::updateBallistics()
 {
     float in[SpectrumAnalyzer::numScopeBins];
@@ -139,6 +278,16 @@ void SpectrumPanel::updateBallistics()
 
     processor.getAnalyzerIn().copyScopeData  (in, SpectrumAnalyzer::numScopeBins);
     processor.getAnalyzerOut().copyScopeData (out, SpectrumAnalyzer::numScopeBins);
+
+    // v2.21.1: the EQ curve and its validity gate read the RAW band
+    // energies, not the display-smoothed ones (the spatial pass is a
+    // display nicety; on measurement data it dragged isolated weak
+    // bands down by up to 24 dB, below the gate).
+    float rawIn[SpectrumAnalyzer::numScopeBins];
+    float rawOut[SpectrumAnalyzer::numScopeBins];
+
+    processor.getAnalyzerIn().copyRawScopeData  (rawIn, SpectrumAnalyzer::numScopeBins);
+    processor.getAnalyzerOut().copyRawScopeData (rawOut, SpectrumAnalyzer::numScopeBins);
 
     for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
     {
@@ -176,51 +325,56 @@ void SpectrumPanel::updateBallistics()
         }
     }
 
-    // v2.6: measured transfer function, OUT minus IN per bin. The tilt
-    // cancels in the difference, so this curve is tilt-independent.
-    // v2.7 stability (UI thread only, zero added audio cost): a 5-bin
-    // pre-smoothing plus a slow, input-energy-weighted EMA - strong
-    // program material updates the curve confidently, weak material
-    // barely moves it.
-    // v2.10: the settling time is FREQUENCY-DEPENDENT (long in the
-    // bass, short in the treble). Even with the finer 8192-point FFT
-    // the low end is intrinsically noisier (few periods per window,
-    // and the console's compressor genuinely varies there with the
-    // program), so the bass gets the long average while the treble
-    // stays quicker.
-    // v2.12: PERSISTENT CURVE. Bins whose input drops below the gate
-    // now simply HOLD their last measured value (previously the path
-    // broke at draw time and the curve erased itself piecewise as the
-    // program's spectrum changed - Clement's complaint); a bin that has
-    // been measured at least once is drawn forever after (until the
-    // panel is recreated).
-    // v2.13: the settling times came back down - the v2.12 doubling
-    // (~4 s bass / ~0.6 s treble) felt too sluggish to Clement. With
-    // the persistence fix in place, the curve can afford to be snappy
-    // again without flickering: ~1 s in the bass, ~0.25 s in the
-    // treble (between the v2.11 and v2.12 values).
-    for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+    // v2.21: the EQ curve is a measured TRANSFER FUNCTION, rebuilt the
+    // way professional dual-FFT measurement (Smaart & co) does it:
+    //
+    //  - per-bin estimators of the INPUT and OUTPUT energies, averaged
+    //    in the POWER domain over time; the EQ value is the ratio of the
+    //    two averages (10 * log10 (Pout / Pin)), not the average of
+    //    per-frame dB differences. Uncorrelated junk (leakage, the
+    //    console's noise / dither floor) averages DOWN and cancels in
+    //    the ratio instead of voting on the curve.
+    //  - a RELATIVE validity gate: a bin is measured only while its
+    //    input lies within 45 dB of the program's current peak bin
+    //    (with an absolute floor at -75 dB) - the audio-measurement
+    //    counterpart of Smaart's coherence blanking. Below that window
+    //    the band carries no honest signal to measure a transfer
+    //    through, so the bin HOLDS its last value rather than reporting
+    //    noise-over-noise. The old absolute gate (-80 dB) let the
+    //    leakage skirt and the hosted console's output floor through:
+    //    with a strong mix lowpassed around 5-9 kHz the OUT floor sits
+    //    ABOVE the IN skirt in the empty treble, and OUT-IN read a
+    //    few dB POSITIVE - the phantom rise above 8 kHz on Clement's
+    //    LP-filtered mixes.
+    //  - kept from earlier versions: the v2.12 persistence (a bin
+    //    measured once stays drawn, holding its last value), the
+    //    frequency-dependent settling times (v2.13: ~1 s bass,
+    //    ~0.25 s treble) and the input-energy confidence weight.
+    // The v2.7 5-bin dB pre-smoothing is gone: the analyser's own
+    // spatial pass (v2.20) already calms the curves, and averaging dB
+    // values across a steep slope is exactly what biased the knee
+    // region of every filter on the display.
     {
-        const int b0 = juce::jmax (0, b - 2);
-        const int b1 = juce::jmax (0, b - 1);
-        const int b3 = juce::jmin (SpectrumAnalyzer::numScopeBins - 1, b + 1);
-        const int b4 = juce::jmin (SpectrumAnalyzer::numScopeBins - 1, b + 2);
+        float peakIn = -100.0f;
 
-        const float o = out[b0] + 4.0f * out[b1] + 6.0f * out[b]
-                      + 4.0f * out[b3] + out[b4];
-        const float i = in[b0]  + 4.0f * in[b1]  + 6.0f * in[b]
-                      + 4.0f * in[b3]  + in[b4];
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+            peakIn = juce::jmax (peakIn, rawIn[b]);
 
-        if (in[b] > -80.0f)
+        const float gateDb = juce::jmax (-75.0f, peakIn - 45.0f);
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
         {
-            // v2.12: this bin carries (or has carried) input energy -
-            // from now on it stays part of the drawn curve, even when
-            // the program later moves away from it
+            if (rawIn[b] <= gateDb)
+                continue; // not measurable right now: hold the last value
+
+            // this bin carries (or has carried) honest input energy -
+            // from now on it stays part of the drawn curve (v2.12)
             eqMeasured[(size_t) b] = true;
 
-            // the more energy the input has in this bin, the more the
-            // measurement can be trusted and the faster it may settle
-            const float w = juce::jlimit (0.0f, 1.0f, (in[b] + 80.0f) / 24.0f);
+            // the more energy this bin carries above the gate, the more
+            // the measurement can be trusted and the faster it may
+            // settle (full confidence 12 dB above the gate)
+            const float w = juce::jlimit (0.0f, 1.0f, (rawIn[b] - gateDb) / 12.0f);
 
             // 20 Hz -> tau ~1 s, 20 kHz -> tau ~0.25 s (log-linear)
             const double freq = processor.getAnalyzerIn().getBinFrequency (b);
@@ -228,10 +382,20 @@ void SpectrumPanel::updateBallistics()
 
             const float alpha = (1.0f / (1.0f + 30.0f * tau)) * (0.25f + 0.75f * w);
 
-            smoothDiff[(size_t) b] += alpha * ((o - i) / 16.0f
-                                              - smoothDiff[(size_t) b]);
+            // per-frame bin energies (the dB zero point and the display
+            // tilt cancel in the ratio)
+            const double pIn  = std::pow (10.0, (double) rawIn[b]  / 10.0);
+            const double pOut = std::pow (10.0, (double) rawOut[b] / 10.0);
+
+            eqInPower [(size_t) b] += (double) alpha * (pIn  - eqInPower [(size_t) b]);
+            eqOutPower[(size_t) b] += (double) alpha * (pOut - eqOutPower[(size_t) b]);
+
+            smoothDiff[(size_t) b] =
+                (float) juce::jlimit (-60.0, 60.0,
+                    10.0 * std::log10 (eqOutPower[(size_t) b]
+                                       / juce::jmax (eqInPower[(size_t) b], 1.0e-12)
+                                       + 1.0e-12));
         }
-        // below the gate: hold the last measured value (no update)
     }
 
     // v2.8.1: loudness-anchored axis calibration. The 0 dB line must read
@@ -317,12 +481,33 @@ void SpectrumPanel::updateBallistics()
     }
 }
 
+// v2.21: harness hooks - the offline test suite constructs a panel with
+// no visible editor and drives the analysis manually (the JUCE timer
+// never fires in the console harness, so there is no double ticking).
+void SpectrumPanel::runAnalysisTick()
+{
+    updateBallistics();
+}
+
+float SpectrumPanel::getEqDbAtBin (int bin) const
+{
+    return smoothDiff[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+}
+
+bool SpectrumPanel::isEqBinMeasured (int bin) const
+{
+    return eqMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+}
+
 void SpectrumPanel::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff0e1420));
 
     drawGrid (g);
-    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f));
+    // v2.20 (point 2): the IN curve is drawn WITHOUT its area fill now -
+    // only OUT keeps its soft fill, so the two curves read as two lines
+    // over one fill instead of two overlapping tints.
+    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f), 1.6f, false);
     drawCurve (g, smoothOut, juce::Colour (0xff54c8e8));
 
     // v2.10: 10-second sliding maximum of the raw output - a thin trace
@@ -351,6 +536,11 @@ void SpectrumPanel::paint (juce::Graphics& g)
     // v2.10: the 10-second max hold trace
     g.setColour (juce::Colour (0xff9adcf0));
     g.drawText ("MAX", legendX + 160, 4, 40, 16, juce::Justification::left);
+
+    // v2.19 (roadmap point 3): the hover readout comes last, above the
+    // legend, so it stays readable over everything
+    if (mouseInside)
+        drawHoverReadout (g);
 }
 
 void SpectrumPanel::drawGrid (juce::Graphics& g)
@@ -587,13 +777,13 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     g.setColour (juce::Colour (0xff7ee08a));
     g.strokePath (path, juce::PathStrokeType (2.4f));
 
-    // the EQ scale labels, on the right edge, match the curve's range
-    // (v2.8: dynamic, "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
-    // v2.9: the 20 kHz frequency label is back in the bottom-right
-    // corner, so the column right-aligns just left of its label box.
+    // the EQ scale labels, match the curve's range (v2.8: dynamic,
+    // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
+    // v2.20 (point 6): the column moved FLUSH against the right edge -
+    // mirroring the spectrum's dB labels at the far left - so it no
+    // longer shares the top-right corner with the hover readout (which
+    // keeps its own clear margin, see drawHoverReadout).
     g.setFont (juce::Font (juce::FontOptions (10.0f)));
-
-    const int eqLabelRight = (int) xForFrequency (20000.0) - 22;
 
     for (float db : { range, 0.0f, -range })
     {
@@ -601,7 +791,7 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
                                    : ((db < 0.0f) ? "-" + juce::String (-db, 0)
                                                   : juce::String ("0"));
         const int y = juce::jlimit (2, getHeight() - 14, (int) yForEqDb (db) - 6);
-        g.drawText (label, eqLabelRight - 28, y, 28, 12,
+        g.drawText (label, getWidth() - 34, y, 30, 12,
                     juce::Justification::centredRight);
     }
 }
@@ -706,6 +896,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
 
+    // v2.20 (point 1): the "?" help button sits next to the studio logo
+    // and opens every tool tip in one window - the controls themselves
+    // keep their small tooltips, but the analyser no longer shows one
+    // while hovering (it was hiding the readout).
+    styleConsoleButton (helpButton);
+    helpButton.setTooltip ("All the tool tips in one place.");
+    helpButton.onClick = [this] { showHelpPopup(); };
+    addAndMakeVisible (helpButton);
+
     addAndMakeVisible (rescanButton);
     rescanButton.onClick = [this] { proc.requestDefaultScan(); };
     // v2.9.1: in a DAW the button only reloads the saved database (loading
@@ -802,6 +1001,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         styleConsoleButton (t);
         addAndMakeVisible (t);
 
+        // v2.20: the tilt buttons get a tooltip too (they were the only
+        // analyser controls without one, and the help window lists it).
+        t.setTooltip ("Analyser display tilt in dB per octave (reference 1 kHz, "
+                      "SPAN convention: a negative tilt flattens a naturally "
+                      "falling spectrum). The tilt only affects the drawing, "
+                      "never the analysis.");
+
         t.onClick = [this, j, tilts]
         {
             if (tiltButtons[j].getToggleState())
@@ -868,10 +1074,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // restore the saved loudness reference (default Mix -23 LUFS)
     spectrumPanel.setLufsTarget (proc.getLufsTarget());
 
-    spectrumPanel.setTooltip ("Click the LEFT dB scale to toggle 10/6 dB per division; "
-                              "click the RIGHT green EQ scale to toggle 4/2 dB per division; "
-                              "click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
-                              "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
+    // v2.20 (point 1): the analyser no longer carries a tooltip - it
+    // was in the way of the hover readout. Its help text (and every
+    // other tooltip) now lives in the "?" button next to the studio
+    // logo (see showHelpPopup).
 
     // restore the saved scales (defaults: 10 dB and 4 dB per division;
     // legacy values are snapped to the two current scales, like the
@@ -1032,6 +1238,14 @@ void TheChannelStripAudioProcessorEditor::resized()
                                                       / logoImage.getWidth()) / 2)
             : 20;
         studioLogo.setBounds (sideX, y + 4, sw, logoH);
+
+        // v2.20 (point 1): the help button rides the logo band, at its
+        // right edge - vertically centred on the band, clear of the
+        // centred logo image itself.
+        helpButton.setBounds (sideX + sw - 24,
+                              y + 4 + juce::jmax (0, (logoH - 22) / 2),
+                              22, 22);
+
         y += logoH + 10;
     }
 
@@ -1260,4 +1474,38 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
 
     layoutHostedHolder();
     fitWindowToHostedEditor();
+}
+
+// v2.20 (point 1): the "?" button opens every tool tip in one window.
+// The analyser deliberately carries NO tooltip any more (it was hiding
+// the hover readout), so its help text is written out here; every other
+// section is pulled live from the control it describes, so the window
+// always shows exactly what the small tooltips show.
+void TheChannelStripAudioProcessorEditor::showHelpPopup()
+{
+    juce::String info;
+
+    auto addSection = [&info] (const juce::String& title, const juce::String& text)
+    {
+        if (text.trim().isNotEmpty())
+            info << title << "\n" << text << "\n\n";
+    };
+
+    addSection ("ANALYSER",
+                "Hover anywhere to read the frequency under the cursor and the "
+                "IN/OUT/EQ levels there. Click the LEFT dB scale to toggle 10/6 dB "
+                "per division; click the RIGHT green EQ scale to toggle 4/2 dB per "
+                "division; click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
+                "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
+    addSection ("TILT",               tiltButtons[0].getTooltip());
+    addSection ("RESPONSE SPEED",      speedButtons[0].getTooltip());
+    addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
+    addSection ("GAIN STAGING",       correctionLabel.getTooltip());
+    addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
+    addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
+    addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
+
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+                                            "TheChannelStrip - help",
+                                            info);
 }

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.18.2 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.21.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -9,7 +9,11 @@
 //   - bit-exact passthrough with no hosted plugin (stereo AND mono)
 //   - measurement gating (nothing measured while the editor is closed)
 //   - LUFS short-term metering (absolute window + 6 dB tracking)
-//   - spectrum analyser peak location
+//   - spectrum analyser peak location (1 kHz and 10 kHz)
+//   - measured EQ curve accuracy in weak-content bands (v2.21: strong
+//     + weak two-tone passthrough reads flat, bass-only leaves the
+//     treble unmeasured - the relative validity gate)
+//   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
 //   - click-free console crossfade (bounded slew + convergence)
@@ -57,6 +61,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "../src/PluginProcessor.h"
+#include "../src/PluginEditor.h"   // v2.19: SpectrumPanel readout statics
 
 // The plugin entry point is defined in PluginProcessor.cpp but not declared
 // in any header (the wrapper targets pick it up from
@@ -468,6 +473,218 @@ void testSpectrumPeak()
                 + juce::String (peakHz, 1) + " Hz)");
 }
 
+// v2.20 (points 3/4/5): high-frequency detection. A 10 kHz tone must
+// land in the right display bin with the new energy aggregation (the
+// old arithmetic mean of the covered FFT bins read the treble low and
+// noisy above ~5 kHz, where one display bin spans a dozen+ FFT bins).
+void testSpectrumHighFrequency()
+{
+    beginTest ("spectrum analyser high-frequency peak");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::AudioBuffer<float> block (2, 512);
+
+    SineSource src (10000.0, 48000.0, 0.3f);
+    processBlocks (proc, src, (int) (2.0 * 48000.0 / 512.0), block);
+
+    float bins[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (bins, SpectrumAnalyzer::numScopeBins);
+
+    int peakBin = 0;
+    for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+        if (bins[b] > bins[peakBin])
+            peakBin = b;
+
+    const double peakHz = proc.getAnalyzerIn().getBinFrequency (peakBin);
+    expectTrue (peakHz > 8500.0 && peakHz < 11500.0,
+                "a 10 kHz tone peaks near 10 kHz (got "
+                + juce::String (peakHz, 1) + " Hz)");
+
+    // the tone's bin must read well above the empty bins around it (the
+    // energy aggregation keeps a genuine tone ~20 dB over the floor)
+    expectTrue (bins[peakBin] - bins[0] > 12.0f,
+                "the 10 kHz peak stands well above the 20 Hz floor (delta "
+                + juce::String (bins[peakBin] - bins[0], 1) + " dB)");
+}
+
+// v2.21: the measured EQ curve in weak-content bands. This is the
+// offline reproduction of Clement's LP-filtered mixes:
+//  - a strong 500 Hz tone plus a weak 10 kHz tone (-26 dB relative,
+//    like a mix lowpassed at 9 kHz) through a bit-exact passthrough
+//    must read a FLAT 0 dB EQ at BOTH frequencies - the weak band
+//    included;
+//  - a bass-only tone (a kick with no real HF content) must NOT
+//    produce a measured EQ in the treble at all - the relative
+//    validity gate (peak - 45 dB, Smaart-style coherence blanking)
+//    keeps the curve from reporting noise-over-noise there. The old
+//    absolute -80 dB gate let leakage and dither floors through, which
+//    is what drew phantom rises above 8 kHz on the real console.
+void testEqWeakContent()
+{
+    beginTest ("EQ curve accuracy in weak-content bands");
+
+    // composite source: two continuous-phase sines in one signal
+    struct TwoToneSource
+    {
+        TwoToneSource (double f1, double a1, double f2, double a2, double sr)
+            : w1 (juce::MathConstants<double>::twoPi * f1 / sr),
+              w2 (juce::MathConstants<double>::twoPi * f2 / sr),
+              amp1 ((float) a1), amp2 ((float) a2)
+        {}
+
+        void fill (juce::AudioBuffer<float>& buffer)
+        {
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const float s = amp1 * (float) std::sin (phase1)
+                              + amp2 * (float) std::sin (phase2);
+                phase1 += w1;
+                phase2 += w2;
+
+                for (int c = 0; c < buffer.getNumChannels(); ++c)
+                    buffer.setSample (c, i, s);
+            }
+        }
+
+        double phase1 = 0.0, phase2 = 0.0, w1, w2;
+        float amp1, amp2;
+    };
+
+    // the display bin whose band [f_b, f_b+1) CONTAINS the frequency.
+    // A tone's energy lands in the band that covers it - which is not
+    // always the band whose CENTRE is nearest (at 10 kHz the centres sit
+    // ~276 Hz apart, more than half a band away from the tone).
+    auto coveringBin = [] (const SpectrumAnalyzer& ana, double freq)
+    {
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins - 1; ++b)
+            if (ana.getBinFrequency (b) <= freq
+                && ana.getBinFrequency (b + 1) > freq)
+                return b;
+
+        return SpectrumAnalyzer::numScopeBins - 1;
+    };
+
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer noMidi;
+
+        // 4 s: one 8192-point analyser frame per ~170 ms
+        TwoToneSource src (500.0, 0.4, 10000.0, 0.02, 48000.0);
+
+        for (int n = 0; n < (int) (4.0 * 48000.0 / 512.0); ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        // drive the panel's analysis without a visible editor
+        SpectrumPanel panel (proc);
+
+        for (int t = 0; t < 200; ++t)
+            panel.runAnalysisTick();
+
+        const int bin500 = coveringBin (proc.getAnalyzerIn(), 500.0);
+        const int bin10k = coveringBin (proc.getAnalyzerIn(), 10000.0);
+
+        expectTrue (panel.isEqBinMeasured (bin500),
+                    "the strong 500 Hz band is measured");
+
+        expectNear (panel.getEqDbAtBin (bin500), 0.0, 1.5,
+                   "the EQ reads flat 0 dB in the strong band (got "
+                   + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
+
+        expectTrue (panel.isEqBinMeasured (bin10k),
+                    "the weak 10 kHz band (-26 dB relative) is measured");
+
+        expectNear (panel.getEqDbAtBin (bin10k), 0.0, 1.5,
+                    "the EQ reads flat 0 dB in the weak treble band (got "
+                    + juce::String (panel.getEqDbAtBin (bin10k), 2) + " dB)");
+    }
+
+    // negative case: bass-only material (a kick with no real HF). The
+    // treble must stay UNMEASURED - no curve, no phantom rise
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer noMidi;
+
+        SineSource src (100.0, 48000.0, 0.4f);
+
+        for (int n = 0; n < (int) (4.0 * 48000.0 / 512.0); ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        SpectrumPanel panel (proc);
+
+        for (int t = 0; t < 200; ++t)
+            panel.runAnalysisTick();
+
+        const int bin10k = coveringBin (proc.getAnalyzerIn(), 10000.0);
+
+        expectTrue (panel.isEqBinMeasured (coveringBin (proc.getAnalyzerIn(), 100.0)),
+                    "the bass band of the bass-only tone is measured");
+
+        expectTrue (! panel.isEqBinMeasured (bin10k),
+                    "bass-only material leaves the treble unmeasured "
+                    "(relative gate, no noise-over-noise EQ)");
+    }
+}
+
+// v2.19 (roadmap point 3): the hover readout's static helpers - the
+// inverse frequency mapping and the value formatting - are exercised
+// here without a live editor (the panel itself needs the GUI, the math
+// does not).
+void testHoverReadout()
+{
+    beginTest ("hover readout mapping and formatting");
+
+    const double width = 900.0;
+
+    // the inverse mapping matches the 16 Hz - 24 kHz log axis at the
+    // edges and at the geometric centre 16 * sqrt (1500)
+    expectNear (SpectrumPanel::frequencyForX (0.0, width), 16.0, 0.01,
+                "x = 0 reads the left edge 16 Hz");
+    expectNear (SpectrumPanel::frequencyForX (width, width), 24000.0, 0.01,
+                "x = width reads the right edge 24 kHz");
+    expectNear (SpectrumPanel::frequencyForX (width / 2.0, width),
+                16.0 * std::sqrt (1500.0), 0.01,
+                "the geometric centre reads 16*sqrt(1500) Hz");
+
+    // out-of-range x clamps to the axis, and a zero-width panel is safe
+    expectNear (SpectrumPanel::frequencyForX (-50.0, width), 16.0, 0.01,
+                "x beyond the left edge clamps to 16 Hz");
+    expectNear (SpectrumPanel::frequencyForX (width + 50.0, width), 24000.0, 0.01,
+                "x beyond the right edge clamps to 24 kHz");
+    expectNear (SpectrumPanel::frequencyForX (100.0, 0.0), 16.0, 0.01,
+                "a zero-width panel reads the left edge");
+
+    // frequency formatting: integer Hz below 1 kHz, two-decimal kHz above
+    expectTrue (SpectrumPanel::formatFrequency (45.0) == "45 Hz",
+                "45 Hz formats as \"45 Hz\"");
+    expectTrue (SpectrumPanel::formatFrequency (1000.0) == "1.00 kHz",
+                "1 kHz formats as \"1.00 kHz\"");
+    expectTrue (SpectrumPanel::formatFrequency (12500.0) == "12.50 kHz",
+                "12.5 kHz formats as \"12.50 kHz\"");
+
+    // level formatting: one decimal, the -100 dB floor reads "--"
+    expectTrue (SpectrumPanel::formatReadoutDb (-47.26f) == "-47.3",
+                "levels format with one decimal");
+    expectTrue (SpectrumPanel::formatReadoutDb (-120.0f) == "--",
+                "the -100 dB floor reads \"--\"");
+}
+
 void testStateRoundtrip()
 {
     beginTest ("state save/restore roundtrip");
@@ -488,7 +705,7 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.18.2",
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.21.1",
                 "saved state carries the current version tag");
 
     TheChannelStripAudioProcessor restored;
@@ -837,7 +1054,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.18.2" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.21.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -846,6 +1063,9 @@ int main (int argc, char* argv[])
     testLufsShortTerm();
     testSilence();
     testSpectrumPeak();
+    testSpectrumHighFrequency();
+    testEqWeakContent();
+    testHoverReadout();
     testStateRoundtrip();
     testLatencyForwarding();
     testCrossfadeClickFree();
