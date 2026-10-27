@@ -248,13 +248,15 @@ void SpectrumPanel::drawHoverReadout (juce::Graphics& g) const
                                 juce::Colour (0xff7ee08a) });
 
     // right-aligned at the top, clear of the centred legend and of the
-    // left scale column; each token is drawn in its own colour
+    // left scale column; each token is drawn in its own colour.
+    // v2.20 (point 6): the right margin grew from 10 to 44 px so the
+    // readout keeps clear of the EQ scale labels at the far right.
     int totalWidth = 0;
 
     for (const auto& s : segments)
         totalWidth += 6 + juce::GlyphArrangement::getStringWidth (font, s.text);
 
-    int cursorX = getWidth() - 10 - totalWidth;
+    int cursorX = getWidth() - 44 - totalWidth;
     g.setFont (font);
 
     for (const auto& s : segments)
@@ -456,7 +458,10 @@ void SpectrumPanel::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff0e1420));
 
     drawGrid (g);
-    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f));
+    // v2.20 (point 2): the IN curve is drawn WITHOUT its area fill now -
+    // only OUT keeps its soft fill, so the two curves read as two lines
+    // over one fill instead of two overlapping tints.
+    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f), 1.6f, false);
     drawCurve (g, smoothOut, juce::Colour (0xff54c8e8));
 
     // v2.10: 10-second sliding maximum of the raw output - a thin trace
@@ -726,13 +731,13 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     g.setColour (juce::Colour (0xff7ee08a));
     g.strokePath (path, juce::PathStrokeType (2.4f));
 
-    // the EQ scale labels, on the right edge, match the curve's range
-    // (v2.8: dynamic, "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
-    // v2.9: the 20 kHz frequency label is back in the bottom-right
-    // corner, so the column right-aligns just left of its label box.
+    // the EQ scale labels, match the curve's range (v2.8: dynamic,
+    // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
+    // v2.20 (point 6): the column moved FLUSH against the right edge -
+    // mirroring the spectrum's dB labels at the far left - so it no
+    // longer shares the top-right corner with the hover readout (which
+    // keeps its own clear margin, see drawHoverReadout).
     g.setFont (juce::Font (juce::FontOptions (10.0f)));
-
-    const int eqLabelRight = (int) xForFrequency (20000.0) - 22;
 
     for (float db : { range, 0.0f, -range })
     {
@@ -740,7 +745,7 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
                                    : ((db < 0.0f) ? "-" + juce::String (-db, 0)
                                                   : juce::String ("0"));
         const int y = juce::jlimit (2, getHeight() - 14, (int) yForEqDb (db) - 6);
-        g.drawText (label, eqLabelRight - 28, y, 28, 12,
+        g.drawText (label, getWidth() - 34, y, 30, 12,
                     juce::Justification::centredRight);
     }
 }
@@ -845,6 +850,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
 
+    // v2.20 (point 1): the "?" help button sits next to the studio logo
+    // and opens every tool tip in one window - the controls themselves
+    // keep their small tooltips, but the analyser no longer shows one
+    // while hovering (it was hiding the readout).
+    styleConsoleButton (helpButton);
+    helpButton.setTooltip ("All the tool tips in one place.");
+    helpButton.onClick = [this] { showHelpPopup(); };
+    addAndMakeVisible (helpButton);
+
     addAndMakeVisible (rescanButton);
     rescanButton.onClick = [this] { proc.requestDefaultScan(); };
     // v2.9.1: in a DAW the button only reloads the saved database (loading
@@ -941,6 +955,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         styleConsoleButton (t);
         addAndMakeVisible (t);
 
+        // v2.20: the tilt buttons get a tooltip too (they were the only
+        // analyser controls without one, and the help window lists it).
+        t.setTooltip ("Analyser display tilt in dB per octave (reference 1 kHz, "
+                      "SPAN convention: a negative tilt flattens a naturally "
+                      "falling spectrum). The tilt only affects the drawing, "
+                      "never the analysis.");
+
         t.onClick = [this, j, tilts]
         {
             if (tiltButtons[j].getToggleState())
@@ -1007,12 +1028,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // restore the saved loudness reference (default Mix -23 LUFS)
     spectrumPanel.setLufsTarget (proc.getLufsTarget());
 
-    spectrumPanel.setTooltip ("Hover anywhere to read the frequency under the cursor and "
-                              "the IN/OUT/EQ levels there. "
-                              "Click the LEFT dB scale to toggle 10/6 dB per division; "
-                              "click the RIGHT green EQ scale to toggle 4/2 dB per division; "
-                              "click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
-                              "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
+    // v2.20 (point 1): the analyser no longer carries a tooltip - it
+    // was in the way of the hover readout. Its help text (and every
+    // other tooltip) now lives in the "?" button next to the studio
+    // logo (see showHelpPopup).
 
     // restore the saved scales (defaults: 10 dB and 4 dB per division;
     // legacy values are snapped to the two current scales, like the
@@ -1173,6 +1192,14 @@ void TheChannelStripAudioProcessorEditor::resized()
                                                       / logoImage.getWidth()) / 2)
             : 20;
         studioLogo.setBounds (sideX, y + 4, sw, logoH);
+
+        // v2.20 (point 1): the help button rides the logo band, at its
+        // right edge - vertically centred on the band, clear of the
+        // centred logo image itself.
+        helpButton.setBounds (sideX + sw - 24,
+                              y + 4 + juce::jmax (0, (logoH - 22) / 2),
+                              22, 22);
+
         y += logoH + 10;
     }
 
@@ -1401,4 +1428,38 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
 
     layoutHostedHolder();
     fitWindowToHostedEditor();
+}
+
+// v2.20 (point 1): the "?" button opens every tool tip in one window.
+// The analyser deliberately carries NO tooltip any more (it was hiding
+// the hover readout), so its help text is written out here; every other
+// section is pulled live from the control it describes, so the window
+// always shows exactly what the small tooltips show.
+void TheChannelStripAudioProcessorEditor::showHelpPopup()
+{
+    juce::String info;
+
+    auto addSection = [&info] (const juce::String& title, const juce::String& text)
+    {
+        if (text.trim().isNotEmpty())
+            info << title << "\n" << text << "\n\n";
+    };
+
+    addSection ("ANALYSER",
+                "Hover anywhere to read the frequency under the cursor and the "
+                "IN/OUT/EQ levels there. Click the LEFT dB scale to toggle 10/6 dB "
+                "per division; click the RIGHT green EQ scale to toggle 4/2 dB per "
+                "division; click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
+                "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
+    addSection ("TILT",               tiltButtons[0].getTooltip());
+    addSection ("RESPONSE SPEED",      speedButtons[0].getTooltip());
+    addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
+    addSection ("GAIN STAGING",       correctionLabel.getTooltip());
+    addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
+    addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
+    addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
+
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+                                            "TheChannelStrip - help",
+                                            info);
 }

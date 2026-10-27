@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.19.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.20.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -49,7 +49,14 @@ them in a clean, focused workflow:
   there, colour-matched to the legend — exactly the values the curves
   show at that position (same tilt and loudness calibration; bins with
   no energy read "--", and EQ only appears once that bin has been
-  measured). Pure display, no cursor lock and no freeze.
+  measured). Pure display, no cursor lock and no freeze. **v2.20**: the
+  IN curve is drawn without its area fill (only OUT keeps its tint),
+  each display bin now aggregates the ENERGY of the FFT bins it covers
+  (the treble reads where reference analysers put it, and both curves
+  get one light spatial smoothing pass), the EQ scale labels sit flush
+  at the far right edge with the readout keeping a clear margin, and
+  the "?" button next to the studio logo opens every tool tip in one
+  window.
 - **Measured transfer function (v2.6)** — a third curve, **OUT-IN**, shows
   what the hosted console actually does to your signal (EQ, dynamics and
   saturation combined), computed live from the two existing analyzer
@@ -152,7 +159,8 @@ hosted plugins — no third-party plugin is needed:
 It prints one line per test and one `FAIL` per failed check, exits 0
 when everything passes (`ALL TESTS PASSED`). Covered: processor basics
 and console inventory, bit-exact dry passthrough (stereo and mono),
-measurement gating, LUFS short-term metering, spectrum peak location,
+measurement gating, LUFS short-term metering, spectrum peak location
+(1 kHz and 10 kHz),
 the hover readout mapping and formatting, state save/restore, latency forwarding (static and runtime changes),
 click-free console swapping, native mono vs stereo-bridge hosting, and
 stereo ↔ mono hot switching without re-creating the instance.
@@ -217,6 +225,25 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.20.0**
+  - **Treble accuracy + UI polish (7-point pass).**
+    (1) A **"?" help button** next to the studio logo opens every tool
+    tip in one window; the analyser itself no longer shows a tooltip on
+    hover (it was hiding the readout). (2) The **IN curve is drawn
+    without its area fill** — only OUT keeps its soft tint.
+    (3/4/5) The per-display-bin value is now the band's **energy (RMS
+    of the covered FFT bins)** instead of their arithmetic mean: above
+    ~5 kHz one display bin spans a dozen+ FFT bins, and the mean of
+    fluctuating magnitudes reads ~3 dB below the band's true energy —
+    the treble now sits where reference analysers put it, and the EQ
+    curve's high end is far more stable. (6) The EQ scale labels moved
+    **flush to the right edge** (mirroring the dB labels at the far
+    left) and the hover readout keeps a 44 px margin — no more
+    collision. (7) One light **spatial smoothing pass** across
+    neighbouring display bins ([0.25, 0.5, 0.25]) on both spectra, the
+    "small smoothness" feel of classic analysers; IN and OUT are
+    smoothed identically so the EQ difference stays honest. The
+    harness gained a 10 kHz peak-location test (14 tests now).
 - **2.19.0**
   - **Hover readout on the analyser (roadmap point 3).** Moving the
     mouse over the spectrum panel shows the frequency under the cursor

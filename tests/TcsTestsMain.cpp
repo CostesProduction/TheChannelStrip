@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.19.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.20.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -9,7 +9,7 @@
 //   - bit-exact passthrough with no hosted plugin (stereo AND mono)
 //   - measurement gating (nothing measured while the editor is closed)
 //   - LUFS short-term metering (absolute window + 6 dB tracking)
-//   - spectrum analyser peak location
+//   - spectrum analyser peak location (1 kHz and 10 kHz)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -470,6 +470,43 @@ void testSpectrumPeak()
                 + juce::String (peakHz, 1) + " Hz)");
 }
 
+// v2.20 (points 3/4/5): high-frequency detection. A 10 kHz tone must
+// land in the right display bin with the new energy aggregation (the
+// old arithmetic mean of the covered FFT bins read the treble low and
+// noisy above ~5 kHz, where one display bin spans a dozen+ FFT bins).
+void testSpectrumHighFrequency()
+{
+    beginTest ("spectrum analyser high-frequency peak");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::AudioBuffer<float> block (2, 512);
+
+    SineSource src (10000.0, 48000.0, 0.3f);
+    processBlocks (proc, src, (int) (2.0 * 48000.0 / 512.0), block);
+
+    float bins[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (bins, SpectrumAnalyzer::numScopeBins);
+
+    int peakBin = 0;
+    for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+        if (bins[b] > bins[peakBin])
+            peakBin = b;
+
+    const double peakHz = proc.getAnalyzerIn().getBinFrequency (peakBin);
+    expectTrue (peakHz > 8500.0 && peakHz < 11500.0,
+                "a 10 kHz tone peaks near 10 kHz (got "
+                + juce::String (peakHz, 1) + " Hz)");
+
+    // the tone's bin must read well above the empty bins around it (the
+    // energy aggregation keeps a genuine tone ~20 dB over the floor)
+    expectTrue (bins[peakBin] - bins[0] > 12.0f,
+                "the 10 kHz peak stands well above the 20 Hz floor (delta "
+                + juce::String (bins[peakBin] - bins[0], 1) + " dB)");
+}
+
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
 // inverse frequency mapping and the value formatting - are exercised
 // here without a live editor (the panel itself needs the GUI, the math
@@ -533,7 +570,7 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.19.0",
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.20.0",
                 "saved state carries the current version tag");
 
     TheChannelStripAudioProcessor restored;
@@ -882,7 +919,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.19.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.20.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -891,6 +928,7 @@ int main (int argc, char* argv[])
     testLufsShortTerm();
     testSilence();
     testSpectrumPeak();
+    testSpectrumHighFrequency();
     testHoverReadout();
     testStateRoundtrip();
     testLatencyForwarding();

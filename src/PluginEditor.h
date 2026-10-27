@@ -236,6 +236,9 @@ private:
     void layoutHostedHolder();
     void fitWindowToHostedEditor(); // v2.4: frame the hosted editor exactly
     void applyAnalyserVisibility(); // v2.8: show/hide the analyser strip
+    // v2.20 (point 1): one window that gathers every tool tip (opened
+    // by the "?" button next to the studio logo).
+    void showHelpPopup();
 
     // v1.0.4: renamed from "processor" to avoid shadowing the inherited
     // AudioProcessorEditor::processor member (-Wshadow-field).
@@ -298,6 +301,9 @@ private:
     // v2.17: Clement's studio logo (embedded as a binary resource),
     // shown between the gain-staging section and the host status area.
     juce::ImageComponent studioLogo;
+
+    // v2.20 (point 1): the "?" button opens the all-in-one help window.
+    juce::TextButton helpButton { "?" };
 
     juce::Label statusLabel;
 
