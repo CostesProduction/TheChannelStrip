@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.29.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.30.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -18,25 +18,37 @@ them in a clean, focused workflow:
   behaviour), one console at a time, and the sidebar shows the hosted
   console's name.
 - **Named presets** — a PRESETS section at the **top of the sidebar**
-  lists every preset at the **root** of the preset folder as
-  « Console - Name » — that root is the **general list**, always
-  available; **sub-folders are your albums and are never listed**.
-  Selecting a preset **loads it on its console** (switching to that
-  console first if another one is hosted). Three actions around the
-  list: **Save** (the floppy) writes the hosted console's current
-  state to a `.tcsPreset` file **wherever you choose** — into the
-  root (it becomes the console's current preset right away) or into a
-  sub-folder (stays out of the list); **Load** (the tray with the
-  incoming arrow) loads any `.tcsPreset` file from anywhere and
-  copies it into the root so it joins the list; **Delete** (the bin)
+  lists every preset in the preset folder, root and albums alike:
+  the **root is the general list** (« Console - Name »), and each
+  **sub-folder is an album**, its presets listed with an
+  « [Album] » tag. Selecting a preset **loads it on its console**
+  (switching to that console first if another one is hosted). Three
+  actions around the list: **Save** (the floppy) is a *Save As* —
+  it writes the hosted console's **current state** to a
+  `.tcsPreset` file **wherever you choose**, and that file (root,
+  album or elsewhere) becomes the console's **current preset**
+  right away, pre-filled in the dialog; **Load** (the tray with
+  the incoming arrow) loads any `.tcsPreset` from anywhere
+  **without copying it** — the preset stays where it lives and
+  becomes the current one at its own file; **Delete** (the bin)
   removes the selected preset, or — with nothing selected — opens a
   browser to delete any preset file, sub-folders included (always
-  with confirmation). A
+  with confirmation). The current preset's own **file** travels
+  with the DAW session, so an album preset reloads as that album
+  preset. A
   preset holds the **console's own state only** — display settings
   (tilt, scales, LUFS reference) travel with the session, not with
   presets. Presets live as individual `.tcsPreset` files in the
   `Presets/` folder next to the plugin database, so they survive
   reinstalls and can be copied by hand.
+- **Interactive help** — the « **?** » button (fourth slot of the
+  preset-button row) enters a **help mode**: the interface dims
+  slightly, and **hovering any documented control shows a small
+  contextual bubble** — a few words each, including the hidden
+  clickables (the dB scales, the LUFS reference at 0 dB). A
+  highlighted outline marks the target under the mouse. **Any
+  click, or Esc, leaves the mode** — a click never triggers the
+  control underneath. The old all-text help window is gone.
 - **Click-free swapping** — switching consoles crossfades over ~50 ms and
   the old instance is destroyed on a background thread.
 - **Spectrum analyzer** — input and output spectra overlaid on the same
@@ -261,6 +273,44 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.30.0**
+  - **Albums join the list.** The preset selector now lists the
+    `.tcsPreset` files of the **whole preset folder**, not just its
+    root: sub-folders are your albums, and their presets appear in
+    the list tagged « Name  [Album] ». A save into an album shows up
+    immediately (this was the v2.29 gap — an album save left the
+    selector on the previous preset).
+  - **Save As makes the file the current preset, wherever it lives.**
+    Saving to any destination — root, album, or elsewhere on disk —
+    now always makes the saved file the console's **current preset**:
+    the combo box shows it (with its album tag) and the « * » tracks
+    it from there.
+  - **Load never copies.** Loading a `.tcsPreset` — from an album,
+    from outside the folder, from anywhere — **just loads it**; the
+    file stays where it lives and becomes the current preset at its
+    own file. Nothing is ever duplicated into the root any more, so
+    the general list cannot accumulate copies picked up from
+    albums.
+  - **The current preset's file travels with the session.** The DAW
+    session now remembers *which file* the current preset points at
+    (relative to the preset folder when inside it), so an album
+    preset reopens as that album preset — the combo box re-selects
+    it there, Save pre-fills there, and deleting that file disowns
+    it.
+  - **Interactive help mode.** The « **?** » button moves into the
+    preset-button row (fourth slot) and no longer opens the all-text
+    window: it enters a **help mode** where hovering any documented
+    control — the preset list, the three action buttons, the
+    analyser — shows a **small contextual bubble**, a few words
+    each, mentioning the hidden clickables (the dB scales and the
+    LUFS reference at 0 dB). A soft outline highlights the target
+    under the mouse. **Any click, or Esc, leaves the mode**, and a
+    click never triggers the control underneath.
+  - Preset files are written with version tag `2.30.0`; the offline
+    test harness covers the recursive listing, the save-anywhere
+    tracking, the no-copy Load and the session roundtrip of the
+    current preset's file.
 
 - **2.29.0**
   - **Presets, three actions.** The section is rebuilt around the

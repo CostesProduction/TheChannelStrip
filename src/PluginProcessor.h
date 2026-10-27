@@ -136,41 +136,60 @@ public:
     {
         juce::String name;         // the user-given preset name
         juce::String consoleName;  // the console the preset belongs to
+        // v2.30: the exact file on disk (the selector resolves presets
+        // by file now - the same name can exist in several places) and
+        // the album it sits in (the sub-folder path under the preset
+        // folder, empty = at the root).
+        juce::String album;
+        juce::File file;
     };
 
     // The folder holding the .tcsPreset files (created on demand).
     juce::File getPresetsDir() const;
-    // Every preset file currently on disk, sorted by name.
+    // Every preset file currently on disk, root AND sub-folders
+    // (albums) - sorted root-first then album, name within each group.
     juce::Array<PresetInfo> getAvailablePresets();
+    // v2.30: the exact file the hosted console's current preset lives
+    // in (falling back to the root file its name implies when only a
+    // name is on record - an older session). Empty when no preset is
+    // tracked. Used by the editor to pre-fill the Save dialog and by
+    // the delete paths to disown the name when its own file goes.
+    juce::File getCurrentPresetFile();
     // Save the hosted console's current state under the given name, as
     // a file in the ROOT of the preset folder (a "general" preset -
     // listed in the selector every time). An existing preset of the
     // same name is overwritten; the preset becomes the console's
     // current one.
     bool savePreset (const juce::String& presetName);
-    // v2.29: Save proper - the hosted console's CURRENT state written
-    // to any file chosen in a save dialog (the old export's dialog,
-    // the old save's content). Saved into the preset folder's ROOT it
-    // is a general preset: listed every time, and it becomes the
-    // console's current one ("Save As" semantics). Saved anywhere else
-    // (a sub-folder = an album, another disk) it is NOT listed and the
-    // current-preset tracking is left untouched.
+    // v2.29/v2.30: Save proper - the hosted console's CURRENT state
+    // written to any file chosen in a save dialog. Wherever it lands
+    // (the root, an album sub-folder, anywhere else) the saved preset
+    // becomes the console's CURRENT one ("Save As" semantics) and the
+    // tracking remembers the exact file. It appears in the selector
+    // when saved inside the preset folder (root or album).
     bool savePresetTo (const juce::File& destination);
-    // Load a preset: if its console is hosted, apply directly; if not,
-    // switch to that console and apply it once the instance is ready.
+    // Load a root preset BY NAME (the root file its sanitised name
+    // implies) - kept for the tests and the name-based flows. The
+    // selector and Load use the file-based variant below.
     bool applyPreset (const juce::String& presetName);
+    // v2.30: load any preset file on disk, wherever it lives (root,
+    // album, or outside the preset folder entirely). If its console is
+    // hosted, apply directly; if not, switch to that console and apply
+    // it once the instance is ready. The preset becomes the console's
+    // current one, tracked at its own file.
+    bool applyPresetFile (const juce::File& file);
     // Delete a preset from the preset folder's root, by name.
     bool deletePreset (const juce::String& presetName);
     // v2.29: delete any preset file on disk (the browse-to-delete
-    // fallback for files the selector does not list - sub-folders).
-    // If the deleted file was the hosted console's current preset, the
-    // name is disowned (the console keeps its sound).
+    // fallback). If the deleted file was the hosted console's current
+    // preset, the name is disowned (the console keeps its sound).
     bool deletePresetFile (const juce::File& file);
-    // Copy an external .tcsPreset file into the Presets folder, then
-    // load it: it becomes the console's current preset (v2.28.0),
-    // exactly as if it had been picked in the selector. The copy can
-    // succeed while the load is refused (console not installed) - the
-    // file stays available in the list, the status area says why.
+    // v2.30: Load - open any .tcsPreset file and load it into the
+    // hosted console (switching consoles first when needed). It is
+    // NEVER copied anywhere: the folder stays exactly as the user
+    // arranged it (v2.29's copy-into-the-root dropped - the root was
+    // filling up with duplicates). The loaded preset becomes the
+    // console's current one, tracked at the file it was loaded from.
     bool importPreset (const juce::File& source);
 
     // ---- v2.11: per-console settings memory ----
@@ -277,6 +296,12 @@ private:
     // disown the name (the console keeps its sound, no preset name).
     void disownPresetIfItsFileIs (const juce::File& file);
 
+    // v2.30: the file the given console's current preset lives in -
+    // the tracked one when there is one (v2.30 sessions and every
+    // save/load path track it), else the root file its name implies
+    // (an older session). consoleStateLock must be held by the caller.
+    juce::File currentPresetFileFor (const juce::String& ident);
+
     // ---- v2.26: preset file helpers ----
     // deterministic name -> filename mapping (the user-given name is
     // stored verbatim inside the file; the filename is sanitised)
@@ -355,15 +380,24 @@ private:
     // v2.27: the name that belongs with the queued preset state above;
     // consumed by instantiateHosted right next to it.
     juce::String pendingPresetName;
+    // v2.30: the file the queued preset was loaded from (see
+    // consolePresetFiles below).
+    juce::String pendingPresetFile;
     // v2.27: current-preset tracking, keyed by plugin ident like
     // consoleStates and persisted the same way (attributes on each
     // <consoleState> element). consolePresetNames holds the preset
     // associated with each console (empty = none), consolePresetModified
     // whether its knobs have moved since that preset was loaded or
     // saved (the "*" marker the editor shows left of the name).
+    // v2.30: consolePresetFiles holds the exact file each console's
+    // current preset lives in (a preset in an album, or loaded from
+    // outside the preset folder, does not sit at the root path its
+    // name implies). Empty = unknown (an older session), and the
+    // root file the name implies is assumed.
     // Guarded by consoleStateLock.
     std::map<juce::String, juce::String> consolePresetNames;
     std::map<juce::String, bool> consolePresetModified;
+    std::map<juce::String, juce::String> consolePresetFiles;
     // v2.27: knob-move detection. Any state the SHELL pushes into the
     // hosted plugin (a preset, the per-console remembered state, a
     // session restore) is not a user modification, so the parameter

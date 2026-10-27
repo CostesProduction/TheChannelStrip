@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.29.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.30.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -29,14 +29,14 @@
 //     export / import / delete against the real preset folder, plus
 //     the explicit refusals - nothing hosted, missing file, corrupt
 //     file; v2.28: an import LOADS the preset - into the console, as
-//     its current one, even when the file was already in the folder;
-//     v2.29: the three actions - Save writes the current state to a
-//     file anywhere (tracking untouched outside the preset folder's
-//     root, becomes the current preset in it), Load imports from
-//     anywhere including a sub-folder (an album - loaded, copied into
-//     the root, never listed on its own), Delete removes a selected
-//     preset or an arbitrary file (sub-folders included), disowning
-//     the current preset when its own file goes)
+//     its current one; v2.29: Save / Load / Delete as three actions;
+//     v2.30: the list is RECURSIVE (root = general presets, each
+//     sub-folder = an album, shown as "[album]" entries), a Save
+//     anywhere becomes the current preset AT ITS FILE (album saves
+//     included), Load never copies anything - it just loads from
+//     wherever the file lives - and the current preset's own FILE
+//     travels with the session, so an album preset restores as an
+//     album preset
 //   - current-preset tracking (v2.27: the saved/loaded preset becomes
 //     the console's current one, a knob move raises the "*" once the
 //     editor timer drains it, reloading or re-saving clears it, the
@@ -1099,7 +1099,8 @@ void testConsoleSlotStatus()
 // name, and everything is cleaned up again at the end.
 void testPresetManager()
 {
-    beginTest ("preset save / list / load / file save / file delete (v2.26-v2.29, point 4)");
+    beginTest ("preset save / list / load / file save / file delete "
+               "(v2.26-v2.30, point 4)");
 
     const auto unique = juce::String ("Tcs Test Preset 2710");
     const auto uniqueFile = unique + ".tcsPreset";  // the sanitised filename
@@ -1117,6 +1118,10 @@ void testPresetManager()
     TheChannelStripAudioProcessor proc;
     proc.prepareToPlay (48000.0, 512);
 
+    const auto rootFile = [&] { return proc.getPresetsDir().getChildFile (uniqueFile); };
+    const auto currentFileIs = [&] (const juce::File& f)
+    { return proc.getCurrentPresetFile() == f; };
+
     // clean slate (a leftover from an interrupted earlier run)
     proc.deletePreset (unique);
 
@@ -1127,13 +1132,17 @@ void testPresetManager()
     proc.getHostedStrip().setPlugin (std::move (mock));
 
     expectTrue (proc.savePreset (unique), "saving the hosted state as a preset");
-    expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
+    expectTrue (rootFile().existsAsFile(),
                 "the preset file exists on disk");
+    expectTrue (proc.getCurrentPresetName() == unique
+                && currentFileIs (rootFile()),
+                "the saved preset becomes the current one, at its file");
 
-    // 3. the list reports it, with the console it belongs to
+    // 3. the list reports it, with the console it belongs to and, v2.30,
+    //    its album (empty for a general/root preset)
     {
         const auto presets = proc.getAvailablePresets();
-        bool listed = false, consoleOk = false;
+        bool listed = false, consoleOk = false, albumOk = false;
 
         for (const auto& p : presets)
         {
@@ -1141,11 +1150,13 @@ void testPresetManager()
             {
                 listed = true;
                 consoleOk = p.consoleName == "MockPresetConsole";
+                albumOk = p.album.isEmpty();
             }
         }
 
         expectTrue (listed, "the saved preset is listed");
         expectTrue (consoleOk, "the preset remembers which console it belongs to");
+        expectTrue (albumOk, "a root preset has no album");
     }
 
     // 4. apply: the preset state goes back into the hosted plugin
@@ -1161,20 +1172,23 @@ void testPresetManager()
     expectTrue (proc.getHostStatus().contains ("could not be loaded"),
                 "the missing-preset message says so");
 
-    // 6. v2.29 Save-to-file: the CURRENT console state is written to an
-    //    arbitrary destination; nothing about the current preset changes
+    // 6. v2.30 Save-to-file: the CURRENT console state is written to an
+    //    arbitrary destination and becomes the current preset AT THAT
+    //    FILE (a "Save As" anywhere - even outside the folder - is the
+    //    console's new current preset)
     const auto dest = proc.getAppDataDir().getChildFile (uniqueFile);
     dest.deleteFile();
 
     expectTrue (proc.savePresetTo (dest),
                 "saving the current state to a file outside the folder");
     expectTrue (dest.existsAsFile(), "the saved file exists");
-    expectTrue (proc.getCurrentPresetName() == unique,
-                "a save outside the preset folder does not touch the"
-                " current preset");
+    expectTrue (proc.getCurrentPresetName() == unique
+                && currentFileIs (dest),
+                "a save anywhere becomes the current preset, at that file");
 
     // 6b. the same save inside a SUB-FOLDER of the preset folder (an
-    //     album): the file exists but never joins the list
+    //     album): the file exists, becomes the current one, AND is now
+    //     listed - the v2.30 listing is recursive, albums included
     const auto albumDir = proc.getPresetsDir().getChildFile ("Tcs Test Album");
     const auto destSub = albumDir.getChildFile (uniqueFile);
     albumDir.createDirectory();
@@ -1184,101 +1198,112 @@ void testPresetManager()
                 "saving the current state into a sub-folder");
     expectTrue (destSub.existsAsFile(),
                 "the sub-folder file exists");
-    expectTrue (proc.getCurrentPresetName() == unique,
-                "a sub-folder save does not touch the current preset");
+    expectTrue (currentFileIs (destSub),
+                "the album save becomes the current preset, at the album file");
     {
-        int uniqueListed = 0;
+        int rootListed = 0, albumListed = 0;
+        bool albumOk = false;
 
         for (const auto& p : proc.getAvailablePresets())
+        {
             if (p.name == unique)
-                ++uniqueListed;
+            {
+                if (p.album.isEmpty())
+                    ++rootListed;
+                else if (p.album == "Tcs Test Album")
+                {
+                    ++albumListed;
+                    albumOk = p.file == destSub;
+                }
+            }
+        }
 
-        // the root file from step 2 is there once; the sub-folder copy
-        // would make it twice if the listing were recursive
-        expectTrue (uniqueListed == 1,
-                    "a preset inside a sub-folder is never listed");
+        expectTrue (rootListed == 1,
+                    "the root preset is listed once");
+        expectTrue (albumListed == 1 && albumOk,
+                    "the album preset is listed too, tagged with its album and its file");
     }
 
-    // 7. delete: gone from the list AND from the disk
-    expectTrue (proc.deletePreset (unique), "delete removes the preset");
-    expectTrue (! proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
-                "the preset file is gone");
+    // 7. delete by name: the ROOT file goes, but the current preset -
+    //    which now lives in the album - is NOT disowned
+    expectTrue (proc.deletePreset (unique), "delete removes the root preset");
+    expectTrue (! rootFile().existsAsFile(),
+                "the root preset file is gone");
 
     {
         const auto presets = proc.getAvailablePresets();
-        bool stillThere = false;
+        int stillThere = 0;
 
         for (const auto& p : presets)
             if (p.name == unique)
-                stillThere = true;
+                ++stillThere;
 
-        expectTrue (! stillThere, "the deleted preset is no longer listed");
+        expectTrue (stillThere == 1,
+                    "only the album copy is still listed");
     }
 
-    // 8. Load the saved copy back - v2.28/v2.29: Load LOADS the preset:
-    //    it goes into the hosted console and becomes its current one,
-    //    unmodified, exactly as if it had been picked in the list
+    expectTrue (proc.getCurrentPresetName() == unique
+                && currentFileIs (destSub),
+                "deleting the root copy does not disown the album preset");
+
+    // 8. v2.30 Load: LOADS the preset - into the console, as its current
+    //    one, at its own file - and NEVER COPIES anything: a file from
+    //    outside the folder does not land in the root
     mockPtr->value.store (9);   // turn the "console knobs" away first
 
     expectTrue (proc.importPreset (dest), "load brings the preset back");
-    expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
-                "the loaded preset file is in the preset folder");
+    expectTrue (! rootFile().existsAsFile(),
+                "the loaded file was NOT copied into the preset folder");
     expectTrue (mockPtr->value.load() == 42,
                 "the loaded preset is loaded into the hosted console");
-    expectTrue (proc.getCurrentPresetName() == unique,
-                "the loaded preset becomes the console's current one");
+    expectTrue (proc.getCurrentPresetName() == unique
+                && currentFileIs (dest),
+                "the loaded preset becomes the console's current one, at its file");
     expectTrue (! proc.isCurrentPresetModified(),
-                "an imported-and-loaded preset starts unmodified");
-    dest.deleteFile();
+                "a loaded preset starts unmodified");
 
-    // 8b. loading a file that already IS in the preset folder loads it
-    //     too (it used to be a silent no-op) - v2.28
+    // 8b. loading a file that already IS in the preset folder (here: an
+    //     album) loads it too, clearing any pending "*" - v2.28
     mockPtr->value.store (11);
     proc.parameterValueChanged (0, 0.5f);   // star the current preset first
     proc.drainPresetDirtyFlag();
 
-    expectTrue (proc.importPreset (proc.getPresetsDir().getChildFile (uniqueFile)),
-                "loading a file already in the preset folder succeeds");
-    expectTrue (mockPtr->value.load() == 42,
-                "re-loading the in-folder preset reloads it");
-    expectTrue (proc.getCurrentPresetName() == unique
-                && ! proc.isCurrentPresetModified(),
-                "re-loading makes the preset current and clears its \"*\"");
-
-    // 8c. v2.29: Load from a SUB-FOLDER (an album) - loaded into the
-    //     console, copied into the root, and so listed
-    mockPtr->value.store (13);
-
     expectTrue (proc.importPreset (destSub),
-                "loading a preset from a sub-folder succeeds");
-    expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
-                "the sub-folder preset was copied into the root");
+                "loading an album preset succeeds");
     expectTrue (mockPtr->value.load() == 42,
-                "the sub-folder preset is loaded into the console");
+                "the album preset is loaded into the console");
     expectTrue (proc.getCurrentPresetName() == unique
-                && ! proc.isCurrentPresetModified(),
-                "the sub-folder preset becomes the current one");
+                && ! proc.isCurrentPresetModified()
+                && currentFileIs (destSub),
+                "loading makes the preset current at the album file and clears its \"*\"");
 
-    // 8d. v2.29 browse-to-delete part 1: an arbitrary file (sub-folders
-    //     included) can be deleted; a file that is not the current
-    //     preset's own leaves the tracking alone
+    // 8c. v2.30: the current preset's own FILE travels with the session -
+    //     an album preset restores pointing at its album file, so the
+    //     combo pre-selects it there and a delete of that file disowns
+    {
+        juce::MemoryBlock session;
+        proc.getStateInformation (session);
+
+        TheChannelStripAudioProcessor restored;
+        restored.prepareToPlay (48000.0, 512);
+        restored.setStateInformation (session.getData(), (int) session.getSize());
+
+        expectTrue (restored.getCurrentPresetName() == unique,
+                    "the current preset's name comes back with the session");
+        expectTrue (restored.getCurrentPresetFile() == destSub,
+                    "so does its own file - the album preset stays an album preset");
+    }
+
+    // 8d. browse-to-delete: deleting the current preset's OWN file (the
+    //     album file here) removes it and disowns the tracking
     expectTrue (proc.deletePresetFile (destSub),
-                "deletePresetFile removes the sub-folder file");
+                "deletePresetFile removes the album file");
     expectTrue (! destSub.existsAsFile(),
-                "the sub-folder file is gone");
-    expectTrue (proc.getCurrentPresetName() == unique,
-                "deleting another file does not disown the current preset");
-
-    // 8e. browse-to-delete part 2: deleting the current preset's OWN
-    //     file (at the root here) disowns it, exactly like deletePreset
-    expectTrue (proc.deletePresetFile (proc.getPresetsDir().getChildFile (uniqueFile)),
-                "deletePresetFile removes the root file");
-    expectTrue (! proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
-                "the root file is gone");
+                "the album file is gone");
     expectTrue (proc.getCurrentPresetName().isEmpty(),
-                "deleting the current preset's file disowns it");
+                "deleting the current preset's own file disowns it");
 
-    // 8f. v2.29: a Save into the ROOT of the preset folder becomes the
+    // 8e. v2.30: a Save into the ROOT of the preset folder becomes the
     //     console's current preset right away (the general list)
     const auto rootSaveName = juce::String ("Tcs Test Root Save");
     const auto rootSaveFile = proc.getPresetsDir().getChildFile ("Tcs Test Root Save.tcsPreset");
@@ -1286,7 +1311,8 @@ void testPresetManager()
     expectTrue (proc.savePresetTo (rootSaveFile),
                 "saving into the root of the preset folder");
     expectTrue (proc.getCurrentPresetName() == rootSaveName
-                && ! proc.isCurrentPresetModified(),
+                && ! proc.isCurrentPresetModified()
+                && currentFileIs (rootSaveFile),
                 "a root save becomes the current preset, unmodified");
     {
         bool listed = false;
@@ -1314,6 +1340,7 @@ void testPresetManager()
     // 10. cleanup: leave the preset folder exactly as it was found
     proc.deletePreset (rootSaveName);
     albumDir.deleteFile();   // the (now empty) album folder
+    dest.deleteFile();
 }
 
 // v2.27: current-preset tracking - the name the combo box mirrors, the
@@ -1411,7 +1438,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.29.0");
+    session->setAttribute ("version", "2.30.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1634,8 +1661,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.29.0",
-                "saved state carries the current version tag (2.29.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.30.0",
+                "saved state carries the current version tag (2.30.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -1983,7 +2010,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.29.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.30.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

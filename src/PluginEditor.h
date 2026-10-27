@@ -2,6 +2,7 @@
 
 #include <array>
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -236,6 +237,11 @@ public:
 // re-fits, smaller without the strip). Measurements only run while this
 // editor exists.
 // ---------------------------------------------------------------------------
+// v2.30: the interactive help mode's overlay (defined in the .cpp) -
+// full-editor, on top, transparent; it shows the hover bubbles and
+// swallows every click (see enterHelpMode).
+class HelpOverlay;
+
 class TheChannelStripAudioProcessorEditor : public juce::AudioProcessorEditor,
                                              private juce::Timer
 {
@@ -254,9 +260,24 @@ private:
     void layoutHostedHolder();
     void fitWindowToHostedEditor(); // v2.4: frame the hosted editor exactly
     void applyAnalyserVisibility(); // v2.8: show/hide the analyser strip
-    // v2.20 (point 1): one window that gathers every tool tip (opened
-    // by the "?" button next to the studio logo).
-    void showHelpPopup();
+    // v2.30: the interactive help mode (see HelpOverlay in the .cpp).
+    // "?" enters it: from then on hovering ANY control shows a small
+    // contextual bubble (its own words - a few of them), and the
+    // hovered control is outlined. ANY click anywhere, or Esc, leaves
+    // the mode - a click in the mode never triggers the control
+    // underneath. Replaces the v2.20 all-in-one tooltip window: the
+    // help comes to the control instead of a wall of text.
+    void enterHelpMode();
+    void exitHelpMode();
+    // v2.30: the bubble text for a hovered component (the deepest
+    // component, or one of its parents, that carries a help entry).
+    // The help mode's own texts live in helpTexts (NOT setTooltip: a
+    // standing TooltipWindow is active and would show real tooltips
+    // on plain hover - and the analyser's would cover its readout).
+    juce::String helpTextFor (juce::Component* component);
+    // v2.30: the overlay drives the mode end-to-end (Esc/click exits,
+    // hover picks the text) - it touches the private members above.
+    friend class HelpOverlay;
     // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
     // (re)populate the preset combo box from the files on disk
     void refreshPresetList();
@@ -296,17 +317,18 @@ private:
     juce::Label channelLabel;
 
     // ---- v2.26 (roadmap point 4): the presets sidebar section ----
-    // One combo box listing every preset at the ROOT of the preset
-    // folder ("Console - Name" - the root is the general list;
-    // sub-folders are albums and stay out of it), then a single row of
-    // three icon buttons (v2.29: floppy = save the current state to a
-    // file anywhere, bin = delete the selection or browse, tray with
-    // incoming arrow = load a .tcsPreset file - no text, no tooltips;
-    // the "?" panel documents them). The combo selection loads the
-    // preset (switching consoles if needed). v2.27: the combo mirrors
-    // the hosted console's CURRENT preset ("*" when its knobs have
-    // moved); v2.29: the section sits at the TOP of the sidebar, right
-    // under the shell's title.
+    // One combo box listing every preset in the preset folder - the
+    // ROOT and the ALBUM sub-folders alike (v2.30: albums are listed
+    // too, the entry text shows the album), then a row of four
+    // buttons: three icon buttons (v2.29: floppy = save the current
+    // state to a file anywhere, bin = delete the selection or browse,
+    // tray with incoming arrow = load a .tcsPreset file - no text, no
+    // tooltips: the help mode documents the section) and the "?" help
+    // button (v2.30: enters the interactive help mode). The combo
+    // selection loads the preset (switching consoles if needed).
+    // v2.27: the combo mirrors the hosted console's CURRENT preset
+    // ("*" when its knobs have moved); v2.29: the section sits at the
+    // TOP of the sidebar, right under the shell's title.
     // v2.26.1: the icon look-and-feels MUST be declared before the
     // buttons they are attached to, so they are destroyed after them.
     std::array<std::unique_ptr<juce::LookAndFeel>, 3> presetButtonLaFs;
@@ -379,8 +401,18 @@ private:
     // shown between the gain-staging section and the host status area.
     juce::ImageComponent studioLogo;
 
-    // v2.20 (point 1): the "?" button opens the all-in-one help window.
+    // v2.20 -> v2.30: the "?" button now rides the presets button row
+    // (the 4th slot freed by the removed export button) and ENTERS the
+    // interactive help mode instead of opening a text window.
     juce::TextButton helpButton { "?" };
+
+    // v2.30: the help-mode overlay while it is on (see enterHelpMode).
+    std::unique_ptr<HelpOverlay> helpOverlay;
+
+    // v2.30: the help-mode bubble texts for the controls that must
+    // NOT carry a standing tooltip (see helpTextFor). Filled in the
+    // editor's constructor, read only by the help overlay.
+    std::map<juce::Component*, juce::String> helpTexts;
 
     juce::Label statusLabel;
 

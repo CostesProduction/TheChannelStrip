@@ -580,6 +580,7 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
         pendingPresetState.reset();
         pendingPresetIdent = juce::String();
         pendingPresetName = juce::String(); // v2.27
+        pendingPresetFile = juce::String(); // v2.30
     }
 
     hostedStrip.clearPlugin();
@@ -652,22 +653,44 @@ TheChannelStripAudioProcessor::getAvailablePresets()
 
     if (dir.isDirectory())
     {
-        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.tcsPreset"))
+        // v2.30: the listing is RECURSIVE - the root holds the general
+        // presets, the sub-folders are albums, and BOTH show up in the
+        // selector (the album is part of the entry text). The same
+        // name can exist in several places, so each entry carries its
+        // exact file; nothing is copied anywhere.
+        for (const auto& f : dir.findChildFiles (juce::File::findFiles, true, "*.tcsPreset"))
         {
             PresetInfo info;
             juce::MemoryBlock state;
 
-            // a corrupt file is skipped by the list (applyPreset and
-            // friends still report it explicitly when named directly)
+            // a corrupt file is skipped by the list (applyPresetFile
+            // and friends still report it explicitly when picked)
             if (readPresetFile (f, info, state))
+            {
+                info.file = f;
+                info.album = f.getParentDirectory().getRelativePathFrom (dir);
+
+                if (info.album == ".")
+                    info.album = juce::String();
+
                 presets.add (info);
+            }
         }
     }
 
-    // alphabetical by preset name, so the combo box is stable
+    // root presets first, then the albums, alphabetical by preset name
+    // inside each group, so the combo box is stable and reads in bands
     std::sort (presets.begin(), presets.end(),
                [] (const PresetInfo& a, const PresetInfo& b)
-               { return a.name.compareIgnoreCase (b.name) < 0; });
+               {
+                   if (a.album.isEmpty() != b.album.isEmpty())
+                       return a.album.isEmpty();
+
+                   if (a.album.compareIgnoreCase (b.album) != 0)
+                       return a.album.compareIgnoreCase (b.album) < 0;
+
+                   return a.name.compareIgnoreCase (b.name) < 0;
+               });
 
     return presets;
 }
@@ -727,7 +750,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.29.0");
+    xml->setAttribute ("version", "2.30.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -742,11 +765,13 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     // v2.27: the saved preset becomes the console's current one, and
-    // the knobs now match it by definition - no "*".
+    // the knobs now match it by definition - no "*". v2.30: the root
+    // file it was written to is remembered with it.
     {
         const juce::ScopedLock lock (consoleStateLock);
         consolePresetNames[currentPluginIdent] = trimmed;
         consolePresetModified[currentPluginIdent] = false;
+        consolePresetFiles[currentPluginIdent] = file.getFullPathName();
     }
 
     presetDirtyPending.store (false, std::memory_order_relaxed);
@@ -756,16 +781,26 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     return true;
 }
 
+// v2.30: the name-based load kept for the root presets (tests, older
+// flows) - it resolves the sanitised name into the root file and
+// hands over to the file-based load below.
 bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
+{
+    return applyPresetFile (getPresetsDir().getChildFile (presetFileNameFor (presetName)));
+}
+
+// v2.30: load any preset file on disk - the root, an album, or a file
+// from outside the preset folder (Load). The old name-based resolution
+// could not tell two same-named presets apart nor reach into the
+// albums; the selector and Load pass the exact file.
+bool TheChannelStripAudioProcessor::applyPresetFile (const juce::File& file)
 {
     PresetInfo info;
     juce::MemoryBlock state;
 
-    const auto file = getPresetsDir().getChildFile (presetFileNameFor (presetName));
-
     if (! readPresetFile (file, info, state))
     {
-        logHostStatus ("Preset '" + presetName.trim()
+        logHostStatus ("Preset '" + file.getFileNameWithoutExtension().trim()
                        + "' could not be loaded - missing or corrupted file.");
         return false;
     }
@@ -812,9 +847,11 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
                 consoleStates[currentPluginIdent] = state;
 
                 // v2.27: the loaded preset becomes the console's
-                // current one, unmodified by definition.
+                // current one, unmodified by definition. v2.30: the
+                // tracking remembers the exact file it came from.
                 consolePresetNames[currentPluginIdent] = info.name;
                 consolePresetModified[currentPluginIdent] = false;
+                consolePresetFiles[currentPluginIdent] = file.getFullPathName();
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
@@ -831,6 +868,7 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
             pendingPresetState = state;
             pendingPresetIdent = identFor (slot.desc);
             pendingPresetName = info.name; // v2.27
+            pendingPresetFile = file.getFullPathName(); // v2.30
         }
 
         logHostStatus ("Switching to '" + info.consoleName + "' to load preset '"
@@ -869,6 +907,7 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
                 const juce::ScopedLock lock (consoleStateLock);
                 consolePresetNames[currentPluginIdent] = info.name;
                 consolePresetModified[currentPluginIdent] = false;
+                consolePresetFiles[currentPluginIdent] = file.getFullPathName();
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
@@ -931,29 +970,60 @@ bool TheChannelStripAudioProcessor::deletePresetFile (const juce::File& file)
     return true;
 }
 
+// v2.30: the file the given console's current preset lives in. The
+// tracking knows it since v2.30 (every save/load path stores it);
+// an older session restored only the name, so fall back to the root
+// file the name implies. Lock held by the caller.
+juce::File TheChannelStripAudioProcessor::currentPresetFileFor (const juce::String& ident)
+{
+    const auto it = consolePresetNames.find (ident);
+
+    if (it == consolePresetNames.end() || it->second.isEmpty())
+        return juce::File();
+
+    const auto f = consolePresetFiles.find (ident);
+
+    if (f != consolePresetFiles.end() && f->second.isNotEmpty())
+        return juce::File (f->second);
+
+    return getPresetsDir().getChildFile (presetFileNameFor (it->second));
+}
+
+// v2.30: the exact file the hosted console's current preset lives in
+// (empty when no preset is tracked). The editor uses it to pre-fill
+// the Save dialog with the preset's own location.
+juce::File TheChannelStripAudioProcessor::getCurrentPresetFile()
+{
+    const juce::ScopedLock lock (consoleStateLock);
+    return currentPresetFileFor (currentPluginIdent);
+}
+
 void TheChannelStripAudioProcessor::disownPresetIfItsFileIs (const juce::File& file)
 {
     const juce::ScopedLock lock (consoleStateLock);
 
-    const auto it = consolePresetNames.find (currentPluginIdent);
-
-    if (it != consolePresetNames.end() && ! it->second.isEmpty()
-        && getPresetsDir().getChildFile (presetFileNameFor (it->second)) == file)
+    if (currentPresetFileFor (currentPluginIdent) == file)
     {
-        it->second = juce::String();
-        consolePresetModified[currentPluginIdent] = false;
+        const auto it = consolePresetNames.find (currentPluginIdent);
+
+        if (it != consolePresetNames.end())
+        {
+            it->second = juce::String();
+            consolePresetModified[currentPluginIdent] = false;
+            consolePresetFiles[currentPluginIdent] = juce::String();
+        }
     }
 }
 
-// v2.29: Save proper. The hosted console's CURRENT state is written to
-// the exact file the save dialog returned - anywhere on disk. Inside
-// the preset folder's root the preset is "general": it is listed in
-// the selector every time and becomes the console's current preset
-// ("Save As" semantics, confirmed by Clement). In a sub-folder (an
-// album, a project) it is deliberately NOT listed and the
-// current-preset tracking is left untouched. The preset's name is the
-// file's name, so what the selector later shows is exactly what was
-// typed in the dialog.
+// v2.29/v2.30: Save proper. The hosted console's CURRENT state is
+// written to the exact file the save dialog returned - anywhere on
+// disk. Wherever it lands, the saved preset becomes the console's
+// CURRENT preset ("Save As" semantics, confirmed by Clement) and the
+// tracking remembers the exact file: saving into the root or an
+// album sub-folder shows up in the selector (v2.30: albums are
+// listed), saving elsewhere keeps it off the list. The preset's name
+// is the file's name, so what the selector later shows is exactly
+// what was typed in the dialog.
 bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
 {
     auto* active = hostedStrip.getActivePlugin();
@@ -997,7 +1067,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.29.0");
+    xml->setAttribute ("version", "2.30.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1009,34 +1079,48 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         return false;
     }
 
-    // a save into the preset folder's ROOT is a general preset: it
-    // becomes the console's current one, and the knobs now match it by
-    // definition - no "*". Anywhere else, nothing is disturbed.
-    const bool inRoot = destination.getParentDirectory() == getPresetsDir();
+    // v2.30: a Save As, wherever it lands - the saved preset becomes
+    // the console's current one right away (like a DAW's Save As: the
+    // document you just saved is the one you are on) and the tracking
+    // remembers the exact file, root or album or elsewhere. The knobs
+    // now match it by definition - no "*". Inside the preset folder
+    // (root or album) it shows up in the selector; outside it does not.
+    const bool inPresetFolder = destination.getParentDirectory() == getPresetsDir()
+        || destination.isAChildOf (getPresetsDir());
 
-    if (inRoot)
     {
         const juce::ScopedLock lock (consoleStateLock);
         consolePresetNames[currentPluginIdent] = name;
         consolePresetModified[currentPluginIdent] = false;
+        consolePresetFiles[currentPluginIdent] = destination.getFullPathName();
         presetDirtyPending.store (false, std::memory_order_relaxed);
     }
 
-    // the selector resolves a preset by sanitising its name back into
-    // a file name - a root file whose name does not round-trip cannot
-    // be loaded again, so say so explicitly instead of failing silently
-    if (inRoot && presetFileNameFor (name) != destination.getFileName())
+    // the name-based load (tests, older flows) resolves a preset by
+    // sanitising its name back into a ROOT file name - a root file
+    // whose name does not round-trip cannot be loaded again, so say so
+    // explicitly instead of failing silently
+    if (destination.getParentDirectory() == getPresetsDir()
+        && presetFileNameFor (name) != destination.getFileName())
         logHostStatus ("Note: '" + name + "' uses characters the preset list"
                        " cannot reload from (safe: letters, digits, space, - _).");
 
     logHostStatus ("Preset '" + name + "' saved ("
-                   + (inRoot ? juce::String ("listed in the selector")
-                             : destination.getParentDirectory().getFullPathName())
+                   + (inPresetFolder ? juce::String ("listed in the selector")
+                                     : destination.getParentDirectory().getFullPathName())
                    + ").");
 
     return true;
 }
 
+// v2.30: Load - open any .tcsPreset file and load it, full stop. The
+// old flows copied the file into the preset folder's root (v2.28) or
+// just made it available (v2.26); Clément rejected the copy - loading
+// album presets was filling the root with duplicates ("une poubelle").
+// Nothing is copied anywhere: the preset loads into the hosted
+// console (switching consoles first when needed) and becomes its
+// current one, tracked at the file it was loaded from. A file inside
+// the preset folder (root or album) keeps its place in the selector.
 bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
 {
     PresetInfo info;
@@ -1044,58 +1128,14 @@ bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
 
     if (! readPresetFile (source, info, state))
     {
-        logHostStatus ("Import failed: '" + source.getFileName()
+        logHostStatus ("Load failed: '" + source.getFileName()
                        + "' is not a valid preset file.");
         return false;
     }
 
-    auto dir = getPresetsDir();
-
-    if (! dir.isDirectory())
-    {
-        auto appDir = getAppDataDir();
-
-        if (! appDir.isDirectory())
-            appDir.createDirectory();
-
-        dir.createDirectory();
-
-        if (! dir.isDirectory())
-        {
-            logHostStatus ("ERROR: preset folder could not be created: "
-                           + dir.getFullPathName());
-            return false;
-        }
-    }
-
-    const auto dest = dir.getChildFile (presetFileNameFor (info.name));
-
-    // importing a file that already IS in the preset folder (the open
-    // dialog can start there) must not truncate it - detect, then
-    // load it like any other import (v2.28.0: an import applies)
-    if (dest == source)
-    {
-        logHostStatus ("Preset '" + info.name + "' (" + info.consoleName
-                       + ") is already in the preset folder - loading it.");
-        applyPreset (info.name);
-        return true;
-    }
-
-    if (! source.copyFileTo (dest))
-    {
-        logHostStatus ("ERROR: preset '" + info.name + "' could not be imported.");
-        return false;
-    }
-
-    logHostStatus ("Preset '" + info.name + "' (" + info.consoleName + ") imported.");
-
-    // v2.28.0: an imported preset becomes the console's current one and
-    // really loads, exactly as if it had been picked in the selector -
-    // applyPreset resolves the console (direct load, deferred switch if
-    // another console is hosted, explicit refusal if it can't be
-    // loaded; the import itself still succeeded in every case).
-    applyPreset (info.name);
-    return true;
+    // applyPresetFile posts its own success/failure to the status
+    // area and tracks the preset at this exact file
+    return applyPresetFile (source);
 }
 
 // ---------------------------------------------------------------------------
@@ -1692,6 +1732,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
         {
             juce::MemoryBlock presetToApply;
             juce::String presetNameToApply; // v2.27
+            juce::String presetFileToApply; // v2.30
             bool presetMatches = false;
 
             {
@@ -1702,11 +1743,13 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                 {
                     presetToApply = pendingPresetState;
                     presetNameToApply = pendingPresetName; // v2.27
+                    presetFileToApply = pendingPresetFile; // v2.30
                     presetMatches = true;
 
                     pendingPresetState.reset();
                     pendingPresetIdent = juce::String();
                     pendingPresetName = juce::String();
+                    pendingPresetFile = juce::String();
                 }
             }
 
@@ -1723,9 +1766,11 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                 consoleStates[currentPluginIdent] = presetToApply;
 
                 // v2.27: the queued preset is now this console's
-                // current one, unmodified by definition.
+                // current one, unmodified by definition. v2.30: its
+                // exact file is remembered with it.
                 consolePresetNames[currentPluginIdent] = presetNameToApply;
                 consolePresetModified[currentPluginIdent] = false;
+                consolePresetFiles[currentPluginIdent] = presetFileToApply;
             }
             else
             {
@@ -1821,7 +1866,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.29.0");
+    xml->setAttribute ("version", "2.30.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
@@ -1894,6 +1939,31 @@ void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& dest
                 const auto pm = consolePresetModified.find (ident);
                 e->setAttribute ("presetModified",
                                  (pm != consolePresetModified.end() && pm->second) ? 1 : 0);
+
+                // v2.30: when the current preset does not sit at the
+                // root file its name implies (an album, or a file
+                // loaded from outside), remember where it lives so a
+                // reopened project pre-fills Save with the right place
+                // and disowns correctly on delete. Inside the preset
+                // folder the path is stored relative to it, so the
+                // session survives a moved home; elsewhere absolute.
+                const auto pf = consolePresetFiles.find (ident);
+
+                if (pf != consolePresetFiles.end() && pf->second.isNotEmpty())
+                {
+                    const auto dir = getPresetsDir();
+                    const auto tracked = juce::File (pf->second);
+                    const auto implied = dir.getChildFile (presetFileNameFor (pn->second));
+
+                    if (tracked != implied && tracked.existsAsFile())
+                    {
+                        if (tracked.isAChildOf (dir))
+                            e->setAttribute ("presetFile",
+                                             tracked.getRelativePathFrom (dir));
+                        else
+                            e->setAttribute ("presetFile", tracked.getFullPathName());
+                    }
+                }
             }
         }
     }
@@ -2006,9 +2076,11 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
         // reason: the restored session is authoritative.
         consolePresetNames.clear();
         consolePresetModified.clear();
+        consolePresetFiles.clear(); // v2.30
         pendingPresetState.reset();
         pendingPresetIdent = juce::String();
         pendingPresetName = juce::String();
+        pendingPresetFile = juce::String(); // v2.30
 
         for (auto* e : xml->getChildIterator())
         {
@@ -2042,6 +2114,22 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
             {
                 consolePresetNames[ident] = pn;
                 consolePresetModified[ident] = e->getBoolAttribute ("presetModified", false);
+
+                // v2.30: the current preset's own file, when the
+                // session knows it (an album preset, or one loaded
+                // from outside the folder). Absent on older sessions:
+                // the root file the name implies is assumed - exactly
+                // the pre-v2.30 behaviour.
+                const auto pf = e->getStringAttribute ("presetFile");
+
+                if (pf.isNotEmpty())
+                {
+                    const auto f = juce::File::isAbsolutePath (pf)
+                        ? juce::File (pf)
+                        : getPresetsDir().getChildFile (pf);
+
+                    consolePresetFiles[ident] = f.getFullPathName();
+                }
             }
         }
     }

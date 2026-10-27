@@ -132,11 +132,19 @@ namespace
     // v2.27: one combo entry's text ("Console - Name"), with the "* "
     // prefix when the entry is the hosted console's current preset and
     // its knobs have moved since it was loaded or saved.
+    // v2.30: an album preset (a sub-folder) carries its album after
+    // the name, so two same-named presets in different places still
+    // read apart.
     juce::String presetItemText (const TheChannelStripAudioProcessor::PresetInfo& info,
                                  bool starred)
     {
-        return (starred ? "* " : "")
-             + shortConsoleNameFor (info.consoleName) + " - " + info.name;
+        auto text = (starred ? "* " : "")
+                  + shortConsoleNameFor (info.consoleName) + " - " + info.name;
+
+        if (info.album.isNotEmpty())
+            text << "  [" << info.album << "]";
+
+        return text;
     }
 
     // v2.4: sidebar + centre column geometry, shared by paint() and
@@ -1004,6 +1012,186 @@ void HostedEditorHolder::paint (juce::Graphics& g)
 }
 
 // ---------------------------------------------------------------------------
+// v2.30: the interactive help mode (Clement's remark 3, in the spirit of
+// the Tokyo Down Record plugins). The "?" button enters it; from then
+// on a full-editor transparent overlay sits on top of everything:
+// moving the mouse outlines the control under the cursor and shows a
+// small bubble with its help text - a few words, the control's own
+// tooltip or its entry in the editor's helpTexts map. ANY click
+// anywhere, or Esc, leaves the mode; the overlay swallows the click,
+// so a button is never triggered from inside the mode. Nothing else
+// changes: no veil over the UI, no wall of text, and nothing at all
+// while the mode is off. It replaces the v2.20 all-in-one help
+// window (the help comes to the control now).
+// ---------------------------------------------------------------------------
+class HelpOverlay final : public juce::Component
+{
+public:
+    explicit HelpOverlay (TheChannelStripAudioProcessorEditor& ed) : editor (ed)
+    {
+        // Esc must reach us even though buttons normally take focus
+        setWantsKeyboardFocus (true);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey)
+        {
+            editor.exitHelpMode();
+            return true;
+        }
+
+        return false;
+    }
+
+    // any click leaves the mode - and never reaches the control below
+    void mouseDown (const juce::MouseEvent&) override { editor.exitHelpMode(); }
+
+    void mouseMove (const juce::MouseEvent& e) override { updateFor (e.getPosition()); }
+
+    void paint (juce::Graphics& g) override
+    {
+        // the hovered control, outlined - the lightest highlight there is
+        if (text.isNotEmpty())
+        {
+            g.setColour (juce::Colour (0xffdfe6f2).withAlpha (0.9f));
+            g.drawRoundedRectangle (highlight.toFloat().expanded (2.0f), 4.0f, 1.2f);
+
+            // the bubble: a small rounded card with a few words
+            g.setColour (juce::Colour (0xf20e1522));
+            g.fillRoundedRectangle (bubble.toFloat(), 5.0f);
+            g.setColour (juce::Colour (0xff5f6b82));
+            g.drawRoundedRectangle (bubble.toFloat(), 5.0f, 1.0f);
+
+            g.setColour (juce::Colour (0xffdfe6f2));
+            g.setFont (juce::Font (juce::FontOptions (12.0f)));
+
+            for (int i = 0; i < lines.size(); ++i)
+                g.drawText (lines[i], bubble.getX() + 8, bubble.getY() + 5 + i * 16,
+                            bubble.getWidth() - 16, 16, juce::Justification::centredLeft);
+        }
+    }
+
+private:
+    void updateFor (juce::Point<int> pt)
+    {
+        auto* newTarget = targetUnder (&editor, pt, this);
+        const auto newText = editor.helpTextFor (newTarget);
+
+        if (newTarget == target && newText == text)
+            return; // nothing moved, nothing to repaint
+
+        target = newTarget;
+        text = newText;
+
+        if (target == nullptr || text.isEmpty())
+        {
+            text = juce::String();
+            lines.clear();
+            highlight = bubble = juce::Rectangle<int>();
+        }
+        else
+        {
+            const auto font = juce::Font (juce::FontOptions (12.0f));
+
+            highlight = editor.getLocalArea (target, target->getLocalBounds());
+            lines = wrapToWidth (text, font, juce::jmin (340, juce::jmax (60, getWidth() - 16)));
+
+            int textWidth = 0;
+            for (auto& l : lines)
+                textWidth = juce::jmax (textWidth,
+                                         juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, l)));
+
+            const int bubbleW = textWidth + 16;
+            const int bubbleH = lines.size() * 16 + 10;
+
+            int bx = juce::jlimit (6, juce::jmax (6, getWidth() - bubbleW - 6),
+                                   highlight.getCentreX() - bubbleW / 2);
+
+            int by = highlight.getBottom() + 8;
+
+            if (by + bubbleH > getHeight() - 6)
+                by = highlight.getY() - bubbleH - 8;   // no room below: above
+
+            by = juce::jmax (6, by);
+
+            bubble.setBounds (bx, by, bubbleW, bubbleH);
+        }
+
+        repaint();
+    }
+
+    // word-wrap a help text into lines that fit maxWidth
+    static juce::StringArray wrapToWidth (const juce::String& text,
+                                           const juce::Font& font,
+                                           int maxWidth)
+    {
+        juce::StringArray wrapped;
+        juce::String line;
+
+        for (const auto& word : juce::StringArray::fromTokens (text, " ", ""))
+        {
+            const auto candidate = line.isEmpty() ? word : line + " " + word;
+
+            if (line.isEmpty()
+                || juce::GlyphArrangement::getStringWidth (font, candidate) <= maxWidth)
+                line = candidate;
+            else
+            {
+                wrapped.add (line);
+                line = word;
+            }
+        }
+
+        if (line.isNotEmpty())
+            wrapped.add (line);
+
+        return wrapped;
+    }
+
+    // the deepest component at pt, WITHOUT the overlay itself (the
+    // overlay sits on top, so the stock getComponentAt would always
+    // return it). Topmost children first, like JUCE's own hit test.
+    static juce::Component* targetUnder (juce::Component* parent,
+                                         juce::Point<int> pt,
+                                         const juce::Component* skip)
+    {
+        if (parent == skip || ! parent->isVisible())
+            return nullptr;
+
+        for (int i = parent->getNumChildComponents(); --i >= 0;)
+        {
+            auto* c = parent->getChildComponent (i);
+
+            if (c == skip || ! c->isVisible())
+                continue;
+
+            const auto local = c->getLocalPoint (parent, pt);
+
+            if (c->getLocalBounds().contains (local))
+            {
+                if (auto* deeper = targetUnder (c, local, skip))
+                    return deeper;
+
+                return c;
+            }
+        }
+
+        return nullptr;
+    }
+
+    TheChannelStripAudioProcessorEditor& editor;
+
+    juce::Component* target = nullptr;
+    juce::Rectangle<int> highlight;
+    juce::Rectangle<int> bubble;
+    juce::String text;
+    juce::StringArray lines;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpOverlay)
+};
+
+// ---------------------------------------------------------------------------
 // TheChannelStripAudioProcessorEditor
 // ---------------------------------------------------------------------------
 
@@ -1095,14 +1283,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
 
-    // v2.20 (point 1): the "?" help button sits next to the studio logo
-    // and opens every tool tip in one window - the controls themselves
-    // keep their small tooltips, but the analyser no longer shows one
-    // while hovering (it was hiding the readout).
-    styleConsoleButton (helpButton);
-    helpButton.setTooltip ("All the tool tips in one place.");
-    helpButton.onClick = [this] { showHelpPopup(); };
-    addAndMakeVisible (helpButton);
+    // v2.30: the "?" button no longer rides the logo band - it moved
+    // to the presets button row (see the presets section below) and
+    // now enters the interactive help mode instead of opening the
+    // all-in-one tooltip window.
 
     addAndMakeVisible (rescanButton);
     rescanButton.onClick = [this] { proc.requestDefaultScan(); };
@@ -1130,12 +1314,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     }
 
     // ---- v2.26 (roadmap point 4): the presets section ----
-    // One combo box listing every preset at the root of the preset
-    // folder, then a single row of three icon buttons (v2.29): floppy
-    // = save the current state to a file anywhere, bin = delete the
-    // selection (or browse when nothing is selected), tray with the
-    // incoming arrow = load a .tcsPreset file from anywhere. Selecting
-    // an entry loads it (switching consoles when needed); every action
+    // One combo box listing every preset in the preset folder - the
+    // ROOT and the album sub-folders alike (v2.30: albums are listed,
+    // the entry text shows the album) - then a single row of three
+    // icon buttons plus the "?" help button (v2.30). Selecting an
+    // entry loads it (switching consoles when needed); every action
     // reports to the status area.
     presetLabel.setText ("PRESETS", juce::dontSendNotification);
     presetLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
@@ -1177,6 +1360,34 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     savePresetButton.onClick   = [this] { savePresetToFile(); };
     deletePresetButton.onClick = [this] { confirmDeletePreset(); };
     importPresetButton.onClick = [this] { importPresetFile(); };
+
+    // v2.30: the "?" help button takes the 4th slot of the presets
+    // row (freed by the removed export button) and enters the
+    // interactive help mode: hovering any control then shows a small
+    // contextual bubble; any click, or Esc, leaves the mode. Its own
+    // standing tooltip says so (it is the only new one - see below).
+    styleConsoleButton (helpButton);
+    helpButton.setTooltip ("Interactive help: hover anything for a short"
+                           " explanation. A click or Esc leaves it.");
+    helpButton.onClick = [this] { enterHelpMode(); };
+    addAndMakeVisible (helpButton);
+
+    // v2.30: short help texts for the help-mode bubbles. They live in
+    // the editor's helpTexts map, NOT in setTooltip(): a standing
+    // juce::TooltipWindow is active (v2.12) and would show any real
+    // tooltip on plain hover - these texts belong to the help mode
+    // alone (and the analyser's would cover its hover readout again).
+    helpTexts[&presetCombo] =
+        "Pick a preset to load it on its console (switching consoles when"
+        " needed). A \"*\" means its knobs have moved.";
+    helpTexts[&savePresetButton] =
+        "Save As: the console's current state to a preset file, anywhere."
+        " It becomes the current preset.";
+    helpTexts[&deletePresetButton] =
+        "Delete the selected preset - or browse for any preset file when"
+        " nothing is selected.";
+    helpTexts[&importPresetButton] =
+        "Load a .tcsPreset from anywhere. Nothing is copied.";
 
     refreshPresetList();
 
@@ -1324,10 +1535,14 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // restore the saved loudness reference (default Mix -23 LUFS)
     spectrumPanel.setLufsTarget (proc.getLufsTarget());
 
-    // v2.20 (point 1): the analyser no longer carries a tooltip - it
-    // was in the way of the hover readout. Its help text (and every
-    // other tooltip) now lives in the "?" button next to the studio
-    // logo (see showHelpPopup).
+    // v2.20 -> v2.30: the analyser still has no STANDING tooltip - the
+    // JUCE-level one was in the way of the hover readout (v2.20). Its
+    // help text lives in the editor's helpTexts map instead: it shows
+    // as a bubble inside the interactive help mode only, so the
+    // readout is untouched outside it.
+    helpTexts[&spectrumPanel] =
+        "IN and OUT spectra overlaid. The dB scales and the LUFS reference"
+        " at 0 dB are clickable; hovering reads the exact level.";
 
     // restore the saved scales (defaults: 10 dB and 4 dB per division;
     // legacy values are snapped to the two current scales, like the
@@ -1375,16 +1590,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     proc.setEditorOpen (true);
 
     startTimerHz (30);
-}
-
-TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
-{
-    stopTimer();
-    // v2.8: closing the editor stops all measurements (LUFS meters and
-    // spectrum analysers) until it is opened again.
-    proc.setEditorOpen (false);
-    embeddedHostedEditor.reset(); // detach the hosted editor before anything else
-    hostedViewport.setViewedComponent (nullptr, false);
 }
 
 void TheChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
@@ -1444,9 +1649,12 @@ void TheChannelStripAudioProcessorEditor::resized()
 
     // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
     // save, bin = delete, tray with the incoming arrow = load).
-    savePresetButton.setBounds   (sideX,      y, 30, 22);
-    deletePresetButton.setBounds (sideX + 33, y, 30, 22);
-    importPresetButton.setBounds (sideX + 66, y, 30, 22);
+    // v2.30: the "?" help button takes the 4th slot and enters the
+    // interactive help mode.
+    savePresetButton.setBounds   (sideX,       y, 30, 22);
+    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
+    importPresetButton.setBounds (sideX + 66,  y, 30, 22);
+    helpButton.setBounds         (sideX + 99,  y, 30, 22);
     y += 22 + 8;
 
     for (size_t i = 0; i < consoleButtons.size(); ++i)
@@ -1507,12 +1715,8 @@ void TheChannelStripAudioProcessorEditor::resized()
             : 20;
         studioLogo.setBounds (sideX, y + 4, sw, logoH);
 
-        // v2.20 (point 1): the help button rides the logo band, at its
-        // right edge - vertically centred on the band, clear of the
-        // centred logo image itself.
-        helpButton.setBounds (sideX + sw - 24,
-                              y + 4 + juce::jmax (0, (logoH - 22) / 2),
-                              22, 22);
+        // v2.30: the "?" button moved to the presets row (top of the
+        // sidebar) - no more help button on the logo band.
 
         y += logoH + 10;
     }
@@ -1529,6 +1733,11 @@ void TheChannelStripAudioProcessorEditor::resized()
                               juce::jmax (60, h - m - zoneY));
 
     layoutHostedHolder();
+
+    // v2.30: the help overlay covers the whole editor whatever the
+    // window does while the mode is on
+    if (helpOverlay != nullptr)
+        helpOverlay->setBounds (getLocalBounds());
 }
 
 void TheChannelStripAudioProcessorEditor::layoutHostedHolder()
@@ -1799,70 +2008,87 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
     fitWindowToHostedEditor();
 }
 
-// v2.20 (point 1): the "?" button opens every tool tip in one window.
-// The analyser deliberately carries NO tooltip any more (it was hiding
-// the hover readout), so its help text is written out here; every other
-// section is pulled live from the control it describes, so the window
-// always shows exactly what the small tooltips show.
-void TheChannelStripAudioProcessorEditor::showHelpPopup()
+// the editor's destructor is defined HERE, after the HelpOverlay class:
+// it destroys the helpOverlay unique_ptr, whose pointee type must be
+// complete at that point (the header only forward-declares it).
+TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
 {
-    juce::String info;
+    stopTimer();
+    // v2.8: closing the editor stops all measurements (LUFS meters and
+    // spectrum analysers) until it is opened again.
+    proc.setEditorOpen (false);
+    embeddedHostedEditor.reset(); // detach the hosted editor before anything else
+    hostedViewport.setViewedComponent (nullptr, false);
+}
 
-    auto addSection = [&info] (const juce::String& title, const juce::String& text)
+// v2.30: "?" -> the help mode. The overlay fills the editor and rides
+// on top of everything, including the hosted plugin; it follows the
+// window when resized() moves it.
+void TheChannelStripAudioProcessorEditor::enterHelpMode()
+{
+    if (helpOverlay != nullptr)
+        return; // already on
+
+    helpOverlay = std::make_unique<HelpOverlay> (*this);
+    addAndMakeVisible (helpOverlay.get());
+    helpOverlay->setBounds (getLocalBounds());
+    helpOverlay->toFront (false);
+    helpOverlay->grabKeyboardFocus();
+}
+
+// v2.30: any click anywhere, or Esc. The overlay is deleted OUTSIDE
+// its own mouse/key callback (handed to the message queue), and if the
+// editor goes first its child-component cleanup makes the pending
+// deletion a no-op - no double delete either way.
+void TheChannelStripAudioProcessorEditor::exitHelpMode()
+{
+    if (helpOverlay == nullptr)
+        return;
+
+    juce::Component::SafePointer<HelpOverlay> safe (helpOverlay.release());
+
+    juce::MessageManager::callAsync ([safe]
     {
-        if (text.trim().isNotEmpty())
-            info << title << "\n" << text << "\n\n";
-    };
+        if (auto* overlay = safe.getComponent())
+            delete overlay;
+    });
+}
 
-    addSection ("ANALYSER",
-                "Hover anywhere to read the frequency under the cursor and the "
-                "IN/OUT/EQ levels there. Click the LEFT dB scale to toggle 10/6 dB "
-                "per division; click the RIGHT green EQ scale to toggle 4/2 dB per "
-                "division; click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
-                "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
-    addSection ("TILT",               tiltButtons[0].getTooltip());
-    addSection ("RESPONSE SPEED",      speedButtons[0].getTooltip());
-    addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
-    addSection ("GAIN STAGING",       correctionLabel.getTooltip());
-    addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
-    addSection ("PRESETS",
-                "The list shows every .tcsPreset file at the ROOT of the preset folder "
-                "as \"Console - Name\" - the root is the general list, always loaded. "
-                "Sub-folders are NOT listed: they are your albums, and presets saved "
-                "there stay out of the list. Select an entry to load it: if its "
-                "console is not the one hosted, the shell switches to that console "
-                "first. The combo always mirrors the hosted console's current preset "
-                "- switching consoles updates the name, and shows none when the "
-                "console was not loaded from a preset. The name comes back with the "
-                "session too, along with the \"*\" that marks a preset whose console "
-                "knobs have moved since it was loaded or saved - reloading the preset "
-                "or saving over it clears the \"*\". The preset holds the console's "
-                "knobs only - display settings (tilt, scales, LUFS) travel with the "
-                "session. The three buttons beside the list are icons: the floppy "
-                "SAVES the hosted console's current state to a .tcsPreset file "
-                "wherever you choose (like a Save As - the dialog opens on the preset "
-                "folder with the current preset's name pre-filled); saving into the "
-                "root makes it the console's current preset right away, saving into "
-                "a sub-folder keeps it out of the list; the bin DELETES the preset "
-                "selected in the list (it asks first), or with nothing selected it "
-                "opens a file browser so any .tcsPreset can be deleted, including "
-                "inside sub-folders (it asks first too); the tray with the incoming "
-                "arrow LOADS a .tcsPreset file from anywhere: it loads straight away "
-                "and is copied into the root of the preset folder so it joins the "
-                "list (switching consoles first if it was made for another one).");
-    addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
-    addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
+// v2.30: the bubble text for whatever sits under the cursor: the
+// deepest component that carries one, walking up to the editor. The
+// help mode's own texts live in helpTexts (never in setTooltip - the
+// standing TooltipWindow would show those on plain hover); the
+// controls that already have a small tooltip (the consoles, tilt,
+// speed, Rescan...) reuse it, so every explanation stays in one
+// place per control.
+juce::String TheChannelStripAudioProcessorEditor::helpTextFor (juce::Component* component)
+{
+    for (auto* c = component; c != nullptr; c = c->getParentComponent())
+    {
+        const auto entry = helpTexts.find (c);
 
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-                                            "TheChannelStrip - help",
-                                            info);
+        if (entry != helpTexts.end() && entry->second.isNotEmpty())
+            return entry->second;
+
+        if (auto* tc = dynamic_cast<juce::TooltipClient*> (c))
+        {
+            const auto tip = tc->getTooltip();
+
+            if (tip.isNotEmpty())
+                return tip;
+        }
+    }
+
+    return juce::String();
 }
 
 // ---------------------------------------------------------------------------
 // v2.26 (roadmap point 4): named presets - the sidebar section.
 // v2.29: three actions around the list (save-to-file, delete with a
-// browse fallback, load-from-file); the root of the preset folder is
-// the general list, sub-folders are albums and stay out of it.
+// browse fallback, load-from-file). v2.30: the selector lists the
+// preset folder's ROOT and the album sub-folders alike (each album
+// entry carries its folder in its text), the entries load by their
+// own file, and Load never copies anything anywhere.
 // ---------------------------------------------------------------------------
 void TheChannelStripAudioProcessorEditor::refreshPresetList()
 {
@@ -1886,16 +2112,28 @@ void TheChannelStripAudioProcessorEditor::syncPresetComboSelection()
     // preset's entry grows a "* " prefix as soon as its knobs have
     // moved since it was loaded or saved.
     const auto name = proc.getCurrentPresetName();
+    const auto file = proc.getCurrentPresetFile(); // v2.30
     const bool modified = proc.isCurrentPresetModified();
 
+    // v2.30: match the entry by FILE first - the same name can exist
+    // at the root and in an album - and fall back to the first name
+    // match (an older session tracks only the name).
     int match = -1;
 
     for (int i = 0; i < presetList.size(); ++i)
-        if (presetList[i].name == name)
+        if (presetList[i].file == file)
         {
             match = i;
             break;
         }
+
+    if (match < 0 && name.isNotEmpty())
+        for (int i = 0; i < presetList.size(); ++i)
+            if (presetList[i].name == name)
+            {
+                match = i;
+                break;
+            }
 
     // refresh every item's text (the "*" comes and goes)
     for (int i = 0; i < presetList.size(); ++i)
@@ -1920,8 +2158,11 @@ void TheChannelStripAudioProcessorEditor::onPresetSelected()
     if (id < 1 || id - 1 >= presetList.size())
         return;
 
-    // applyPreset posts its own success/failure to the status area
-    if (! proc.applyPreset (presetList[id - 1].name))
+    // v2.30: the entry's own FILE is loaded - the same name can exist
+    // at the root and in an album, and the name-based load only ever
+    // reached the root. applyPresetFile posts its own success/failure
+    // to the status area.
+    if (! proc.applyPresetFile (presetList[id - 1].file))
     {
         // v2.27: a failed load (missing console, corrupt file) must
         // not leave the failed entry selected - snap back to whatever
@@ -1930,19 +2171,20 @@ void TheChannelStripAudioProcessorEditor::onPresetSelected()
     }
 }
 
-// v2.29: Save = where. A native save dialog opens in the preset folder
-// with the current preset's name pre-filled (or empty when the console
-// never came from a preset): save into the folder's ROOT and the preset
-// is general - listed in the selector and it becomes the console's
-// current one; save into a sub-folder (an album) or anywhere else and
-// it stays off the list. The old name-dialog and the old export merged
-// into this one action.
+// v2.29/v2.30: Save = where. A native save dialog opens on the current
+// preset's own file (v2.30 - an album preset re-saves in its album),
+// or on the preset folder when the console never came from a preset:
+// wherever it lands, the saved preset becomes the console's CURRENT
+// one; inside the preset folder (root or album) it shows up in the
+// selector, elsewhere it stays off the list. The old name-dialog and
+// the old export merged into this one action.
 void TheChannelStripAudioProcessorEditor::savePresetToFile()
 {
-    const auto current = proc.getCurrentPresetName();
-
-    const auto start = current.isNotEmpty()
-        ? proc.getPresetsDir().getChildFile (current + ".tcsPreset")
+    // v2.30: the dialog opens on the current preset's own FILE - a
+    // preset saved in an album re-saves there, one at the root
+    // re-saves at the root (the name pre-filled as before).
+    const auto start = proc.getCurrentPresetName().isNotEmpty()
+        ? proc.getCurrentPresetFile()
         : proc.getPresetsDir();
 
     // the FileChooser must outlive launchAsync, hence the member
@@ -1966,10 +2208,10 @@ void TheChannelStripAudioProcessorEditor::savePresetToFile()
 
 // v2.29: Delete acts on the selector's selection; with nothing selected
 // it becomes the browse-to-delete fallback: any .tcsPreset file
-// anywhere (sub-folder included - the selector never lists those) can
-// be picked and deleted, after a confirmation. The path covers album
-// presets the list cannot reach; a root preset deleted this way
-// disowns the console's current preset name exactly like a list delete.
+// anywhere can be picked and deleted, after a confirmation. v2.30:
+// the selection deletes the ENTRY's own file (a name can exist at the
+// root and in an album); whichever path deletes the hosted console's
+// current preset's own file, the name is disowned.
 void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
 {
     const int id = presetCombo.getSelectedId();
@@ -1980,21 +2222,32 @@ void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
         return;
     }
 
-    const auto name = presetList[id - 1].name;
+    // v2.30: the selected ENTRY's own file goes - the same name can
+    // exist at the root and in an album, so the name alone no longer
+    // identifies it.
+    const auto& entry = presetList[id - 1];
+    const auto file = entry.file;
+
+    juce::String message = "Delete the preset '" + entry.name + "'";
+
+    if (entry.album.isNotEmpty())
+        message << " (album: " << entry.album << ")";
+
+    message << "?";
 
     // async OK/Cancel (JUCE_MODAL_LOOPS_PERMITTED is 0 in a plugin, so
     // the callback overload is the right one); the callback receives 1
     // for OK, 0 for Cancel
     juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
                                         "Delete preset",
-                                        "Delete the preset '" + name + "'?",
+                                        message,
                                         "Delete",
                                         "Cancel",
                                         this,
                                         juce::ModalCallbackFunction::create (
-                                            [this, name] (int result)
+                                            [this, file] (int result)
                                             {
-                                                if (result == 1 && proc.deletePreset (name))
+                                                if (result == 1 && proc.deletePresetFile (file))
                                                     refreshPresetList();
                                             }));
 }
