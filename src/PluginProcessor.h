@@ -103,6 +103,39 @@ public:
     void selectConsole (int consoleIndex);
     void clearHostedPlugin();
 
+    // ---- v2.26 (roadmap point 4): named presets ----
+    // A preset is the HOSTED CONSOLE'S OWN STATE (its knobs), saved on
+    // disk as one file per preset in the Presets folder next to the
+    // plugin database. Display settings (tilt, scales, LUFS reference)
+    // are deliberately NOT part of a preset: they travel with the
+    // session, a preset is a sound. The list shown in the editor is
+    // GLOBAL (every preset of every console); loading a preset whose
+    // console is not currently hosted switches to that console first,
+    // then applies the state. All failures post an explicit message to
+    // the status area and return false (never a silent no-op).
+    struct PresetInfo
+    {
+        juce::String name;         // the user-given preset name
+        juce::String consoleName;  // the console the preset belongs to
+    };
+
+    // The folder holding the .tcsPreset files (created on demand).
+    juce::File getPresetsDir() const;
+    // Every preset file currently on disk, sorted by name.
+    juce::Array<PresetInfo> getAvailablePresets();
+    // Save the currently hosted console's state under the given name
+    // (an existing preset of the same name is overwritten).
+    bool savePreset (const juce::String& presetName);
+    // Load a preset: if its console is hosted, apply directly; if not,
+    // switch to that console and apply it once the instance is ready.
+    bool applyPreset (const juce::String& presetName);
+    // Delete a preset file.
+    bool deletePreset (const juce::String& presetName);
+    // Copy a preset file to an arbitrary location (sharing/backup).
+    bool exportPreset (const juce::String& presetName, const juce::File& destination);
+    // Copy an external .tcsPreset file into the Presets folder.
+    bool importPreset (const juce::File& source);
+
     // ---- v2.11: per-console settings memory ----
     // Switching consoles destroys and re-creates the hosted plugin,
     // which used to reset every knob to factory defaults. Each
@@ -197,6 +230,13 @@ private:
     void logHostStatus (const juce::String& message);
     void scanDirectoryForFormat (const juce::File& directory);
 
+    // ---- v2.26: preset file helpers ----
+    // deterministic name -> filename mapping (the user-given name is
+    // stored verbatim inside the file; the filename is sanitised)
+    static juce::String presetFileNameFor (const juce::String& presetName);
+    // parse one .tcsPreset file; false when missing/corrupt/empty state
+    bool readPresetFile (const juce::File& file, PresetInfo& info, juce::MemoryBlock& state);
+
     // ---- v2.24 (roadmap point 7): silent-console watch ----
     // Detects the classic "licence expired" failure mode: a third-party
     // console loads fine but produces digital silence (Plugin Alliance
@@ -257,6 +297,13 @@ private:
     // ---- v2.11: per-console settings memory (see the editor API above) ----
     juce::CriticalSection consoleStateLock;
     std::map<juce::String, juce::MemoryBlock> consoleStates; // keyed by plugin ident
+    // v2.26: a preset whose console is NOT the currently hosted one is
+    // applied right after that console is instantiated (see applyPreset
+    // and instantiateHosted). Guarded by consoleStateLock. Cleared in
+    // clearHostedPlugin so a stale request can never surprise a later
+    // manual selection (the hosting itself checks the ident anyway).
+    juce::MemoryBlock pendingPresetState;
+    juce::String pendingPresetIdent;
     // v2.8: display options + editor-open gate (see the editor API above).
     std::atomic<float> anaDbDiv { 10.0f };
     std::atomic<float> eqDbDiv { 4.0f };

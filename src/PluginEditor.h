@@ -257,6 +257,20 @@ private:
     // v2.20 (point 1): one window that gathers every tool tip (opened
     // by the "?" button next to the studio logo).
     void showHelpPopup();
+    // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
+    // (re)populate the preset combo box from the files on disk; keeps
+    // the current selection when the preset still exists
+    void refreshPresetList();
+    // the combo selection changed -> load that preset
+    void onPresetSelected();
+    // "Save" -> small modal asking for a name, then proc.savePreset
+    void showSavePresetDialog();
+    // "Delete" -> confirmation, then proc.deletePreset
+    void confirmDeletePreset();
+    // "Export" -> native save dialog, then proc.exportPreset
+    void exportSelectedPreset();
+    // "Import" -> native open dialog, then proc.importPreset
+    void importPresetFile();
 
     // v1.0.4: renamed from "processor" to avoid shadowing the inherited
     // AudioProcessorEditor::processor member (-Wshadow-field).
@@ -272,6 +286,24 @@ private:
     // v2.14.1: channel-format diagnostic under the hosted console's name
     // ("track: stereo" / "track: mono (native)" / "track: mono (bridge)").
     juce::Label channelLabel;
+
+    // ---- v2.26 (roadmap point 4): the presets sidebar section ----
+    // One combo box listing every preset on disk ("Console - Name"),
+    // then two rows of two buttons: Save/Delete, Export/Import. The
+    // combo selection loads the preset (switching consoles if needed);
+    // the buttons act on the selected entry, except Save (acts on the
+    // hosted console's current state).
+    juce::Label presetLabel;
+    juce::ComboBox presetCombo;
+    juce::TextButton savePresetButton    { "Save" };
+    juce::TextButton deletePresetButton  { "Delete" };
+    juce::TextButton exportPresetButton  { "Export" };
+    juce::TextButton importPresetButton  { "Import" };
+    // the combo entries, refreshed by refreshPresetList (itemId is
+    // index+1 into this array)
+    juce::Array<TheChannelStripAudioProcessor::PresetInfo> presetList;
+    // v2.26: the FileChoosers must outlive their async callbacks.
+    std::unique_ptr<juce::FileChooser> presetFileChooser;
 
     // v2.1: the correction readout is display-only and smoothed (tau ~1.5 s)
     // so it stays readable; it holds the last valid value while silent.

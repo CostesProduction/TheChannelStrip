@@ -20,6 +20,19 @@ namespace
         b.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xffffffff));
     }
 
+    // v2.26: the short console label for a preset entry ("SSL E - My
+    // preset"). A consoleName that is not one of the nine (an exotic
+    // plugin the preset was made for) is truncated instead of resolved.
+    juce::String shortConsoleNameFor (const juce::String& consoleName)
+    {
+        for (int i = 0; i < TheChannelStripAudioProcessor::numConsoles; ++i)
+            if (consoleName.containsIgnoreCase (
+                    juce::String (TheChannelStripAudioProcessor::consoleNames[i])))
+                return TheChannelStripAudioProcessor::consoleLabel (i);
+
+        return consoleName.substring (0, juce::jmin (consoleName.length(), 14));
+    }
+
     // v2.4: sidebar + centre column geometry, shared by paint() and
     // resized(). Everything lives in the condensed left sidebar.
     constexpr int sidebarWidth        = 132; // left: all wrapper controls
@@ -906,9 +919,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.16: two more console buttons (Lindell 80/50 Channel) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
-    setSize (1180, 900);
+    // v2.26: the presets section (combo + two button rows) -> 1000 / 820.
+    setSize (1180, 1000);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 900 : 720, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 1000 : 820, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1008,6 +1022,52 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
         b.onClick = [this, i] { proc.selectConsole ((int) i); };
     }
+
+    // ---- v2.26 (roadmap point 4): the presets section ----
+    // One combo box listing every preset on disk, then Save/Delete and
+    // Export/Import. Selecting an entry loads it (switching consoles
+    // when needed); every action reports to the status area.
+    presetLabel.setText ("PRESETS", juce::dontSendNotification);
+    presetLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    presetLabel.setJustificationType (juce::Justification::centred);
+    presetLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+    addAndMakeVisible (presetLabel);
+
+    presetCombo.setJustificationType (juce::Justification::centred);
+    presetCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff1a2130));
+    presetCombo.setColour (juce::ComboBox::textColourId,       juce::Colour (0xffdfe6f2));
+    presetCombo.setColour (juce::ComboBox::outlineColourId,   juce::Colour (0xff5f6b82));
+    presetCombo.setColour (juce::ComboBox::arrowColourId,     juce::Colour (0xff8f9bb0));
+    presetCombo.setTextWhenNothingSelected ("(no presets)");
+    presetCombo.setTooltip ("Every preset on disk, as \"Console - Name\". Select one to load it:"
+                            " if its console is not the one hosted, the shell switches to that"
+                            " console first. The preset holds the console's knobs only - display"
+                            " settings (tilt, scales, LUFS) travel with the session.");
+    presetCombo.onChange = [this] { onPresetSelected(); };
+    addAndMakeVisible (presetCombo);
+
+    for (auto* b : { &savePresetButton, &deletePresetButton,
+                    &exportPresetButton, &importPresetButton })
+    {
+        styleConsoleButton (*b);
+        addAndMakeVisible (*b);
+    }
+
+    savePresetButton.onClick   = [this] { showSavePresetDialog(); };
+    deletePresetButton.onClick = [this] { confirmDeletePreset(); };
+    exportPresetButton.onClick = [this] { exportSelectedPreset(); };
+    importPresetButton.onClick = [this] { importPresetFile(); };
+
+    savePresetButton.setTooltip ("Save the hosted console's current settings as a named"
+                                 " preset file (.tcsPreset). An existing preset of the same"
+                                 " name is overwritten.");
+    deletePresetButton.setTooltip ("Delete the preset selected in the list above (asks first).");
+    exportPresetButton.setTooltip ("Copy the preset selected in the list to a file anywhere"
+                                   " on disk - for sharing between machines or projects.");
+    importPresetButton.setTooltip ("Import a .tcsPreset file from anywhere into the preset"
+                                   " folder, so it appears in the list.");
+
+    refreshPresetList();
 
     // ---- v2.12: analyser response speed (IN/OUT smoothing) ----
     // Back to two speeds: Fast ~0.15 s (close to the pre-v2.10 snappy
@@ -1273,6 +1333,22 @@ void TheChannelStripAudioProcessorEditor::resized()
     channelLabel.setBounds (sideX, y, sw, 14);
     y += 18;
 
+    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
+    //      global preset list, then Save/Delete and Export/Import) ----
+    presetLabel.setBounds (sideX, y, sw, 15);
+    y += 17;
+
+    presetCombo.setBounds (sideX, y, sw, 22);
+    y += 26;
+
+    savePresetButton.setBounds   (sideX,      y, 64, 22);
+    deletePresetButton.setBounds (sideX + 68, y, 64, 22);
+    y += 27;
+
+    exportPresetButton.setBounds (sideX,      y, 64, 22);
+    importPresetButton.setBounds (sideX + 68, y, 64, 22);
+    y += 22 + 8;
+
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
     for (size_t j = 0; j < speedButtons.size(); ++j)
         speedButtons[j].setBounds (sideX + (int) j * 68, y, 64, 22);
@@ -1387,7 +1463,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.16: two more console buttons (Lindell) -> 840 / 660.
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
-    const int newH = juce::jlimit (showStrip ? 900 : 720, 1600, targetH);
+    // v2.26: the presets section (combo + two button rows) -> 1000 / 820.
+    const int newH = juce::jlimit (showStrip ? 1000 : 820, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1402,7 +1479,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 900 : 720, 2560, 1600); // v2.17.1: logo block halved
+    setResizeLimits (1024, show ? 1000 : 820, 2560, 1600); // v2.26: presets section
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -1621,10 +1698,156 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
     addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
     addSection ("GAIN STAGING",       correctionLabel.getTooltip());
     addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
+    addSection ("PRESETS",            presetCombo.getTooltip());
     addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
     addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
 
     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
                                             "TheChannelStrip - help",
                                             info);
+}
+
+// ---------------------------------------------------------------------------
+// v2.26 (roadmap point 4): named presets - the sidebar section
+// ---------------------------------------------------------------------------
+void TheChannelStripAudioProcessorEditor::refreshPresetList()
+{
+    // keep the current selection across the rebuild when possible
+    juce::String selectedName;
+
+    {
+        const int id = presetCombo.getSelectedId();
+
+        if (id > 0 && id - 1 < presetList.size())
+            selectedName = presetList[id - 1].name;
+    }
+
+    presetList = proc.getAvailablePresets();
+    presetCombo.clear (juce::dontSendNotification);
+
+    for (int i = 0; i < presetList.size(); ++i)
+        presetCombo.addItem (shortConsoleNameFor (presetList[i].consoleName)
+                             + " - " + presetList[i].name,
+                             i + 1);
+
+    if (selectedName.isNotEmpty())
+        for (int i = 0; i < presetList.size(); ++i)
+            if (presetList[i].name == selectedName)
+            {
+                presetCombo.setSelectedId (i + 1, juce::dontSendNotification);
+                break;
+            }
+}
+
+void TheChannelStripAudioProcessorEditor::onPresetSelected()
+{
+    const int id = presetCombo.getSelectedId();
+
+    if (id < 1 || id - 1 >= presetList.size())
+        return;
+
+    // applyPreset posts its own success/failure to the status area
+    proc.applyPreset (presetList[id - 1].name);
+}
+
+void TheChannelStripAudioProcessorEditor::showSavePresetDialog()
+{
+    // a small modal asking for the preset name. Async (a plugin must
+    // never block the message thread); the window deletes itself after
+    // the callback has run.
+    auto* aw = new juce::AlertWindow ("Save preset",
+                                      "Name for the hosted console's current settings:",
+                                      juce::MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("name", {}, {});
+    aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true,
+                         juce::ModalCallbackFunction::create ([this, aw] (int result)
+                         {
+                             if (result == 1)
+                             {
+                                 const auto name = aw->getTextEditorContents ("name").trim();
+
+                                 if (name.isNotEmpty() && proc.savePreset (name))
+                                     refreshPresetList();
+                             }
+                         }),
+                         true);
+}
+
+void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
+{
+    const int id = presetCombo.getSelectedId();
+
+    if (id < 1 || id - 1 >= presetList.size())
+        return; // nothing selected: harmless no-op
+
+    const auto name = presetList[id - 1].name;
+
+    // async OK/Cancel (JUCE_MODAL_LOOPS_PERMITTED is 0 in a plugin, so
+    // the callback overload is the right one); the callback receives 1
+    // for OK, 0 for Cancel
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
+                                        "Delete preset",
+                                        "Delete the preset '" + name + "'?",
+                                        "Delete",
+                                        "Cancel",
+                                        this,
+                                        juce::ModalCallbackFunction::create (
+                                            [this, name] (int result)
+                                            {
+                                                if (result == 1 && proc.deletePreset (name))
+                                                    refreshPresetList();
+                                            }));
+}
+
+void TheChannelStripAudioProcessorEditor::exportSelectedPreset()
+{
+    const int id = presetCombo.getSelectedId();
+
+    if (id < 1 || id - 1 >= presetList.size())
+        return;
+
+    const auto name = presetList[id - 1].name;
+
+    // the FileChooser must outlive launchAsync, hence the member
+    presetFileChooser = std::make_unique<juce::FileChooser> (
+        "Export preset '" + name + "'",
+        proc.getPresetsDir(),
+        "*.tcsPreset");
+
+    presetFileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                        | juce::FileBrowserComponent::canSelectFiles,
+                                    [this, name] (const juce::FileChooser& fc)
+                                    {
+                                        const auto dest = fc.getResult();
+
+                                        if (dest == juce::File())
+                                            return; // cancelled
+
+                                        proc.exportPreset (name,
+                                                           dest.withFileExtension ("tcsPreset"));
+                                    });
+}
+
+void TheChannelStripAudioProcessorEditor::importPresetFile()
+{
+    presetFileChooser = std::make_unique<juce::FileChooser> (
+        "Import a preset",
+        juce::File(),
+        "*.tcsPreset");
+
+    presetFileChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                        | juce::FileBrowserComponent::canSelectFiles,
+                                    [this] (const juce::FileChooser& fc)
+                                    {
+                                        const auto source = fc.getResult();
+
+                                        if (source == juce::File())
+                                            return; // cancelled
+
+                                        if (proc.importPreset (source))
+                                            refreshPresetList();
+                                    });
 }

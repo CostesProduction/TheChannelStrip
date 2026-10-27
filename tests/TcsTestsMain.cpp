@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.24.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.26.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -25,6 +25,10 @@
 //     stand-in console emits digital silence while the input is loud -
 //     exactly ONE explicit warning per hosted instance, none for a
 //     healthy console, none for a silent input, re-armed on swap)
+//   - named presets (v2.26, roadmap point 4: save / list / load /
+//     export / import / delete against the real preset folder, plus
+//     the explicit refusals - nothing hosted, missing file, corrupt
+//     file)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -64,6 +68,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -273,6 +278,75 @@ private:
     const bool acceptsMono;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockConsole)
+};
+
+// ---------------------------------------------------------------------------
+// MockPresetConsole (v2.26): a hosted console whose state is a single
+// int, so the preset save/list/apply paths can assert byte-exactly
+// what was saved and re-applied. It records the last state it was
+// GIVEN, so a test can tell "the preset was applied" from "nothing
+// happened". The pure-virtual boilerplate matches MockConsole above
+// exactly (getProgramName (int) - see the v2.24.1 lesson).
+// ---------------------------------------------------------------------------
+class MockPresetConsole : public juce::AudioProcessor
+{
+public:
+    MockPresetConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {}
+
+    std::atomic<int> value { 0 };            // the "console state"
+    std::atomic<int> applyCallCount { 0 };
+
+    const juce::String getName() const override { return "MockPresetConsole"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        const auto in  = layouts.getMainInputChannelSet();
+        const auto out = layouts.getMainOutputChannelSet();
+
+        return in == out && in == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+
+    double getTailLengthSeconds() const override { return 2.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock& mb) override
+    {
+        const int v = value.load();
+
+        mb.setSize (sizeof (v));
+        mb.copyFrom (&v, 0, sizeof (v));
+    }
+
+    void setStateInformation (const void* data, int sizeInBytes) override
+    {
+        if (sizeInBytes < (int) sizeof (int))
+            return;
+
+        int v = 0;
+        std::memcpy (&v, data, sizeof (v));
+
+        value.store (v);
+        ++applyCallCount;
+    }
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockPresetConsole)
 };
 
 // ---------------------------------------------------------------------------
@@ -997,6 +1071,123 @@ void testConsoleSlotStatus()
     }
 }
 
+// v2.26 (roadmap point 4): named presets. The whole file-level
+// lifecycle runs against the REAL Presets folder (next to the plugin
+// database): save without a hosted console (refused, explicit), save
+// with a hosted mock, list, apply on the hosted mock, a missing
+// preset, export / import roundtrip, delete, and a corrupt file.
+// Only the test's own preset files are touched, under a distinctive
+// name, and everything is cleaned up again at the end.
+void testPresetManager()
+{
+    beginTest ("preset save / list / load / export / import / delete (v2.26, point 4)");
+
+    const auto unique = juce::String ("Tcs Test Preset 2710");
+    const auto uniqueFile = unique + ".tcsPreset";  // the sanitised filename
+
+    // 1. nothing hosted: save is refused with an explicit message
+    {
+        TheChannelStripAudioProcessor proc;
+
+        expectTrue (! proc.savePreset (unique),
+                    "saving a preset without a hosted console fails");
+        expectTrue (proc.getHostStatus().contains ("no console is hosted"),
+                    "the refusal says why in the status area");
+    }
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    // clean slate (a leftover from an interrupted earlier run)
+    proc.deletePreset (unique);
+
+    // 2. save the hosted console's state (the mock's state = one int)
+    auto mock = std::make_unique<MockPresetConsole>();
+    mock->value.store (42);
+    auto* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    expectTrue (proc.savePreset (unique), "saving the hosted state as a preset");
+    expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
+                "the preset file exists on disk");
+
+    // 3. the list reports it, with the console it belongs to
+    {
+        const auto presets = proc.getAvailablePresets();
+        bool listed = false, consoleOk = false;
+
+        for (const auto& p : presets)
+        {
+            if (p.name == unique)
+            {
+                listed = true;
+                consoleOk = p.consoleName == "MockPresetConsole";
+            }
+        }
+
+        expectTrue (listed, "the saved preset is listed");
+        expectTrue (consoleOk, "the preset remembers which console it belongs to");
+    }
+
+    // 4. apply: the preset state goes back into the hosted plugin
+    mockPtr->value.store (7);   // turn the "console knobs" away from the saved state
+
+    expectTrue (proc.applyPreset (unique), "loading the preset applies it");
+    expectTrue (mockPtr->value.load() == 42,
+                "the hosted console is back to the saved state");
+
+    // 5. a missing preset is refused explicitly (never a silent no-op)
+    expectTrue (! proc.applyPreset ("Tcs Test Preset nonexistent"),
+                "loading a preset that does not exist fails");
+    expectTrue (proc.getHostStatus().contains ("could not be loaded"),
+                "the missing-preset message says so");
+
+    // 6. export / import roundtrip through an arbitrary file
+    const auto dest = proc.getAppDataDir().getChildFile ("tcs-test-preset-export.tcsPreset");
+    dest.deleteFile();
+
+    expectTrue (proc.exportPreset (unique, dest), "export copies the preset file");
+    expectTrue (dest.existsAsFile(), "the exported file exists");
+
+    // 7. delete: gone from the list AND from the disk
+    expectTrue (proc.deletePreset (unique), "delete removes the preset");
+    expectTrue (! proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
+                "the preset file is gone");
+
+    {
+        const auto presets = proc.getAvailablePresets();
+        bool stillThere = false;
+
+        for (const auto& p : presets)
+            if (p.name == unique)
+                stillThere = true;
+
+        expectTrue (! stillThere, "the deleted preset is no longer listed");
+    }
+
+    // 8. import the exported copy back
+    expectTrue (proc.importPreset (dest), "import brings the preset back");
+    expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
+                "the imported preset file is in the preset folder");
+    dest.deleteFile();
+
+    // 9. a corrupt file is refused cleanly, never crashed on
+    {
+        const auto corrupt = proc.getPresetsDir().getChildFile ("Tcs Corrupt Preset.tcsPreset");
+        corrupt.replaceWithText ("this is not a preset file at all");
+
+        expectTrue (! proc.applyPreset ("Tcs Corrupt Preset"),
+                    "loading a corrupt preset file fails cleanly");
+        expectTrue (! proc.importPreset (corrupt),
+                    "importing a corrupt file fails cleanly");
+
+        corrupt.deleteFile();
+    }
+
+    // 10. cleanup: leave the preset folder exactly as it was found
+    proc.deletePreset (unique);
+}
+
 // v2.24 (roadmap point 7): the silent-console watch. A licence-expired
 // console loads but emits digital silence; while the input is loud the
 // watch must post exactly ONE explicit warning per hosted instance.
@@ -1156,8 +1347,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.24.1",
-                "saved state carries the current version tag");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.26.0",
+                "saved state carries the current version tag (2.26.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -1505,7 +1696,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.24.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.26.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -1518,6 +1709,7 @@ int main (int argc, char* argv[])
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
     testConsoleSlotStatus();
+    testPresetManager();
     testSilentConsoleWarning();
     testHoverReadout();
     testStateRoundtrip();

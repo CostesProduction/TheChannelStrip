@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.24.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.26.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -13,8 +13,22 @@ them in a clean, focused workflow:
   sidebar** with short labels (A9099, SSL E, SSL G, SSL J, Bx N,
   Lindell N, Lindell A, Focusrite, A200). Clicking a
   button instantiates that plugin; buttons for plugins that are not
-  installed are disabled. Selection is exclusive (radio behaviour), one
-  console at a time, and the sidebar shows the hosted console's name.
+  installed stay clickable and dimmed, and clicking one posts the exact
+  situation to the status area. Selection is exclusive (radio
+  behaviour), one console at a time, and the sidebar shows the hosted
+  console's name.
+- **Named presets** — a PRESETS section in the sidebar lists every
+  preset on disk as « Console - Name ». Selecting one **loads it on its
+  console** (switching to that console first if another one is
+  hosted). **Save** stores the hosted console's current settings
+  under a name you choose, **Delete** removes the selected preset
+  (with confirmation), **Export** copies it to a file anywhere for
+  sharing/backup, **Import** brings an external preset file in. A
+  preset holds the **console's own state only** — display settings
+  (tilt, scales, LUFS reference) travel with the session, not with
+  presets. Presets live as individual `.tcsPreset` files in the
+  `Presets/` folder next to the plugin database, so they survive
+  reinstalls and can be copied by hand.
 - **Click-free swapping** — switching consoles crossfades over ~50 ms and
   the old instance is destroyed on a background thread.
 - **Spectrum analyzer** — input and output spectra overlaid on the same
@@ -239,6 +253,31 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.26.0**
+  - **Named presets (roadmap point 4).** A PRESETS section in the
+    sidebar: one combo box listing every preset on disk
+    (« Console - Name »), then **Save / Delete / Export / Import**.
+    - **A preset is the hosted console's own state** (its knobs),
+      nothing else: display settings (tilt, spectrum/EQ scales, LUFS
+      reference, response speed) travel with the session — a preset is
+      a sound, not a screen configuration.
+    - **Global list, console-aware loading.** Every preset of every
+      console appears in the list; selecting one switches to its
+      console if it is not the one currently hosted, then applies the
+      state (which also becomes that console's remembered state).
+    - **One file per preset, on disk.** `Presets/` next to the plugin
+      database (`~/Library/Application Support/TheChannelStrip/`),
+      one `.tcsPreset` per entry — copyable by hand, reusable across
+      projects and machines; Import brings an external file in,
+      Export copies one out.
+    - **Explicit failures everywhere** (same philosophy as v2.24):
+      saving without a hosted console, a missing or corrupted preset
+      file, a preset whose console is not installed — each posts its
+      own message to the status area instead of doing nothing.
+    - Minimum window height +100 px for the section (1000 / 820 with /
+      without the analyser strip). The test harness gains a preset
+      lifecycle suite (19 tests).
 
 - **2.24.1**
   - **Test-harness compile fix** (plugin code unchanged): the new

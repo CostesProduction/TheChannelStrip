@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 #include <cstdlib>
 
 // v1.0.10: command-line flag that turns the Standalone into the out-of-process
@@ -542,8 +543,385 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
     // v2.15.5: stop forwarding gain reduction BEFORE the console goes
     // away, so the host can never pull through a dying instance.
     grForwarder.disconnect();
-    currentPluginIdent = {};
+    currentPluginIdent = juce::String();
+
+    // v2.26: a pending preset application belongs to the console being
+    // cleared away - it must not leak onto whatever is hosted next.
+    {
+        const juce::ScopedLock lock (consoleStateLock);
+        pendingPresetState.reset();
+        pendingPresetIdent = juce::String();
+    }
+
     hostedStrip.clearPlugin();
+}
+
+// ---------------------------------------------------------------------------
+// v2.26 (roadmap point 4): named presets
+// ---------------------------------------------------------------------------
+
+juce::File TheChannelStripAudioProcessor::getPresetsDir() const
+{
+    return getAppDataDir().getChildFile ("Presets");
+}
+
+juce::String TheChannelStripAudioProcessor::presetFileNameFor (const juce::String& presetName)
+{
+    // sanitise the user-given name into a safe filename (the ORIGINAL
+    // name is kept verbatim inside the file; only the filename is
+    // derived). Anything outside letters, digits, space, - and _ is
+    // replaced with an underscore; the result is trimmed and capped.
+    juce::String safe;
+
+    for (auto c : presetName.trim())
+    {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+            || c == ' ' || c == '-' || c == '_')
+            safe << c;
+        else
+            safe << '_';
+    }
+
+    if (safe.isEmpty())
+        safe = "preset";
+
+    return safe.dropLastCharacters (juce::jmax (0, safe.length() - 80)) + ".tcsPreset";
+}
+
+bool TheChannelStripAudioProcessor::readPresetFile (const juce::File& file,
+                                                    PresetInfo& info,
+                                                    juce::MemoryBlock& state)
+{
+    if (! file.existsAsFile())
+        return false;
+
+    auto xml = juce::parseXML (file);
+
+    if (xml == nullptr || ! xml->hasTagName ("tcsPreset"))
+        return false;
+
+    info.name        = xml->getStringAttribute ("name");
+    info.consoleName = xml->getStringAttribute ("consoleName");
+
+    const auto b64 = xml->getStringAttribute ("state");
+
+    if (info.name.isEmpty() || info.consoleName.isEmpty() || b64.isEmpty())
+        return false;
+
+    if (! state.fromBase64Encoding (b64) || state.getSize() == 0)
+        return false;
+
+    return true;
+}
+
+juce::Array<TheChannelStripAudioProcessor::PresetInfo>
+TheChannelStripAudioProcessor::getAvailablePresets()
+{
+    juce::Array<PresetInfo> presets;
+
+    auto dir = getPresetsDir();
+
+    if (dir.isDirectory())
+    {
+        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.tcsPreset"))
+        {
+            PresetInfo info;
+            juce::MemoryBlock state;
+
+            // a corrupt file is skipped by the list (applyPreset and
+            // friends still report it explicitly when named directly)
+            if (readPresetFile (f, info, state))
+                presets.add (info);
+        }
+    }
+
+    // alphabetical by preset name, so the combo box is stable
+    std::sort (presets.begin(), presets.end(),
+               [] (const PresetInfo& a, const PresetInfo& b)
+               { return a.name.compareIgnoreCase (b.name) < 0; });
+
+    return presets;
+}
+
+bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
+{
+    const auto trimmed = presetName.trim();
+
+    if (trimmed.isEmpty())
+    {
+        logHostStatus ("Preset not saved: the name is empty.");
+        return false;
+    }
+
+    auto* active = hostedStrip.getActivePlugin();
+
+    if (active == nullptr)
+    {
+        logHostStatus ("Preset not saved: no console is hosted - select one first.");
+        return false;
+    }
+
+    juce::MemoryBlock state;
+    active->getStateInformation (state);
+
+    if (state.getSize() == 0)
+    {
+        logHostStatus ("Preset not saved: '" + active->getName()
+                       + "' returned an empty state.");
+        return false;
+    }
+
+    // the console the preset belongs to: the name the host reports
+    // (from the ident for a real console, the plugin's own name for a
+    // directly-set instance)
+    const auto consoleName = currentPluginIdent.isNotEmpty()
+        ? currentPluginIdent.fromLastOccurrenceOf ("|", false, false)
+        : active->getName();
+
+    auto dir = getPresetsDir();
+
+    if (! dir.isDirectory())
+    {
+        auto appDir = getAppDataDir();
+
+        if (! appDir.isDirectory())
+            appDir.createDirectory();
+
+        dir.createDirectory();
+
+        if (! dir.isDirectory())
+        {
+            logHostStatus ("ERROR: preset folder could not be created: "
+                           + dir.getFullPathName());
+            return false;
+        }
+    }
+
+    auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
+    xml->setAttribute ("version", "2.26.0");
+    xml->setAttribute ("name", trimmed);
+    xml->setAttribute ("consoleName", consoleName);
+    xml->setAttribute ("state", state.toBase64Encoding());
+
+    const auto file = dir.getChildFile (presetFileNameFor (trimmed));
+
+    if (! xml->writeTo (file))
+    {
+        logHostStatus ("ERROR: preset '" + trimmed + "' could not be written to "
+                       + file.getFullPathName());
+        return false;
+    }
+
+    logHostStatus ("Preset '" + trimmed + "' saved (" + consoleName + ").");
+
+    return true;
+}
+
+bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
+{
+    PresetInfo info;
+    juce::MemoryBlock state;
+
+    const auto file = getPresetsDir().getChildFile (presetFileNameFor (presetName));
+
+    if (! readPresetFile (file, info, state))
+    {
+        logHostStatus ("Preset '" + presetName.trim()
+                       + "' could not be loaded - missing or corrupted file.");
+        return false;
+    }
+
+    // resolve the console this preset belongs to
+    int consoleIndex = -1;
+
+    for (int i = 0; i < numConsoles; ++i)
+        if (info.consoleName.containsIgnoreCase (consoleNames[i]))
+        {
+            consoleIndex = i;
+            break;
+        }
+
+    // the console is already hosted: apply the state directly and make
+    // it the remembered state too (a later switch away and back, or a
+    // session save, keeps it).
+    if (consoleIndex >= 0)
+    {
+        auto slots = getConsoleSlots();
+        const auto& slot = slots[(size_t) consoleIndex];
+
+        if (! slot.found)
+        {
+            logHostStatus ("Preset '" + info.name + "' was made for '" + info.consoleName
+                           + "', which is not installed - install it (or press Rescan)"
+                             " and load the preset again.");
+            return false;
+        }
+
+        if (identFor (slot.desc) == currentPluginIdent)
+        {
+            if (auto* active = hostedStrip.getActivePlugin())
+            {
+                active->setStateInformation (state.getData(), (int) state.getSize());
+
+                const juce::ScopedLock lock (consoleStateLock);
+                consoleStates[currentPluginIdent] = state;
+            }
+
+            logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
+            return true;
+        }
+
+        // a different console is hosted: remember the one being left,
+        // queue the preset, then switch - instantiateHosted applies
+        // the queued state once the right console is ready.
+        rememberCurrentConsoleState();
+
+        {
+            const juce::ScopedLock lock (consoleStateLock);
+            pendingPresetState = state;
+            pendingPresetIdent = identFor (slot.desc);
+        }
+
+        logHostStatus ("Switching to '" + info.consoleName + "' to load preset '"
+                       + info.name + "'...");
+        selectConsole (consoleIndex);
+        return true;
+    }
+
+    // the preset's console is not one of the nine but matches whatever
+    // is hosted right now (e.g. an externally-named plugin): apply it
+    // directly. Anything else is refused explicitly.
+    if (auto* active = hostedStrip.getActivePlugin())
+    {
+        if (active->getName().containsIgnoreCase (info.consoleName)
+            || info.consoleName.containsIgnoreCase (active->getName()))
+        {
+            active->setStateInformation (state.getData(), (int) state.getSize());
+
+            if (currentPluginIdent.isNotEmpty())
+            {
+                const juce::ScopedLock lock (consoleStateLock);
+                consoleStates[currentPluginIdent] = state;
+            }
+
+            logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
+            return true;
+        }
+    }
+
+    logHostStatus ("Preset '" + info.name + "' was made for '" + info.consoleName
+                   + "', which is not one of the consoles - it cannot be loaded.");
+    return false;
+}
+
+bool TheChannelStripAudioProcessor::deletePreset (const juce::String& presetName)
+{
+    const auto file = getPresetsDir().getChildFile (presetFileNameFor (presetName));
+
+    if (! file.existsAsFile())
+    {
+        logHostStatus ("Preset '" + presetName.trim() + "' not found.");
+        return false;
+    }
+
+    if (! file.deleteFile())
+    {
+        logHostStatus ("ERROR: preset '" + presetName.trim() + "' could not be deleted.");
+        return false;
+    }
+
+    logHostStatus ("Preset '" + presetName.trim() + "' deleted.");
+    return true;
+}
+
+bool TheChannelStripAudioProcessor::exportPreset (const juce::String& presetName,
+                                                  const juce::File& destination)
+{
+    const auto source = getPresetsDir().getChildFile (presetFileNameFor (presetName));
+
+    if (! source.existsAsFile())
+    {
+        logHostStatus ("Preset '" + presetName.trim() + "' not found.");
+        return false;
+    }
+
+    // copying a file onto itself would truncate it (the user can pick a
+    // destination inside the preset folder) - detect and accept
+    if (destination == source)
+    {
+        logHostStatus ("Preset '" + presetName.trim() + "' is already there - nothing to export.");
+        return true;
+    }
+
+    if (! destination.getParentDirectory().isDirectory())
+    {
+        logHostStatus ("ERROR: export folder does not exist: "
+                       + destination.getParentDirectory().getFullPathName());
+        return false;
+    }
+
+    if (! source.copyFileTo (destination))
+    {
+        logHostStatus ("ERROR: preset '" + presetName.trim()
+                       + "' could not be copied to " + destination.getFullPathName());
+        return false;
+    }
+
+    logHostStatus ("Preset '" + presetName.trim() + "' exported to "
+                   + destination.getFullPathName());
+    return true;
+}
+
+bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
+{
+    PresetInfo info;
+    juce::MemoryBlock state;
+
+    if (! readPresetFile (source, info, state))
+    {
+        logHostStatus ("Import failed: '" + source.getFileName()
+                       + "' is not a valid preset file.");
+        return false;
+    }
+
+    auto dir = getPresetsDir();
+
+    if (! dir.isDirectory())
+    {
+        auto appDir = getAppDataDir();
+
+        if (! appDir.isDirectory())
+            appDir.createDirectory();
+
+        dir.createDirectory();
+
+        if (! dir.isDirectory())
+        {
+            logHostStatus ("ERROR: preset folder could not be created: "
+                           + dir.getFullPathName());
+            return false;
+        }
+    }
+
+    const auto dest = dir.getChildFile (presetFileNameFor (info.name));
+
+    // importing a file that already IS in the preset folder (the open
+    // dialog can start there) must not truncate it - detect and accept
+    if (dest == source)
+    {
+        logHostStatus ("Preset '" + info.name + "' (" + info.consoleName
+                       + ") is already in the preset folder.");
+        return true;
+    }
+
+    if (! source.copyFileTo (dest))
+    {
+        logHostStatus ("ERROR: preset '" + info.name + "' could not be imported.");
+        return false;
+    }
+
+    logHostStatus ("Preset '" + info.name + "' (" + info.consoleName + ") imported.");
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,23 +1434,56 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
     // v2.11: per-console settings memory. A console chosen by hand
     // recalls the state remembered from the last time it was hosted
     // (factory defaults the first time).
+    // v2.26: a preset queued by applyPreset takes precedence over the
+    // remembered state - the user asked for THIS state, on THIS
+    // console, right now. Ident-checked so a stale request can never
+    // land on the wrong console; consumed exactly once, and it becomes
+    // the console's remembered state too.
     if (! applyPendingState)
     {
         if (auto* active = hostedStrip.getActivePlugin())
         {
-            juce::MemoryBlock remembered;
+            juce::MemoryBlock presetToApply;
+            bool presetMatches = false;
 
             {
                 const juce::ScopedLock lock (consoleStateLock);
-                const auto it = consoleStates.find (currentPluginIdent);
 
-                if (it != consoleStates.end())
-                    remembered = it->second;
+                if (pendingPresetState.getSize() > 0
+                    && pendingPresetIdent == currentPluginIdent)
+                {
+                    presetToApply = pendingPresetState;
+                    presetMatches = true;
+
+                    pendingPresetState.reset();
+                    pendingPresetIdent = juce::String();
+                }
             }
 
-            if (remembered.getSize() > 0)
-                active->setStateInformation (remembered.getData(),
-                                             (int) remembered.getSize());
+            if (presetMatches)
+            {
+                active->setStateInformation (presetToApply.getData(),
+                                            (int) presetToApply.getSize());
+
+                const juce::ScopedLock lock (consoleStateLock);
+                consoleStates[currentPluginIdent] = presetToApply;
+            }
+            else
+            {
+                juce::MemoryBlock remembered;
+
+                {
+                    const juce::ScopedLock lock (consoleStateLock);
+                    const auto it = consoleStates.find (currentPluginIdent);
+
+                    if (it != consoleStates.end())
+                        remembered = it->second;
+                }
+
+                if (remembered.getSize() > 0)
+                    active->setStateInformation (remembered.getData(),
+                                                 (int) remembered.getSize());
+            }
         }
     }
 }
@@ -1144,7 +1555,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.24.1");
+    xml->setAttribute ("version", "2.26.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
