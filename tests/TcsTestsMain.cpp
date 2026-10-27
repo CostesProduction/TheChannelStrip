@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.21.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.22.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -13,6 +13,10 @@
 //   - measured EQ curve accuracy in weak-content bands (v2.21: strong
 //     + weak two-tone passthrough reads flat, bass-only leaves the
 //     treble unmeasured - the relative validity gate)
+//   - EQ rejection of UNCORRELATED console noise (v2.22: a mock console
+//     that adds an independent 12 kHz tone; the cross-spectrum transfer
+//     reads flat 0 dB there while the coherence dips below 1 - the old
+//     power ratio would have read the tone as a +3 dB phantom boost)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -261,6 +265,104 @@ private:
     const bool acceptsMono;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockConsole)
+};
+
+// ---------------------------------------------------------------------------
+// MockToneConsole: a hosted console that passes the signal through
+// UNCHANGED but adds an independent 12 kHz tone at its output - a
+// deterministic stand-in for the real consoles' noise / dither floor
+// sitting above their lowpass section. The tone is UNCORRELATED with
+// the program: a power-ratio EQ measures it as a gain (the phantom
+// rise), a cross-spectrum transfer rejects it (it averages out of the
+// complex Sxy) while the coherence records its presence.
+// ---------------------------------------------------------------------------
+class MockToneConsole : public juce::AudioProcessor
+{
+public:
+    MockToneConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {}
+
+    const juce::String getName() const override { return "MockToneConsole"; }
+
+    void prepareToPlay (double sampleRate, int) override
+    {
+        omega = juce::MathConstants<double>::twoPi * 12000.0 / sampleRate;
+        tonePhase = 0.0;
+    }
+
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        return layouts.getMainInputChannelSet() == layouts.getMainOutputChannelSet()
+                && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        const int numSamples = buffer.getNumSamples();
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float s = 0.02f * (float) std::sin (tonePhase);
+            tonePhase += omega;
+
+            for (int c = 0; c < buffer.getNumChannels(); ++c)
+                buffer.setSample (c, i, buffer.getSample (c, i) + s);
+        }
+    }
+
+    double getTailLengthSeconds() const override { return 2.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    double omega = 0.0;
+    double tonePhase = 0.0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockToneConsole)
+};
+
+// ---------------------------------------------------------------------------
+// NoiseSource: deterministic broadband noise (xorshift32, fixed seed, so
+// every run - and the reference simulation - sees the same statistics).
+// Fills every channel with the SAME stream, like SineSource.
+// ---------------------------------------------------------------------------
+struct NoiseSource
+{
+    explicit NoiseSource (float amplitudeToUse) : amplitude (amplitudeToUse) {}
+
+    void fill (juce::AudioBuffer<float>& buffer)
+    {
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+
+            const float s = amplitude * ((float) ((double) state / 2147483648.0) - 1.0f);
+
+            for (int c = 0; c < buffer.getNumChannels(); ++c)
+                buffer.setSample (c, i, s);
+        }
+    }
+
+    juce::uint32 state = 0x12345678u;
+    float amplitude;
 };
 
 // ---------------------------------------------------------------------------
@@ -642,6 +744,95 @@ void testEqWeakContent()
     }
 }
 
+// v2.22: THE discriminator for the cross-spectrum transfer measurement.
+// A console that adds an UNCORRELATED tone (its noise / dither floor, a
+// mock of what sits above the SSL J's lowpass) must NOT show up on the
+// EQ curve: the complex Sxy accumulation averages the random-phase tone
+// away, while the coherence g2 = |Sxy|^2 / (Sxx * Syy) records that the
+// output band is only partly explained by the input (g2 < 1). The
+// v2.21.1 power ratio Pout/Pin would read the tone as a +3 dB phantom
+// boost at 12 kHz; the reference simulation measured exactly that
+// failure mode on the old engine and a flat 0 dB (+/- 0.1) with the
+// cross-spectrum, with g2 ~ 0.5 at the tone band and 1.0 elsewhere.
+void testEqUncorrelatedConsoleNoise()
+{
+    beginTest ("EQ rejects uncorrelated console noise (cross-spectrum)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    // broadband input: every band carries honest energy, so the input
+    // gate alone cannot hide the console's tone - only the cross-
+    // spectrum can reject it. This is the point of the test.
+    NoiseSource src (0.2f);
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    auto mock = std::make_unique<MockToneConsole>();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // 6 s (the cross-spectrum EMAs average over the last ~8 frames of
+    // ~170 ms; the random-phase tone only cancels across frames)
+    for (int n = 0; n < (int) (6.0 * 48000.0 / 512.0); ++n)
+    {
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    SpectrumPanel panel (proc);
+
+    for (int t = 0; t < 200; ++t)
+        panel.runAnalysisTick();
+
+    // the display bin whose band [f_b, f_b+1) CONTAINS the frequency
+    auto coveringBin = [] (const TransferAnalyzer& ana, double freq)
+    {
+        for (int b = 0; b < TransferAnalyzer::numScopeBins - 1; ++b)
+            if (ana.getBinFrequency (b) <= freq
+                && ana.getBinFrequency (b + 1) > freq)
+                return b;
+
+        return TransferAnalyzer::numScopeBins - 1;
+    };
+
+    const int bin500 = coveringBin (proc.getTransferAnalyzer(), 500.0);
+    const int bin12k = coveringBin (proc.getTransferAnalyzer(), 12000.0);
+
+    float eqDb[TransferAnalyzer::numScopeBins];
+    float eqCoherence[TransferAnalyzer::numScopeBins];
+
+    proc.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
+                                                 TransferAnalyzer::numScopeBins);
+
+    // the clean band is fully coherent (the console is a pure passthrough
+    // there, so the output is entirely explained by the input)
+    expectTrue (eqCoherence[bin500] > 0.9f,
+                "the clean band's coherence is ~1 (got "
+                + juce::String (eqCoherence[bin500], 3) + ")");
+
+    // the tone band's coherence dips below 1 but stays above the 0.25
+    // gate: the tone is present (uncorrelated with the input) yet the
+    // band is still measured - and the EQ must IGNORE the tone.
+    // Reference simulation: g2 ~ 0.5 at the tone band.
+    expectTrue (eqCoherence[bin12k] < 0.9f,
+                "the tone band's coherence dips below 1 (the tone is there; got "
+                + juce::String (eqCoherence[bin12k], 3) + ")");
+    expectTrue (eqCoherence[bin12k] >= 0.25f,
+                "the tone band's coherence stays above the validity gate");
+    expectTrue (panel.isEqBinMeasured (bin12k),
+                "the tone band is measured (both gates pass)");
+
+    expectNear (panel.getEqDbAtBin (bin12k), 0.0, 1.5,
+                "the EQ ignores the uncorrelated tone (the old power ratio "
+                "read ~ +3 dB there; got "
+                + juce::String (panel.getEqDbAtBin (bin12k), 2) + " dB)");
+
+    expectNear (panel.getEqDbAtBin (bin500), 0.0, 1.0,
+                "the clean passband reads flat 0 dB (got "
+                + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
+}
+
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
 // inverse frequency mapping and the value formatting - are exercised
 // here without a live editor (the panel itself needs the GUI, the math
@@ -705,7 +896,7 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.21.1",
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.22.0",
                 "saved state carries the current version tag");
 
     TheChannelStripAudioProcessor restored;
@@ -1054,7 +1245,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.21.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.22.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -1065,6 +1256,7 @@ int main (int argc, char* argv[])
     testSpectrumPeak();
     testSpectrumHighFrequency();
     testEqWeakContent();
+    testEqUncorrelatedConsoleNoise();
     testHoverReadout();
     testStateRoundtrip();
     testLatencyForwarding();

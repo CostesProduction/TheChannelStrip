@@ -145,18 +145,16 @@ private:
     // (like smoothDiff) and resets with the panel, on editor reopen.
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMeasured;
 
-    // v2.21: transfer-function estimators in the POWER domain. The old
-    // code averaged the per-frame OUT-IN difference in dB, which let
-    // near-floor bins (leakage skirt, console noise/dither floor) vote
-    // on the curve and drew phantom rises in weak treble bands.
-    // Averaging the input and output energies separately over time,
-    // then taking the ratio of the two averages, is the classic
-    // dual-FFT transfer-function estimate (what Smaart-class
-    // measurement does with power / coherence-weighted averaging):
-    // uncorrelated junk averages DOWN instead of voting, and the
-    // ratio only reflects what the two signals genuinely share.
-    std::array<double, SpectrumAnalyzer::numScopeBins> eqInPower;
-    std::array<double, SpectrumAnalyzer::numScopeBins> eqOutPower;
+    // v2.22: the EQ value itself (20*log10|H|, the H1 cross-spectrum
+    // estimate) and its coherence now come from the TransferAnalyzer
+    // on the audio thread, which accumulates the cross-spectrum Sxy
+    // COMPLEX per band - the random-phase console floor cancels out of
+    // that average, so it no longer votes on the curve (the phantom
+    // +3 dB rise above a console lowpass). The panel only applies the
+    // validity gates (relative input gate + coherence >= 0.25) and a
+    // light display EMA on the already-averaged value; the v2.21
+    // per-bin power EMAs are gone, along with the per-frame dB
+    // averaging artefacts they existed to tame.
 
     // v2.10: 10-second sliding maximum of the raw output, as a thin
     // overlay trace on the OUT curve. The ring buffer stores the last

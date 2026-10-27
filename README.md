@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.21.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.22.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -68,14 +68,22 @@ them in a clean, focused workflow:
   a slow input-energy-weighted smoothing (~0.4 s at full energy) so the
   curve stays stable and readable. v2.8 makes that scale selectable:
   **4 dB per division (+/-18 dB) or 2 dB per division (+/-9 dB)**, from
-  the sidebar. **v2.21 makes it a measurement-grade estimate**: the
-  input and output band energies are averaged in the power domain over
-  time and the curve is the ratio of the two averages (the classic
-  dual-FFT transfer-function method), and a bin is only refreshed while
-  its input sits within 45 dB of the program's peak (Smaart-style
-  validity gate) - bands with no honest signal to measure through hold
-  their last value instead of reporting noise-over-noise, which used to
-  draw phantom rises in the empty treble of LP-filtered mixes.
+  the sidebar. **v2.21 made it a measurement-grade estimate** (power-
+  domain averaging of the band energies plus a Smaart-style relative
+  validity gate). **v2.22 upgrades it to the full dual-FFT method**:
+  a dedicated cross-spectrum analyzer on the audio thread accumulates,
+  per band, the input/output auto-spectra AND the complex cross-spectrum
+  Sxy; the curve is the H1 estimate 20*log10|Sxy/Sxx|, and a
+  **coherence gate** (gamma^2 = |Sxy|^2 / (Sxx*Syy) >= 0.25, Smaart's
+  coherence blanking) decides whether a band carries a real transfer.
+  Why: with a console lowpass engaged (SSL J LP), the output band is
+  the attenuated signal PLUS the console's own noise floor - and once
+  the floor exceeds the attenuated signal, an honest power ratio
+  Pout/Pin measures a *gain* that is not a transfer (the +3 dB rise
+  above 10 kHz on LP-filtered material). The complex Sxy accumulation
+  cancels the random-phase floor over frames, so the curve now reads
+  the true rolloff deep under the floor and simply stops (holds its
+  last value) where the signal sinks into it, instead of rising back.
 - **Display toggle (v2.8)** — a "Display" checkbox in the sidebar hides or
   shows the analyzer strip entirely; the window re-fits (smaller without
   the strip), so the space is genuinely freed. The choice is saved with
@@ -231,6 +239,41 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.22.0**
+  - **Cross-spectrum transfer measurement + coherence gate (the real
+    Smaart method).** New `TransferAnalyzer` on the audio thread: every
+    8192-point frame (same Blackman-Harris window as the scope) is
+    FFT'd on BOTH the pre-console input and the post-console output,
+    and per display band the analyser accumulates the input/output
+    auto-spectra Sxx/Syy and the complex cross-spectrum
+    Sxy = E[X*conj(Y)] (EMA, effective average over ~8 frames ~ 1.4 s).
+    The EQ curve is the **H1 estimate** 20*log10|Sxy/Sxx|; a new
+    **coherence gate** gamma^2 = |Sxy|^2/(Sxx*Syy) >= 0.25 blanks the
+    curve exactly where the output is dominated by uncorrelated junk.
+    The v2.21.1 power ratio measured "attenuated signal + console
+    floor" over "signal": with a console lowpass (SSL J LP at 5 kHz)
+    the floor exceeds the attenuated treble signal, the ratio turns
+    positive, and the EQ honestly reported a **+3 dB rise above
+    10 kHz that was not a transfer**. The complex accumulation is the
+    fix: the console's noise/dither has a random phase and averages
+    OUT of Sxy (it stays visible on the OUT curve, but no longer votes
+    on the EQ), while the deeply filtered signal stays correlated with
+    the input - so the curve reads the true rolloff and then holds its
+    last value once the signal sinks under the floor (coherence
+    blanking), exactly like a professional dual-FFT measurement.
+    A pure delay (console latency) only rotates Sxy's phase: |H| and
+    gamma^2 are exact without any delay compensation.
+  - The v2.13/v2.21 per-bin settling times and confidence weights are
+    gone (they tuned per-frame dB ratios that no longer exist); the
+    measurement is already averaged in the analyser EMAs, so the panel
+    keeps a single light display EMA (tau 0.25 s).
+  - New harness test (16 tests now): a mock console that **adds an
+    uncorrelated 12 kHz tone** over broadband input. The cross-spectrum
+    EQ must read flat 0 dB at the tone band while the coherence dips
+    below 1 there (the v2.21.1 power ratio would read the tone as a
+    +3 dB phantom boost - the reference simulation measured exactly
+    that failure mode on the old engine).
 
 - **2.21.1**
   - **Measurement-grade EQ curve + weak-band accuracy (LP-filtered

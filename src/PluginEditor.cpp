@@ -41,9 +41,6 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     // v2.12: the EQ curve starts with nothing measured; it is drawn for
     // exactly the bins that have carried input energy at least once.
     eqMeasured.fill (false);
-    // v2.21: power-domain estimators start at the numerical floor
-    eqInPower.fill  (1.0e-12);
-    eqOutPower.fill (1.0e-12);
     // v2.10: the 10-second max hold starts empty (silent).
     maxOut.fill (-100.0f);
     maxRing.assign ((size_t) maxHoldFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
@@ -325,35 +322,42 @@ void SpectrumPanel::updateBallistics()
         }
     }
 
-    // v2.21: the EQ curve is a measured TRANSFER FUNCTION, rebuilt the
-    // way professional dual-FFT measurement (Smaart & co) does it:
+    // v2.22: the EQ curve is the CROSS-SPECTRUM transfer estimate - the
+    // full dual-FFT measurement that Smaart-class systems perform. The
+    // TransferAnalyzer on the audio thread accumulates, per display
+    // band, the input / output auto-spectra AND the complex cross-
+    // spectrum (Sxy = E[X * conj(Y)]); the EQ value is 20*log10|Sxy/Sxx|
+    // (the H1 estimator). The complex accumulation is the key: the
+    // console's noise / dither floor has a RANDOM phase, so it cancels
+    // out of the averaged Sxy (it lands in Syy - the OUT curve - but no
+    // longer votes on the EQ). With the SSL J's lowpass engaged the
+    // v2.21.1 power ratio honestly measured "attenuated signal + console
+    // floor" over "signal": once the floor exceeded the attenuated
+    // signal, the ratio turned POSITIVE - the +3 dB rise above 10 kHz
+    // on Clement's screenshot, a real power gain that is not a
+    // transfer. The cross-spectrum reads the true rolloff instead, deep
+    // under the floor, because the attenuated signal stays CORRELATED
+    // with the input while the floor does not.
     //
-    //  - per-bin estimators of the INPUT and OUTPUT energies, averaged
-    //    in the POWER domain over time; the EQ value is the ratio of the
-    //    two averages (10 * log10 (Pout / Pin)), not the average of
-    //    per-frame dB differences. Uncorrelated junk (leakage, the
-    //    console's noise / dither floor) averages DOWN and cancels in
-    //    the ratio instead of voting on the curve.
-    //  - a RELATIVE validity gate: a bin is measured only while its
-    //    input lies within 45 dB of the program's current peak bin
-    //    (with an absolute floor at -75 dB) - the audio-measurement
-    //    counterpart of Smaart's coherence blanking. Below that window
-    //    the band carries no honest signal to measure a transfer
-    //    through, so the bin HOLDS its last value rather than reporting
-    //    noise-over-noise. The old absolute gate (-80 dB) let the
-    //    leakage skirt and the hosted console's output floor through:
-    //    with a strong mix lowpassed around 5-9 kHz the OUT floor sits
-    //    ABOVE the IN skirt in the empty treble, and OUT-IN read a
-    //    few dB POSITIVE - the phantom rise above 8 kHz on Clement's
-    //    LP-filtered mixes.
-    //  - kept from earlier versions: the v2.12 persistence (a bin
-    //    measured once stays drawn, holding its last value), the
-    //    frequency-dependent settling times (v2.13: ~1 s bass,
-    //    ~0.25 s treble) and the input-energy confidence weight.
-    // The v2.7 5-bin dB pre-smoothing is gone: the analyser's own
-    // spatial pass (v2.20) already calms the curves, and averaging dB
-    // values across a steep slope is exactly what biased the knee
-    // region of every filter on the display.
+    // Two validity gates now decide whether a bin is measured:
+    //  - the v2.21.1 RELATIVE input gate (within 45 dB of the program's
+    //    peak bin, absolute floor -75 dB): the band must carry honest
+    //    input energy to measure a transfer through;
+    //  - the COHERENCE gate (g2 = |Sxy|^2 / (Sxx*Syy) >= 0.25, computed
+    //    by the analyzer): g2 collapses towards zero exactly where the
+    //    output band is dominated by uncorrelated junk - Smaart's
+    //    coherence blanking. There the bin HOLDS its last value instead
+    //    of reporting noise-over-noise, so the curve shows the true
+    //    rolloff down to where the signal sinks under the console
+    //    floor, then stops - it no longer rises back.
+    // Kept from earlier versions: the v2.12 persistence (a bin
+    // measured once stays drawn, holding its last value).
+    //
+    // The measurement is already time-averaged in the analyzer's EMAs
+    // (~1.4 s effective); the frequency-dependent settling and
+    // confidence weights of v2.13/v2.21 tuned per-frame dB ratios that
+    // no longer exist, so the display EMA here is a single light
+    // one-pole (tau 0.25 s at 30 Hz) for continuity only.
     {
         float peakIn = -100.0f;
 
@@ -362,39 +366,25 @@ void SpectrumPanel::updateBallistics()
 
         const float gateDb = juce::jmax (-75.0f, peakIn - 45.0f);
 
+        // the transfer magnitude (dB) and coherence per display bin
+        float eqDb        [SpectrumAnalyzer::numScopeBins];
+        float eqCoherence [SpectrumAnalyzer::numScopeBins];
+
+        processor.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
+                                                          SpectrumAnalyzer::numScopeBins);
+
+        const float eqAlpha = 1.0f / (1.0f + 30.0f * 0.25f);
+
         for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
         {
-            if (rawIn[b] <= gateDb)
+            if (rawIn[b] <= gateDb || eqCoherence[b] < 0.25f)
                 continue; // not measurable right now: hold the last value
 
-            // this bin carries (or has carried) honest input energy -
-            // from now on it stays part of the drawn curve (v2.12)
+            // this bin carries (or has carried) honest, coherent
+            // content - from now on it stays part of the drawn curve
             eqMeasured[(size_t) b] = true;
 
-            // the more energy this bin carries above the gate, the more
-            // the measurement can be trusted and the faster it may
-            // settle (full confidence 12 dB above the gate)
-            const float w = juce::jlimit (0.0f, 1.0f, (rawIn[b] - gateDb) / 12.0f);
-
-            // 20 Hz -> tau ~1 s, 20 kHz -> tau ~0.25 s (log-linear)
-            const double freq = processor.getAnalyzerIn().getBinFrequency (b);
-            const float tau = (float) (0.25 + 0.75 * (std::log10 (20000.0 / freq) / 3.0));
-
-            const float alpha = (1.0f / (1.0f + 30.0f * tau)) * (0.25f + 0.75f * w);
-
-            // per-frame bin energies (the dB zero point and the display
-            // tilt cancel in the ratio)
-            const double pIn  = std::pow (10.0, (double) rawIn[b]  / 10.0);
-            const double pOut = std::pow (10.0, (double) rawOut[b] / 10.0);
-
-            eqInPower [(size_t) b] += (double) alpha * (pIn  - eqInPower [(size_t) b]);
-            eqOutPower[(size_t) b] += (double) alpha * (pOut - eqOutPower[(size_t) b]);
-
-            smoothDiff[(size_t) b] =
-                (float) juce::jlimit (-60.0, 60.0,
-                    10.0 * std::log10 (eqOutPower[(size_t) b]
-                                       / juce::jmax (eqInPower[(size_t) b], 1.0e-12)
-                                       + 1.0e-12));
+            smoothDiff[(size_t) b] += eqAlpha * (eqDb[b] - smoothDiff[(size_t) b]);
         }
     }
 

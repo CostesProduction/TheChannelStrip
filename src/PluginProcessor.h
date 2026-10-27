@@ -8,6 +8,7 @@
 #include "GRForwarder.h"
 #include "LufsMeter.h"
 #include "SpectrumAnalyzer.h"
+#include "TransferAnalyzer.h"
 
 class TheChannelStripAudioProcessorEditor;
 
@@ -118,6 +119,8 @@ public:
     LufsMeter& getLufsOut() { return lufsOut; }
     SpectrumAnalyzer& getAnalyzerIn()  { return analyzerIn; }
     SpectrumAnalyzer& getAnalyzerOut() { return analyzerOut; }
+    // v2.22: the cross-spectrum transfer measurement (EQ curve + coherence)
+    TransferAnalyzer& getTransferAnalyzer() { return transferAnalyzer; }
 
     float getTiltDb() const { return tiltDb.load (std::memory_order_relaxed); }
     void setTiltDb (float tilt) { tiltDb.store (tilt, std::memory_order_relaxed); }
@@ -201,6 +204,9 @@ private:
     HostedStrip hostedStrip;
     LufsMeter lufsIn, lufsOut;
     SpectrumAnalyzer analyzerIn, analyzerOut;
+    // v2.22: fed the pre-console input (pushInput) and the post-console
+    // output (pushOutput) of every block, so its frames stay aligned.
+    TransferAnalyzer transferAnalyzer;
 
     // v2.15.5: forwards the hosted console's gain reduction to Studio One
     // (see GRForwarder.h). Declared AFTER hostedStrip on purpose: members

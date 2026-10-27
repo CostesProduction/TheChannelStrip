@@ -229,6 +229,7 @@ void TheChannelStripAudioProcessor::prepareToPlay (double sampleRate, int sample
     lufsOut.prepare (currentSampleRate, numChannels);
     analyzerIn.prepare  (currentSampleRate);
     analyzerOut.prepare (currentSampleRate);
+    transferAnalyzer.prepare (currentSampleRate, currentBlockSize);
 
     // v2.14: re-negotiate the hosted console's own bus layout whenever the
     // track format changes (the host has released us before calling this,
@@ -279,6 +280,10 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     {
         lufsIn.process (buffer);
         analyzerIn.processAudio (buffer);
+        // v2.22: stash the pre-console input for the cross-spectrum
+        // transfer measurement (the console overwrites the buffer in
+        // place; the stash is drained by the matching pushOutput below).
+        transferAnalyzer.pushInput (buffer);
     }
 
     // v2.8.2 crash fix (SIGSEGV inside the hosted console when Studio One
@@ -319,6 +324,9 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     {
         lufsOut.process (buffer);
         analyzerOut.processAudio (buffer);
+        // v2.22: the console's output of the same block - this drain
+        // advances the transfer frames (and computes the cross-spectra).
+        transferAnalyzer.pushOutput (buffer);
     }
 
     // ---- forward the hosted plugin's reported latency to the host ----
@@ -1020,7 +1028,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.21.1");
+    xml->setAttribute ("version", "2.22.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
