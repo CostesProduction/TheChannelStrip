@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.30.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.30.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1277,16 +1277,54 @@ void testPresetManager()
                 && currentFileIs (destSub),
                 "loading makes the preset current at the album file and clears its \"*\"");
 
-    // 8c. v2.30: the current preset's own FILE travels with the session -
-    //     an album preset restores pointing at its album file, so the
-    //     combo pre-selects it there and a delete of that file disowns
+    // 8c. v2.30: the current preset's own FILE travels with the session.
+    //     Save side: the real session's <consoleState> for the current
+    //     preset carries presetFile, relative to the preset folder for
+    //     a file inside it (the directly-set mock has an EMPTY ident,
+    //     which the save keeps but the restore deliberately skips - a
+    //     real hosted console always has a non-empty one), so the
+    //     attribute is inspected here and the restore is driven by the
+    //     fake session below, exactly like the v2.27 tracking test.
     {
-        juce::MemoryBlock session;
-        proc.getStateInformation (session);
+        juce::MemoryBlock sessionBlock;
+        proc.getStateInformation (sessionBlock);
+
+        auto xml = juce::AudioProcessor::getXmlFromBinary (sessionBlock.getData(),
+                                                           (int) sessionBlock.getSize());
+        bool fileSaved = false;
+
+        if (xml != nullptr)
+            for (auto* e : xml->getChildIterator())
+                if (e->hasTagName ("consoleState")
+                    && e->getStringAttribute ("presetName") == unique
+                    && e->getStringAttribute ("presetFile")
+                           == "Tcs Test Album/" + uniqueFile)
+                    fileSaved = true;
+
+        expectTrue (fileSaved,
+                    "the album preset's own file is saved with the session,"
+                    " relative to the preset folder");
+
+        // restore side: a session that carries the album file restores
+        // it, so the combo pre-selects the preset in its album and Save
+        // re-fills there (the v2.27 fake-session pattern)
+        const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
+        auto session = std::make_unique<juce::XmlElement> ("TCS");
+        session->setAttribute ("version", "2.30.1");
+        session->setAttribute ("hostedIdent", fakeIdent);
+
+        auto* cs = session->createNewChildElement ("consoleState");
+        cs->setAttribute ("ident", fakeIdent);
+        cs->setAttribute ("state", juce::MemoryBlock (5, true).toBase64Encoding());
+        cs->setAttribute ("presetName", unique);
+        cs->setAttribute ("presetModified", 0);
+        cs->setAttribute ("presetFile", "Tcs Test Album/" + uniqueFile);
+
+        juce::MemoryBlock restoredBlock;
+        juce::AudioProcessor::copyXmlToBinary (*session, restoredBlock);
 
         TheChannelStripAudioProcessor restored;
-        restored.prepareToPlay (48000.0, 512);
-        restored.setStateInformation (session.getData(), (int) session.getSize());
+        restored.setStateInformation (restoredBlock.getData(), (int) restoredBlock.getSize());
 
         expectTrue (restored.getCurrentPresetName() == unique,
                     "the current preset's name comes back with the session");
@@ -1438,7 +1476,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.30.0");
+    session->setAttribute ("version", "2.30.1");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1661,8 +1699,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.30.0",
-                "saved state carries the current version tag (2.30.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.30.1",
+                "saved state carries the current version tag (2.30.1)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2010,7 +2048,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.30.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.30.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

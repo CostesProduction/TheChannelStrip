@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.30.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.30.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -273,6 +273,19 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.30.1**
+  - **Test-harness fix (no product change).** The v2.30 offline test
+    that checks the session roundtrip of the current preset's own
+    file built its session from a directly-set mock console, whose
+    ident is empty — and the restore deliberately skips empty-ident
+    `<consoleState>` elements (a real hosted console always has a
+    non-empty one), so two checks failed. The test now inspects the
+    real save for the `presetFile` attribute (stored relative to the
+    preset folder) and drives the restore with the same fake-session
+    pattern as the v2.27 tracking test, with an album path in it.
+    Also casts the help-mode bubble's wrap width comparison to float,
+    silencing the one warning v2.30 added.
 
 - **2.30.0**
   - **Albums join the list.** The preset selector now lists the

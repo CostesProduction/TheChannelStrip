@@ -1134,7 +1134,7 @@ private:
             const auto candidate = line.isEmpty() ? word : line + " " + word;
 
             if (line.isEmpty()
-                || juce::GlyphArrangement::getStringWidth (font, candidate) <= maxWidth)
+                || juce::GlyphArrangement::getStringWidth (font, candidate) <= (float) maxWidth)
                 line = candidate;
             else
             {
