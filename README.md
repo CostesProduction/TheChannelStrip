@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.17.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.18.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -131,6 +131,38 @@ build/TheChannelStrip_artefacts/Release/Standalone/TheChannelStrip.app (macOS)
 Install the VST3 to `~/Library/Audio/Plug-Ins/VST3/` and the AU to
 `~/Library/Audio/Plug-Ins/Components/`, then rescan in your DAW.
 
+## Tests
+
+The build also produces **TcsTests**, a console test harness that
+exercises the processor end to end with synthetic material and mock
+hosted plugins — no third-party plugin is needed:
+
+```bash
+./build/TcsTests_artefacts/Release/TcsTests          # Linux
+./build/TcsTests_artefacts/Release/TcsTests.app/Contents/MacOS/TcsTests   # macOS
+```
+
+It prints one line per test and one `FAIL` per failed check, exits 0
+when everything passes (`ALL TESTS PASSED`). Covered: processor basics
+and console inventory, bit-exact dry passthrough (stereo and mono),
+measurement gating, LUFS short-term metering, spectrum peak location,
+state save/restore, latency forwarding (static and runtime changes),
+click-free console swapping, native mono vs stereo-bridge hosting, and
+stereo ↔ mono hot switching without re-creating the instance.
+
+Pass `--integration` to additionally host a **real** console found in the
+saved plugin database (launch the Standalone once first so a scan has
+run):
+
+```bash
+./build/TcsTests_artefacts/Release/TcsTests --integration
+```
+
+The integration mode loads a third-party module inside the test binary.
+In the DAW the shell never does that (scan children are separate
+processes), so here a hostile plugin can only kill a throwaway test
+process; treat a crash there as a plugin problem, not a shell bug.
+
 ## Usage
 
 1. **Scan** — the editor automatically scans the standard VST3 folders on
@@ -178,6 +210,45 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.18.2**
+  - **Test harness expectation fix (LUFS check).** The v2.18.1 suite
+    failed one check: it expected a stereo 1 kHz sine at -23 dBFS RMS
+    per channel to read -23 LUFS, but BS.1770 loudness sums the
+    mean-square power of every channel — an identical stereo pair
+    measures about 3 dB louder (-20 LUFS). The meter was right and the
+    test expectation was wrong; the check now targets -20 LUFS (the
+    harness biquad K-weight gives ~+0.43 dB at 1 kHz vs ~+0.69 dB for
+    the exact BS.1770 coefficients, so the observed reading is ~-20.25).
+    The plugin code itself is unchanged.
+- **2.18.1**
+  - **Test harness crash fix.** The v2.18.0 `TcsTests` binary segfaulted
+    on the very first test: the helper that builds a canonical main-bus
+    layout assigned through `BusesLayout::getChannelSet`, which is an
+    unchecked array access — a default-constructed `BusesLayout` has
+    empty bus arrays, so the write dereferenced a null array. The
+    layouts are now built through the public `inputBuses` /
+    `outputBuses` members instead. The plugin targets were never
+    affected: the shell always starts from a real `getBusesLayout()`,
+    whose arrays match the actual buses.
+- **2.18.0**
+  - **Offline test harness (TcsTests)**. A new console target builds
+    alongside the plugins and exercises the shell automatically: 12
+    unit tests run with mock hosted plugins (a mock is a real
+    `juce::AudioProcessor`, so the whole production path is exercised —
+    latency snapshotting, the 50 ms crossfade, mono layout negotiation,
+    the stereo bridge) plus one opt-in integration test (`--integration`)
+    that hosts a real console from the saved plugin database and logs
+    the negotiated mono path. Covered end to end: processor basics and
+    console inventory, bit-exact dry passthrough (stereo and mono),
+    measurement gating (nothing measured while no editor is open),
+    LUFS short-term metering (absolute window and 6 dB tracking),
+    spectrum peak location, state save/restore (including the version
+    tag), latency forwarding for static AND runtime changes, click-free
+    console swapping (bounded inter-sample slew), native mono hosting
+    vs stereo-bridge fallback, and stereo ↔ mono hot switching without
+    ever re-creating the hosted instance. The plugin targets themselves
+    are unchanged — same binary behaviour, one new `tests/` source file
+    and one CMake target.
 - **2.17.1**
   - **Studio logo halved**. The Costes logo in the sidebar is now half
     its v2.17 size in both directions (the placement keeps the aspect
