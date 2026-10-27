@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.27.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.28.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -28,7 +28,8 @@
 //   - named presets (v2.26, roadmap point 4: save / list / load /
 //     export / import / delete against the real preset folder, plus
 //     the explicit refusals - nothing hosted, missing file, corrupt
-//     file)
+//     file; v2.28: an import LOADS the preset - into the console, as
+//     its current one, even when the file was already in the folder)
 //   - current-preset tracking (v2.27: the saved/loaded preset becomes
 //     the console's current one, a knob move raises the "*" once the
 //     editor timer drains it, reloading or re-saving clears it, the
@@ -1170,11 +1171,35 @@ void testPresetManager()
         expectTrue (! stillThere, "the deleted preset is no longer listed");
     }
 
-    // 8. import the exported copy back
+    // 8. import the exported copy back - v2.28: the import LOADS the
+    // preset: it goes into the hosted console and becomes its current
+    // one, unmodified, exactly as if it had been picked in the list
+    mockPtr->value.store (9);   // turn the "console knobs" away first
+
     expectTrue (proc.importPreset (dest), "import brings the preset back");
     expectTrue (proc.getPresetsDir().getChildFile (uniqueFile).existsAsFile(),
                 "the imported preset file is in the preset folder");
+    expectTrue (mockPtr->value.load() == 42,
+                "the imported preset is loaded into the hosted console");
+    expectTrue (proc.getCurrentPresetName() == unique,
+                "the imported preset becomes the console's current one");
+    expectTrue (! proc.isCurrentPresetModified(),
+                "an imported-and-loaded preset starts unmodified");
     dest.deleteFile();
+
+    // 8b. importing a file that already IS in the preset folder loads
+    // it too (it used to be a silent no-op) - v2.28
+    mockPtr->value.store (11);
+    proc.parameterValueChanged (0, 0.5f);   // star the current preset first
+    proc.drainPresetDirtyFlag();
+
+    expectTrue (proc.importPreset (proc.getPresetsDir().getChildFile (uniqueFile)),
+                "importing a file already in the preset folder succeeds");
+    expectTrue (mockPtr->value.load() == 42,
+                "re-importing the in-folder preset reloads it");
+    expectTrue (proc.getCurrentPresetName() == unique
+                && ! proc.isCurrentPresetModified(),
+                "re-importing makes the preset current and clears its \"*\"");
 
     // 9. a corrupt file is refused cleanly, never crashed on
     {
@@ -1288,7 +1313,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.27.1");
+    session->setAttribute ("version", "2.28.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1511,8 +1536,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.27.1",
-                "saved state carries the current version tag (2.27.1)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.28.0",
+                "saved state carries the current version tag (2.28.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -1860,7 +1885,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.27.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.28.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

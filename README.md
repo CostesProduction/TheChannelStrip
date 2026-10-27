@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.27.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.28.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -253,6 +253,19 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.28.0**
+  - **Import loads the preset.** Importing a `.tcsPreset` file used to
+    only make it available in the list; it now **loads it into the
+    hosted console and makes it the console's current preset**, exactly
+    as if it had been picked in the selector:
+    - If the preset was made for **another console**, the shell
+      **switches to it first**, then applies the preset.
+    - Importing a file that **already is** in the preset folder loads
+      it too, instead of doing nothing.
+    - If the preset's console is **not installed**, the file is still
+      imported and stays available in the list — the status area says
+      why it could not be loaded.
 
 - **2.27.1**
   - **Fix: the current preset's name and « * » could be dropped from a

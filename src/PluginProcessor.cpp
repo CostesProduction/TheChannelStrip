@@ -727,7 +727,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.27.1");
+    xml->setAttribute ("version", "2.28.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -988,11 +988,13 @@ bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
     const auto dest = dir.getChildFile (presetFileNameFor (info.name));
 
     // importing a file that already IS in the preset folder (the open
-    // dialog can start there) must not truncate it - detect and accept
+    // dialog can start there) must not truncate it - detect, then
+    // load it like any other import (v2.28.0: an import applies)
     if (dest == source)
     {
         logHostStatus ("Preset '" + info.name + "' (" + info.consoleName
-                       + ") is already in the preset folder.");
+                       + ") is already in the preset folder - loading it.");
+        applyPreset (info.name);
         return true;
     }
 
@@ -1003,6 +1005,13 @@ bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
     }
 
     logHostStatus ("Preset '" + info.name + "' (" + info.consoleName + ") imported.");
+
+    // v2.28.0: an imported preset becomes the console's current one and
+    // really loads, exactly as if it had been picked in the selector -
+    // applyPreset resolves the console (direct load, deferred switch if
+    // another console is hosted, explicit refusal if it can't be
+    // loaded; the import itself still succeeded in every case).
+    applyPreset (info.name);
     return true;
 }
 
@@ -1729,7 +1738,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.27.1");
+    xml->setAttribute ("version", "2.28.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

@@ -1855,7 +1855,9 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
                 "arrow exports the hosted console's CURRENT preset, with that "
                 "preset's own name pre-filled, for sharing between machines or "
                 "projects; the tray with the incoming arrow imports a .tcsPreset file "
-                "from anywhere into the preset folder, so it appears in the list.");
+                "from anywhere into the preset folder and loads it right away - it "
+                "becomes the console's current preset (switching consoles first if "
+                "it was made for another one).");
     addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
     addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
 

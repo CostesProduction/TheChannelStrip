@@ -152,7 +152,11 @@ public:
     bool deletePreset (const juce::String& presetName);
     // Copy a preset file to an arbitrary location (sharing/backup).
     bool exportPreset (const juce::String& presetName, const juce::File& destination);
-    // Copy an external .tcsPreset file into the Presets folder.
+    // Copy an external .tcsPreset file into the Presets folder, then
+    // load it: it becomes the console's current preset (v2.28.0),
+    // exactly as if it had been picked in the selector. The copy can
+    // succeed while the load is refused (console not installed) - the
+    // file stays available in the list, the status area says why.
     bool importPreset (const juce::File& source);
 
     // ---- v2.11: per-console settings memory ----
