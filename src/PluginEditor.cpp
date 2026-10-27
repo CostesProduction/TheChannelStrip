@@ -132,142 +132,6 @@ void SpectrumPanel::timerCallback()
     repaint();
 }
 
-// v2.19 (roadmap point 3): the hover readout. mouseMove just records the
-// cursor position and repaints - the readout itself is drawn in paint()
-// from the SAME smoothed arrays and the SAME display transform as the
-// curves, so the numbers always agree with what is on screen. mouseExit
-// hides it again (the readout never lingers after the mouse leaves).
-void SpectrumPanel::mouseMove (const juce::MouseEvent& e)
-{
-    hoverPos = e.getPosition();
-    mouseInside = true;
-    repaint();
-}
-
-void SpectrumPanel::mouseExit (const juce::MouseEvent&)
-{
-    mouseInside = false;
-    repaint();
-}
-
-// v2.19: the exact inverse of xForFrequency - same 16 Hz - 24 kHz log
-// axis, so frequencyForX (xForFrequency (f)) == f. Static and pure so
-// the offline test harness can verify the mapping without an editor.
-double SpectrumPanel::frequencyForX (double x, double width)
-{
-    constexpr double minHz = 16.0;
-    constexpr double span  = 3.1760912590556813; // log10 (24000 / 16)
-
-    if (width <= 0.0)
-        return minHz;
-
-    const double x01 = juce::jlimit (0.0, 1.0, x / width);
-    return minHz * std::pow (10.0, span * x01);
-}
-
-// v2.19: frequency as a compact readout string ("45 Hz", "1.23 kHz").
-// Below 1 kHz the value is rounded to the nearest hertz; above, two
-// decimals of kHz - the convention every analyser uses.
-juce::String SpectrumPanel::formatFrequency (double freq)
-{
-    freq = juce::jlimit (16.0, 24000.0, freq);
-
-    if (freq < 1000.0)
-        return juce::String (juce::roundToInt (freq)) + " Hz";
-
-    return juce::String (freq / 1000.0, 2) + " kHz";
-}
-
-// v2.19: one decimal for the levels; bins with no energy (the -100 dB
-// floor of the smoothing arrays) read "--" instead of a meaningless
-// "-100.0".
-juce::String SpectrumPanel::formatReadoutDb (float db)
-{
-    if (db <= -95.0f)
-        return "--";
-
-    return juce::String (db, 1);
-}
-
-// v2.19: the scope bin whose centre frequency is nearest the hovered
-// frequency. 256 bins, linear scan on the UI thread - trivial, and the
-// scope bins are already log-spaced for the display.
-int SpectrumPanel::binForX (float x) const
-{
-    const double freq = frequencyForX (x, (double) getWidth());
-    int best = 0;
-    double bestDist = 1.0e30;
-
-    for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
-    {
-        const double dist = std::abs (processor.getAnalyzerIn().getBinFrequency (bin) - freq);
-
-        if (dist < bestDist)
-        {
-            bestDist = dist;
-            best = bin;
-        }
-    }
-
-    return best;
-}
-
-// v2.19: draws the hairline at the cursor plus the fixed top-right
-// readout: frequency under the cursor, then the IN / OUT levels and -
-// when that bin has been measured at least once (v2.12 persistence) -
-// the EQ (OUT-IN) value. The IN/OUT numbers go through the exact same
-// tilt + loudness-offset transform as the curves, so they match the
-// pixel under the hairline; the EQ value is the raw measured difference
-// (tilt and offset cancel in OUT-IN). Colour-matched to the legend.
-void SpectrumPanel::drawHoverReadout (juce::Graphics& g) const
-{
-    const int x = juce::jlimit (0, getWidth() - 1, hoverPos.x);
-    const int bin = binForX ((float) x);
-
-    // subtle vertical hairline at the cursor, inside the panel only
-    g.setColour (juce::Colour (0x408f9bb0));
-    g.drawVerticalLine (x, 0.0f, (float) getHeight());
-
-    const float binFreq = (float) processor.getAnalyzerIn().getBinFrequency (bin);
-    const float tiltDb  = tilt * (std::log2 (binFreq / 1000.0f));
-    const float dbIn    = smoothIn  [(size_t) bin] - tiltDb - lufsOffsetDb;
-    const float dbOut   = smoothOut [(size_t) bin] - tiltDb - lufsOffsetDb;
-
-    const juce::Font font (juce::FontOptions (12.0f, juce::Font::bold));
-
-    struct Segment { juce::String text; juce::Colour colour; };
-    juce::Array<Segment> segments;
-
-    segments.add (Segment { formatFrequency (frequencyForX (x, (double) getWidth())),
-                            juce::Colour (0xffc8d2e6) });
-    segments.add (Segment { "IN "  + formatReadoutDb (dbIn),  juce::Colour (0xffe2a14f) });
-    segments.add (Segment { "OUT " + formatReadoutDb (dbOut), juce::Colour (0xff54c8e8) });
-
-    if (eqMeasured[(size_t) bin])
-        segments.add (Segment { "EQ " + formatReadoutDb (smoothDiff[(size_t) bin]),
-                                juce::Colour (0xff7ee08a) });
-
-    // right-aligned at the top, clear of the centred legend and of the
-    // left scale column; each token is drawn in its own colour.
-    // v2.20 (point 6): the right margin grew from 10 to 44 px so the
-    // readout keeps clear of the EQ scale labels at the far right.
-    int totalWidth = 0;
-
-    for (const auto& s : segments)
-        totalWidth += 6 + juce::GlyphArrangement::getStringWidth (font, s.text);
-
-    int cursorX = getWidth() - 44 - totalWidth;
-    g.setFont (font);
-
-    for (const auto& s : segments)
-    {
-        const int w = juce::GlyphArrangement::getStringWidth (font, s.text);
-        g.setColour (s.colour);
-        g.drawText (s.text, cursorX, 4, w + 8, 16, juce::Justification::left);
-        cursorX += 6 + w;
-    }
-}
-
 void SpectrumPanel::updateBallistics()
 {
     float in[SpectrumAnalyzer::numScopeBins];
@@ -458,10 +322,7 @@ void SpectrumPanel::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff0e1420));
 
     drawGrid (g);
-    // v2.20 (point 2): the IN curve is drawn WITHOUT its area fill now -
-    // only OUT keeps its soft fill, so the two curves read as two lines
-    // over one fill instead of two overlapping tints.
-    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f), 1.6f, false);
+    drawCurve (g, smoothIn,  juce::Colour (0xffe2a14f));
     drawCurve (g, smoothOut, juce::Colour (0xff54c8e8));
 
     // v2.10: 10-second sliding maximum of the raw output - a thin trace
@@ -490,11 +351,6 @@ void SpectrumPanel::paint (juce::Graphics& g)
     // v2.10: the 10-second max hold trace
     g.setColour (juce::Colour (0xff9adcf0));
     g.drawText ("MAX", legendX + 160, 4, 40, 16, juce::Justification::left);
-
-    // v2.19 (roadmap point 3): the hover readout comes last, above the
-    // legend, so it stays readable over everything
-    if (mouseInside)
-        drawHoverReadout (g);
 }
 
 void SpectrumPanel::drawGrid (juce::Graphics& g)
@@ -731,13 +587,13 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     g.setColour (juce::Colour (0xff7ee08a));
     g.strokePath (path, juce::PathStrokeType (2.4f));
 
-    // the EQ scale labels, match the curve's range (v2.8: dynamic,
-    // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
-    // v2.20 (point 6): the column moved FLUSH against the right edge -
-    // mirroring the spectrum's dB labels at the far left - so it no
-    // longer shares the top-right corner with the hover readout (which
-    // keeps its own clear margin, see drawHoverReadout).
+    // the EQ scale labels, on the right edge, match the curve's range
+    // (v2.8: dynamic, "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
+    // v2.9: the 20 kHz frequency label is back in the bottom-right
+    // corner, so the column right-aligns just left of its label box.
     g.setFont (juce::Font (juce::FontOptions (10.0f)));
+
+    const int eqLabelRight = (int) xForFrequency (20000.0) - 22;
 
     for (float db : { range, 0.0f, -range })
     {
@@ -745,7 +601,7 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
                                    : ((db < 0.0f) ? "-" + juce::String (-db, 0)
                                                   : juce::String ("0"));
         const int y = juce::jlimit (2, getHeight() - 14, (int) yForEqDb (db) - 6);
-        g.drawText (label, getWidth() - 34, y, 30, 12,
+        g.drawText (label, eqLabelRight - 28, y, 28, 12,
                     juce::Justification::centredRight);
     }
 }
@@ -850,15 +706,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
 
-    // v2.20 (point 1): the "?" help button sits next to the studio logo
-    // and opens every tool tip in one window - the controls themselves
-    // keep their small tooltips, but the analyser no longer shows one
-    // while hovering (it was hiding the readout).
-    styleConsoleButton (helpButton);
-    helpButton.setTooltip ("All the tool tips in one place.");
-    helpButton.onClick = [this] { showHelpPopup(); };
-    addAndMakeVisible (helpButton);
-
     addAndMakeVisible (rescanButton);
     rescanButton.onClick = [this] { proc.requestDefaultScan(); };
     // v2.9.1: in a DAW the button only reloads the saved database (loading
@@ -955,13 +802,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         styleConsoleButton (t);
         addAndMakeVisible (t);
 
-        // v2.20: the tilt buttons get a tooltip too (they were the only
-        // analyser controls without one, and the help window lists it).
-        t.setTooltip ("Analyser display tilt in dB per octave (reference 1 kHz, "
-                      "SPAN convention: a negative tilt flattens a naturally "
-                      "falling spectrum). The tilt only affects the drawing, "
-                      "never the analysis.");
-
         t.onClick = [this, j, tilts]
         {
             if (tiltButtons[j].getToggleState())
@@ -1028,10 +868,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // restore the saved loudness reference (default Mix -23 LUFS)
     spectrumPanel.setLufsTarget (proc.getLufsTarget());
 
-    // v2.20 (point 1): the analyser no longer carries a tooltip - it
-    // was in the way of the hover readout. Its help text (and every
-    // other tooltip) now lives in the "?" button next to the studio
-    // logo (see showHelpPopup).
+    spectrumPanel.setTooltip ("Click the LEFT dB scale to toggle 10/6 dB per division; "
+                              "click the RIGHT green EQ scale to toggle 4/2 dB per division; "
+                              "click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
+                              "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
 
     // restore the saved scales (defaults: 10 dB and 4 dB per division;
     // legacy values are snapped to the two current scales, like the
@@ -1192,14 +1032,6 @@ void TheChannelStripAudioProcessorEditor::resized()
                                                       / logoImage.getWidth()) / 2)
             : 20;
         studioLogo.setBounds (sideX, y + 4, sw, logoH);
-
-        // v2.20 (point 1): the help button rides the logo band, at its
-        // right edge - vertically centred on the band, clear of the
-        // centred logo image itself.
-        helpButton.setBounds (sideX + sw - 24,
-                              y + 4 + juce::jmax (0, (logoH - 22) / 2),
-                              22, 22);
-
         y += logoH + 10;
     }
 
@@ -1428,38 +1260,4 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
 
     layoutHostedHolder();
     fitWindowToHostedEditor();
-}
-
-// v2.20 (point 1): the "?" button opens every tool tip in one window.
-// The analyser deliberately carries NO tooltip any more (it was hiding
-// the hover readout), so its help text is written out here; every other
-// section is pulled live from the control it describes, so the window
-// always shows exactly what the small tooltips show.
-void TheChannelStripAudioProcessorEditor::showHelpPopup()
-{
-    juce::String info;
-
-    auto addSection = [&info] (const juce::String& title, const juce::String& text)
-    {
-        if (text.trim().isNotEmpty())
-            info << title << "\n" << text << "\n\n";
-    };
-
-    addSection ("ANALYSER",
-                "Hover anywhere to read the frequency under the cursor and the "
-                "IN/OUT/EQ levels there. Click the LEFT dB scale to toggle 10/6 dB "
-                "per division; click the RIGHT green EQ scale to toggle 4/2 dB per "
-                "division; click the loudness reference label (e.g. \"Mix (-23 LUFS)\") "
-                "to cycle the Record/Mix/Master reference (-37/-23/-14 LUFS).");
-    addSection ("TILT",               tiltButtons[0].getTooltip());
-    addSection ("RESPONSE SPEED",      speedButtons[0].getTooltip());
-    addSection ("ANALYSER DISPLAY",   analyserToggle.getTooltip());
-    addSection ("GAIN STAGING",       correctionLabel.getTooltip());
-    addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
-    addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
-    addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
-
-    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-                                            "TheChannelStrip - help",
-                                            info);
 }

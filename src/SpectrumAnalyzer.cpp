@@ -66,19 +66,6 @@ void SpectrumAnalyzer::compute()
 
     const int lastBin = fftSize / 2 - 1;
 
-    // v2.20 (Clement's points 3, 4, 5): the per-display-bin value is
-    // now the band's ENERGY (RMS of the covered FFT-bin magnitudes)
-    // instead of their arithmetic mean. A display bin at 10 kHz spans
-    // ~18 FFT bins; the MEAN of 18 independent, fluctuating magnitudes
-    // systematically reads ~3 dB BELOW the band's true energy
-    // (mean < RMS always), which is exactly why the treble read lower
-    // than in Melda-class analysers - and why OUT-IN was noisy above
-    // 5 kHz (two noisy means make a noisier difference). The RMS keeps
-    // broadband content at its honest level and stabilises the EQ
-    // curve's treble; tones read within ~3 dB of their peak instead
-    // of ~6 dB under it.
-    float raw[(size_t) numScopeBins];
-
     for (int b = 0; b < numScopeBins; ++b)
     {
         const double fLow  = binFrequencies[(size_t) b];
@@ -90,35 +77,18 @@ void SpectrumAnalyzer::compute()
         const int kHigh = juce::jlimit (kLow, lastBin,
             (int) std::round (fHigh * fftSize / sampleRate));
 
-        double energy = 0.0;
+        float sum = 0.0f;
         int count = 0;
-
         for (int k = kLow; k <= kHigh; ++k)
         {
-            const double m = fftData[(size_t) k];
-            energy += m * m;
+            sum += fftData[(size_t) k];
             ++count;
         }
 
-        const double rms = count > 0 ? std::sqrt (energy / (double) count) : 0.0;
-        const float db = (float) (20.0 * std::log10 (rms / (0.25 * (double) fftSize)
-                                                     + 1.0e-10));
+        const float avg = count > 0 ? sum / (float) count : 0.0f;
+        const float db = 20.0f * std::log10 (avg / (0.25f * (float) fftSize) + 1e-10f);
 
-        raw[(size_t) b] = juce::jlimit (-100.0f, 6.0f, db);
-    }
-
-    // v2.20 (point 7): one light spatial pass across neighbouring
-    // display bins ([0.25, 0.5, 0.25]) - the same feel as a small
-    // "smoothness" setting on classic analysers. The editor's temporal
-    // EMA already smooths over time; this calms the last bit of
-    // bin-to-bin jitter on the curves (and, since IN and OUT are
-    // smoothed identically, it also quiets the EQ difference).
-    for (int b = 0; b < numScopeBins; ++b)
-    {
-        const float lo = raw[(size_t) juce::jmax (0, b - 1)];
-        const float hi = raw[(size_t) juce::jmin (numScopeBins - 1, b + 1)];
-
-        scopeData[(size_t) b].store (0.25f * lo + 0.5f * raw[(size_t) b] + 0.25f * hi,
+        scopeData[(size_t) b].store (juce::jlimit (-100.0f, 6.0f, db),
                                      std::memory_order_relaxed);
     }
 }
