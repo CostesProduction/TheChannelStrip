@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.18.3** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.19.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -43,6 +43,13 @@ them in a clean, focused workflow:
   at the 16 Hz left edge) with a graduation at every 20/30/.../90,
   100/200/.../900, 1k/.../9k, 10k, 20k tick and labels on the classic
   frequencies (20, 100, 200, 1k, 2k, 10k, 20 kHz).
+  **v2.19 hover readout**: moving the mouse over the analyser draws a
+  subtle vertical hairline at the cursor and a fixed top-right readout
+  with the frequency under the cursor and the IN / OUT / EQ levels
+  there, colour-matched to the legend — exactly the values the curves
+  show at that position (same tilt and loudness calibration; bins with
+  no energy read "--", and EQ only appears once that bin has been
+  measured). Pure display, no cursor lock and no freeze.
 - **Measured transfer function (v2.6)** — a third curve, **OUT-IN**, shows
   what the hosted console actually does to your signal (EQ, dynamics and
   saturation combined), computed live from the two existing analyzer
@@ -146,7 +153,7 @@ It prints one line per test and one `FAIL` per failed check, exits 0
 when everything passes (`ALL TESTS PASSED`). Covered: processor basics
 and console inventory, bit-exact dry passthrough (stereo and mono),
 measurement gating, LUFS short-term metering, spectrum peak location,
-state save/restore, latency forwarding (static and runtime changes),
+the hover readout mapping and formatting, state save/restore, latency forwarding (static and runtime changes),
 click-free console swapping, native mono vs stereo-bridge hosting, and
 stereo ↔ mono hot switching without re-creating the instance.
 
@@ -210,6 +217,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.19.0**
+  - **Hover readout on the analyser (roadmap point 3).** Moving the
+    mouse over the spectrum panel shows the frequency under the cursor
+    and the IN / OUT / EQ levels at that position, in a fixed top-right
+    label colour-matched to the legend, with a subtle vertical hairline
+    at the cursor. The IN/OUT numbers go through the exact same tilt
+    and loudness-offset transform as the drawn curves, so the readout
+    always matches what is on screen; unmeasured bins read "--" and the
+    EQ value only appears once a bin has carried energy (v2.12
+    persistence). No cursor lock, no freeze - pure display. The
+    frequency mapping and the value formatting are covered by a new
+    check group in the offline test harness (13 tests now).
 - **2.18.3**
   - **Lighter studio logo asset.** The `CostesLogo.png` resource is
     downsized locally from 755 KB to roughly 80-100 KB (the full

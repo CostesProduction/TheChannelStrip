@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.18.3 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.19.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -10,6 +10,7 @@
 //   - measurement gating (nothing measured while the editor is closed)
 //   - LUFS short-term metering (absolute window + 6 dB tracking)
 //   - spectrum analyser peak location
+//   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
 //   - click-free console crossfade (bounded slew + convergence)
@@ -57,6 +58,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "../src/PluginProcessor.h"
+#include "../src/PluginEditor.h"   // v2.19: SpectrumPanel readout statics
 
 // The plugin entry point is defined in PluginProcessor.cpp but not declared
 // in any header (the wrapper targets pick it up from
@@ -468,6 +470,49 @@ void testSpectrumPeak()
                 + juce::String (peakHz, 1) + " Hz)");
 }
 
+// v2.19 (roadmap point 3): the hover readout's static helpers - the
+// inverse frequency mapping and the value formatting - are exercised
+// here without a live editor (the panel itself needs the GUI, the math
+// does not).
+void testHoverReadout()
+{
+    beginTest ("hover readout mapping and formatting");
+
+    const double width = 900.0;
+
+    // the inverse mapping matches the 16 Hz - 24 kHz log axis at the
+    // edges and at the geometric centre 16 * sqrt (1500)
+    expectNear (SpectrumPanel::frequencyForX (0.0, width), 16.0, 0.01,
+                "x = 0 reads the left edge 16 Hz");
+    expectNear (SpectrumPanel::frequencyForX (width, width), 24000.0, 0.01,
+                "x = width reads the right edge 24 kHz");
+    expectNear (SpectrumPanel::frequencyForX (width / 2.0, width),
+                16.0 * std::sqrt (1500.0), 0.01,
+                "the geometric centre reads 16*sqrt(1500) Hz");
+
+    // out-of-range x clamps to the axis, and a zero-width panel is safe
+    expectNear (SpectrumPanel::frequencyForX (-50.0, width), 16.0, 0.01,
+                "x beyond the left edge clamps to 16 Hz");
+    expectNear (SpectrumPanel::frequencyForX (width + 50.0, width), 24000.0, 0.01,
+                "x beyond the right edge clamps to 24 kHz");
+    expectNear (SpectrumPanel::frequencyForX (100.0, 0.0), 16.0, 0.01,
+                "a zero-width panel reads the left edge");
+
+    // frequency formatting: integer Hz below 1 kHz, two-decimal kHz above
+    expectTrue (SpectrumPanel::formatFrequency (45.0) == "45 Hz",
+                "45 Hz formats as \"45 Hz\"");
+    expectTrue (SpectrumPanel::formatFrequency (1000.0) == "1.00 kHz",
+                "1 kHz formats as \"1.00 kHz\"");
+    expectTrue (SpectrumPanel::formatFrequency (12500.0) == "12.50 kHz",
+                "12.5 kHz formats as \"12.50 kHz\"");
+
+    // level formatting: one decimal, the -100 dB floor reads "--"
+    expectTrue (SpectrumPanel::formatReadoutDb (-47.26f) == "-47.3",
+                "levels format with one decimal");
+    expectTrue (SpectrumPanel::formatReadoutDb (-120.0f) == "--",
+                "the -100 dB floor reads \"--\"");
+}
+
 void testStateRoundtrip()
 {
     beginTest ("state save/restore roundtrip");
@@ -488,7 +533,7 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.18.3",
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.19.0",
                 "saved state carries the current version tag");
 
     TheChannelStripAudioProcessor restored;
@@ -837,7 +882,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.18.3" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.19.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -846,6 +891,7 @@ int main (int argc, char* argv[])
     testLufsShortTerm();
     testSilence();
     testSpectrumPeak();
+    testHoverReadout();
     testStateRoundtrip();
     testLatencyForwarding();
     testCrossfadeClickFree();

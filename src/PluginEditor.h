@@ -45,11 +45,13 @@ public:
     explicit SpectrumPanel (TheChannelStripAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
-    // v2.12: clicking the left dB scale column toggles the spectrum
-    // range (10/6 dB per division) and clicking the right green EQ
-    // label column toggles the EQ range (4/2 dB per division). The
-    // editor wires the two std::function members below; clicks that
-    // land in neither column are ignored.
+    // v2.19 (roadmap point 3): hovering the analyser shows a readout of
+    // the frequency under the cursor plus the IN / OUT / EQ levels at
+    // that frequency. mouseMove just records the cursor and repaints;
+    // mouseExit hides the readout again. No cursor lock, no freeze -
+    // pure display.
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void setTilt (float newTiltDbPerOct);
     void setDbPerDiv (float dbPerDivision);   // v2.9: 10 or 6
@@ -58,6 +60,15 @@ public:
     // v2.13: loudness reference of the axis (0 dB line = this many LUFS
     // absolute). Changing it re-snaps the calibration immediately.
     void setLufsTarget (float targetLufs);
+
+    // v2.19 (roadmap point 3): hover readout helpers - STATIC and free
+    // of any component state so the offline test harness (TcsTests) can
+    // exercise the frequency mapping and the value formatting without a
+    // live editor. frequencyForX is the exact inverse of the private
+    // xForFrequency (the same 16 Hz - 24 kHz log axis).
+    static double frequencyForX (double x, double width);
+    static juce::String formatFrequency (double freq);
+    static juce::String formatReadoutDb (float db);
 
     // v2.12: scale toggle hooks (called when the user clicks one of the
     // two scale columns; see mouseDown).
@@ -78,10 +89,19 @@ private:
     float yForDb (float db) const;
     float yForEqDb (float db) const; // v2.8: dedicated EQ scale (+/- 4.5 divisions)
     float xForBin (int bin) const;
+    // v2.9: the text drawn at the 0 dB line, e.g. "Mix (-23 LUFS)"
+    juce::String lufsTargetLabel() const;
     // v2.9: x position of a frequency on the 16 Hz - 24 kHz log axis
     float xForFrequency (double freq) const;
-    // v2.13: the text drawn at the 0 dB line, e.g. "Mix (-23 LUFS)"
-    juce::String lufsTargetLabel() const;
+    // v2.19 (roadmap point 3): the scope bin whose centre frequency is
+    // closest to the hovered x position (256 bins, linear scan - the
+    // analyser's bins are already log-spaced for display).
+    int binForX (float x) const;
+    // v2.19: the hover readout itself - a subtle vertical hairline at
+    // the cursor and a fixed top-right label (frequency + IN/OUT/EQ
+    // levels, colour-matched to the legend). Drawn last so it stays
+    // readable above everything.
+    void drawHoverReadout (juce::Graphics& g) const;
 
     // v2.9: the axis is 9 divisions deep, top = 3 x dB/div and bottom =
     // -6 x dB/div (both relative to the -23 LUFS reference), so the 0 dB
@@ -138,6 +158,12 @@ private:
     // the processor (persisted) and cycled by clicking the reference
     // label (see lufsTargetLabel/mouseDown).
     float lufsTargetDb = -23.0f;
+
+    // v2.19 (roadmap point 3): hover state - the last cursor position
+    // inside the panel and whether it is inside at all. UI thread only,
+    // written by mouseMove/mouseExit and read in paint.
+    juce::Point<int> hoverPos;
+    bool mouseInside = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrumPanel)
 };
