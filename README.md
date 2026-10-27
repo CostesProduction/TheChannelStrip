@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.30.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.31.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -273,6 +273,28 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.31.0**
+  - **Help lives in the help mode alone.** Outside the mode, the
+    sidebar and the analyser controls no longer dispense standing
+    tooltips on every hover: every explanation (hosted name, track
+    format, correction, Rescan, speed, tilt, Display toggle, the
+    per-slot console status, the analyser) moved into the help-mode
+    bubbles. The « ? » button keeps the only remaining tooltip — it
+    is the mode's entry point.
+  - **The analyser's dB scales are documented too.** Inside the help
+    mode, the three clickable zones of the analyser each get their
+    own bubble: the left scale (click to switch 10 / 6 dB per
+    division), the right EQ scale (click to switch 4 / 2 dB per
+    division) and the LUFS reference at the 0 dB line (click to
+    cycle Record −37 / Mix −23 / Master −14) — instead of the
+    panel's generic text everywhere.
+  - **The help bubble floats in front of the hosted console.** The
+    bubble now rides in its own borderless always-on-top desktop
+    window, so the hosted plugin's native view can no longer cut
+    the writing: whatever the console draws under it, the bubble
+    stays readable. It follows the cursor in screen coordinates and
+    is closed with the mode (click, Esc, or editor close).
 
 - **2.30.1**
   - **Test-harness fix (no product change).** The v2.30 offline test

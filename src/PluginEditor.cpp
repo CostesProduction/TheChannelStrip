@@ -253,6 +253,27 @@ void SpectrumPanel::mouseDown (const juce::MouseEvent& e)
     }
 }
 
+// v2.31 (Clement's remark 2): the interactive help mode asks which
+// analyser zone a point falls in, so its bubble can document the dB
+// scales instead of the panel's generic text alone. The zones and
+// constants are the SAME as mouseDown above - the bubble always
+// says exactly what a click in that zone would do.
+SpectrumPanel::HelpZone SpectrumPanel::helpZoneFor (juce::Point<int> p) const
+{
+    const float zeroY = yForDb (0.0f);
+
+    if (p.x >= 36 && p.x <= 190 && std::abs ((float) p.y - zeroY) <= 12.0f)
+        return HelpZone::lufsReference;
+
+    if (p.x <= 44)
+        return HelpZone::analyzerScale;
+
+    if (p.x >= getWidth() - 56)
+        return HelpZone::eqScale;
+
+    return HelpZone::graph;
+}
+
 void SpectrumPanel::timerCallback()
 {
     updateBallistics();
@@ -1016,14 +1037,82 @@ void HostedEditorHolder::paint (juce::Graphics& g)
 // the Tokyo Down Record plugins). The "?" button enters it; from then
 // on a full-editor transparent overlay sits on top of everything:
 // moving the mouse outlines the control under the cursor and shows a
-// small bubble with its help text - a few words, the control's own
-// tooltip or its entry in the editor's helpTexts map. ANY click
-// anywhere, or Esc, leaves the mode; the overlay swallows the click,
-// so a button is never triggered from inside the mode. Nothing else
-// changes: no veil over the UI, no wall of text, and nothing at all
-// while the mode is off. It replaces the v2.20 all-in-one help
-// window (the help comes to the control now).
+// small bubble with its help text - a few words, the control's entry
+// in the editor's helpTexts map (since v2.31 the texts live ONLY there,
+// Clement's remark 1: no control carries a standing tooltip outside the
+// mode, except "?" itself). ANY click anywhere, or Esc, leaves the
+// mode; the overlay swallows the click, so a button is never triggered
+// from inside the mode. Nothing else changes: no veil over the UI, no
+// wall of text, and nothing at all while the mode is off. It replaces
+// the v2.20 all-in-one help window (the help comes to the control now).
+//
+// v2.31 (Clement's remark 3): the bubble is no longer painted INSIDE
+// the overlay. The hosted plugin's editor is a native NSView layered
+// ABOVE everything JUCE draws in the window, so an overlay-drawn
+// bubble would vanish behind the console ("it cuts the writing").
+// The bubble now lives in its own borderless always-on-top DESKTOP
+// window (HelpBubbleWindow below), which floats in front of every
+// native view. The overlay keeps the highlight, the keyboard trap and
+// the geometry; the bubble window follows the cursor in screen
+// coordinates.
 // ---------------------------------------------------------------------------
+
+// v2.31: the help bubble's own desktop window. Tiny, borderless,
+// transparent, always on top - and above all NOT a child of the
+// editor, because children are drawn under the hosted plugin's
+// native NSView.
+class HelpBubbleWindow final : public juce::Component
+{
+public:
+    explicit HelpBubbleWindow (TheChannelStripAudioProcessorEditor& ed) : editor (ed)
+    {
+        setOpaque (false);
+        setVisible (false); // nothing to show until the cursor picks a control
+        addToDesktop (0);   // borderless desktop window, no decorations
+        setAlwaysOnTop (true);
+    }
+
+    ~HelpBubbleWindow() override
+    {
+        removeFromDesktop();
+    }
+
+    // a click on the bubble leaves the mode, like anywhere else
+    void mouseDown (const juce::MouseEvent&) override { editor.exitHelpMode(); }
+
+    // v2.31: the lines to draw, handed over by the overlay on every
+    // hover move (the window's bounds are set right before this).
+    void setContent (const juce::StringArray& newLines)
+    {
+        lines = newLines;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // the same small rounded card the v2.30 overlay drew inline -
+        // now in its own window, where the hosted plugin cannot
+        // cover it
+        g.setColour (juce::Colour (0xf20e1522));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 5.0f);
+        g.setColour (juce::Colour (0xff5f6b82));
+        g.drawRoundedRectangle (getLocalBounds().toFloat(), 5.0f, 1.0f);
+
+        g.setColour (juce::Colour (0xffdfe6f2));
+        g.setFont (juce::Font (juce::FontOptions (12.0f)));
+
+        for (int i = 0; i < lines.size(); ++i)
+            g.drawText (lines[i], 8, 5 + i * 16, getWidth() - 16, 16,
+                        juce::Justification::centredLeft);
+    }
+
+private:
+    TheChannelStripAudioProcessorEditor& editor;
+    juce::StringArray lines;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpBubbleWindow)
+};
+
 class HelpOverlay final : public juce::Component
 {
 public:
@@ -1051,44 +1140,39 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        // the hovered control, outlined - the lightest highlight there is
+        // the hovered control, outlined - the lightest highlight there
+        // is. The bubble itself is NOT drawn here any more (v2.31): it
+        // rides in the editor's always-on-top desktop window, above
+        // the hosted plugin's native view (Clement's remark 3).
         if (text.isNotEmpty())
         {
             g.setColour (juce::Colour (0xffdfe6f2).withAlpha (0.9f));
             g.drawRoundedRectangle (highlight.toFloat().expanded (2.0f), 4.0f, 1.2f);
-
-            // the bubble: a small rounded card with a few words
-            g.setColour (juce::Colour (0xf20e1522));
-            g.fillRoundedRectangle (bubble.toFloat(), 5.0f);
-            g.setColour (juce::Colour (0xff5f6b82));
-            g.drawRoundedRectangle (bubble.toFloat(), 5.0f, 1.0f);
-
-            g.setColour (juce::Colour (0xffdfe6f2));
-            g.setFont (juce::Font (juce::FontOptions (12.0f)));
-
-            for (int i = 0; i < lines.size(); ++i)
-                g.drawText (lines[i], bubble.getX() + 8, bubble.getY() + 5 + i * 16,
-                            bubble.getWidth() - 16, 16, juce::Justification::centredLeft);
         }
     }
 
 private:
     void updateFor (juce::Point<int> pt)
     {
-        auto* newTarget = targetUnder (&editor, pt, this);
-        const auto newText = editor.helpTextFor (newTarget);
+        // the mode is tearing down (exitHelpMode already released the
+        // bubble): nothing left to drive
+        if (editor.helpBubble == nullptr)
+            return;
 
-        if (newTarget == target && newText == text)
-            return; // nothing moved, nothing to repaint
+        auto* newTarget = targetUnder (&editor, pt, this);
+        const auto newText = editor.helpTextFor (newTarget, pt);
+        const bool unchanged = (newTarget == target && newText == text);
 
         target = newTarget;
         text = newText;
 
         if (target == nullptr || text.isEmpty())
         {
+            target = nullptr;
             text = juce::String();
             lines.clear();
-            highlight = bubble = juce::Rectangle<int>();
+            highlight = juce::Rectangle<int>();
+            editor.helpBubble->setVisible (false);
         }
         else
         {
@@ -1115,10 +1199,17 @@ private:
 
             by = juce::jmax (6, by);
 
-            bubble.setBounds (bx, by, bubbleW, bubbleH);
+            // v2.31: the geometry above is editor-local, but the bubble
+            // window lives on the desktop - place it in SCREEN
+            // coordinates, in front of the hosted plugin's view.
+            const auto screenPos = editor.localPointToGlobal (juce::Point<int> (bx, by));
+            editor.helpBubble->setBounds (screenPos.x, screenPos.y, bubbleW, bubbleH);
+            editor.helpBubble->setContent (lines);
+            editor.helpBubble->setVisible (true);
         }
 
-        repaint();
+        if (! unchanged)
+            repaint();
     }
 
     // word-wrap a help text into lines that fit maxWidth
@@ -1184,7 +1275,8 @@ private:
 
     juce::Component* target = nullptr;
     juce::Rectangle<int> highlight;
-    juce::Rectangle<int> bubble;
+    // v2.31: the bubble RECT lives in the desktop window's bounds now -
+    // only the highlight is drawn here.
     juce::String text;
     juce::StringArray lines;
 
@@ -1245,7 +1337,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     hostedNameLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     hostedNameLabel.setJustificationType (juce::Justification::centred);
     hostedNameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
-    hostedNameLabel.setTooltip ("The hosted console plugin, once one is selected.");
+    // v2.31 (Clement's remark 1): the label's help text moved from a
+    // standing tooltip into helpTexts - outside the help mode the
+    // sidebar stays silent now (only "?" keeps its own tooltip).
+    helpTexts[&hostedNameLabel] =
+        "The hosted console plugin, once one is selected.";
     addAndMakeVisible (hostedNameLabel);
 
     // v2.14.2: live channel-format readout - what the DAW feeds this
@@ -1257,7 +1353,8 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     channelLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
     channelLabel.setJustificationType (juce::Justification::centred);
     channelLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
-    channelLabel.setTooltip ("Channel format the host gives this instance and the console's audio path.");
+    helpTexts[&channelLabel] =
+        "Channel format the host gives this instance and the console's audio path.";
     addAndMakeVisible (channelLabel);
 
     // v2.1: the correction is the main readout: bigger and smoothed.
@@ -1269,10 +1366,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     correctionLabel.setColour (juce::Label::textColourId, juce::Colour (0xff54c8e8));
     correctionLabel.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
     correctionLabel.setJustificationType (juce::Justification::centred);
-    correctionLabel.setTooltip ("Smoothed short-term BS.1770 correction: what to ADD to "
-                                "the console's output so it matches its input loudness. "
-                                "Add +0.7 dB means raise the output by 0.7 dB; Add -0.4 dB "
-                                "means lower it by 0.4 dB.");
+    // v2.31 (remark 1): the correction's explanation moved into the
+    // help-mode texts too - no standing tooltip any more.
+    helpTexts[&correctionLabel] =
+        "Smoothed short-term BS.1770 correction: what to ADD to "
+        "the console's output so it matches its input loudness. "
+        "Add +0.7 dB means raise the output by 0.7 dB; Add -0.4 dB "
+        "means lower it by 0.4 dB.";
 
     // v2.17: Clement's studio logo, embedded as a binary resource so the
     // plugin is fully self-contained. ImageComponent scales it to the
@@ -1293,11 +1393,14 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.9.1: in a DAW the button only reloads the saved database (loading
     // third-party modules in-process can crash the host); the full folder
     // scan runs in the Standalone, out-of-process.
-    rescanButton.setTooltip ("Reload the saved plugin database. In the Standalone "
-                             "this re-scans the VST3 folders (out-of-process, hostile "
-                             "plugins can only kill the helper); inside a DAW it only "
-                             "reloads the database - launch the Standalone to run a "
-                             "full folder scan.");
+    // v2.31 (remark 1): the Rescan explanation lives in the help-mode
+    // texts now, not as a standing tooltip.
+    helpTexts[&rescanButton] =
+        "Reload the saved plugin database. In the Standalone "
+        "this re-scans the VST3 folders (out-of-process, hostile "
+        "plugins can only kill the helper); inside a DAW it only "
+        "reloads the database - launch the Standalone to run a "
+        "full folder scan.";
 
     // ---- the console buttons (radio group: exactly one) ----
     for (size_t i = 0; i < consoleButtons.size(); ++i)
@@ -1364,8 +1467,12 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.30: the "?" help button takes the 4th slot of the presets
     // row (freed by the removed export button) and enters the
     // interactive help mode: hovering any control then shows a small
-    // contextual bubble; any click, or Esc, leaves the mode. Its own
-    // standing tooltip says so (it is the only new one - see below).
+    // contextual bubble; any click, or Esc, leaves the mode.
+    // v2.31: its tooltip is now the editor's ONLY standing one
+    // (Clement's remark 1) - every other explanation moved into
+    // helpTexts below and shows up in the interactive help mode
+    // alone, so the sidebar stops dispensing help while the mode
+    // is off.
     styleConsoleButton (helpButton);
     helpButton.setTooltip ("Interactive help: hover anything for a short"
                            " explanation. A click or Esc leaves it.");
@@ -1421,8 +1528,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                 }
             };
 
-            b.setTooltip ("Analyser response speed: the IN/OUT curves smooth "
-                          "with a time constant of ~0.15 s (Fast) or ~1 s (Slow).");
+            // v2.31 (remark 1): the speed explanation moved into the
+            // help-mode texts - no standing tooltip any more.
+            helpTexts[&b] = "Analyser response speed: the IN/OUT curves smooth "
+                            "with a time constant of ~0.15 s (Fast) or ~1 s (Slow).";
         }
 
         // restore the saved speed, snapped to the closest of the two
@@ -1462,12 +1571,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         styleConsoleButton (t);
         addAndMakeVisible (t);
 
-        // v2.20: the tilt buttons get a tooltip too (they were the only
-        // analyser controls without one, and the help window lists it).
-        t.setTooltip ("Analyser display tilt in dB per octave (reference 1 kHz, "
-                      "SPAN convention: a negative tilt flattens a naturally "
-                      "falling spectrum). The tilt only affects the drawing, "
-                      "never the analysis.");
+        // v2.20: the tilt buttons got a tooltip (they were the only
+        // analyser controls without one). v2.31 (remark 1): the text
+        // moved into the help-mode texts - no standing tooltip.
+        helpTexts[&t] = "Analyser display tilt in dB per octave (reference 1 kHz, "
+                        "SPAN convention: a negative tilt flattens a naturally "
+                        "falling spectrum). The tilt only affects the drawing, "
+                        "never the analysis.";
 
         t.onClick = [this, j, tilts]
         {
@@ -1551,7 +1661,9 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     spectrumPanel.setEqDbPerDiv (proc.getEqDbDiv() > 3.0f ? 4.0f : 2.0f);
 
     // ---- v2.8: show/hide the analyser strip ----
-    analyserToggle.setTooltip ("Show or hide the analyser strip (the window re-fits).");
+    // v2.31 (remark 1): help text in the help-mode map, not a tooltip.
+    helpTexts[&analyserToggle] =
+        "Show or hide the analyser strip (the window re-fits).";
     addAndMakeVisible (analyserToggle);
 
     analyserToggle.onClick = [this]
@@ -1737,7 +1849,16 @@ void TheChannelStripAudioProcessorEditor::resized()
     // v2.30: the help overlay covers the whole editor whatever the
     // window does while the mode is on
     if (helpOverlay != nullptr)
+    {
         helpOverlay->setBounds (getLocalBounds());
+
+        // v2.31: the bubble window keeps SCREEN coordinates - after a
+        // resize they are stale, so drop it until the next mouse move
+        // repositions it over its control (mouseMove fires again as
+        // soon as the cursor moves, so it comes right back).
+        if (helpBubble != nullptr)
+            helpBubble->setVisible (false);
+    }
 }
 
 void TheChannelStripAudioProcessorEditor::layoutHostedHolder()
@@ -1915,7 +2036,10 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
         else
             tip = juce::String (slot.name) + " - not found (install it or Rescan)";
 
-        btn.setTooltip (tip);
+        // v2.31 (remark 1): the per-slot status text moved into
+        // helpTexts - it shows as the help-mode bubble now, not as a
+        // standing tooltip on every hover.
+        helpTexts[&btn] = tip;
 
         const bool active = slot.found
                                 && proc.identFor (slot.desc) == proc.getCurrentPluginIdent();
@@ -2017,6 +2141,17 @@ TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
     // v2.8: closing the editor stops all measurements (LUFS meters and
     // spectrum analysers) until it is opened again.
     proc.setEditorOpen (false);
+    // v2.31: the help bubble is a DESKTOP window, not a child - it must
+    // be closed HERE, explicitly, before the editor tears down (it is
+    // removed from the desktop while the editor is still alive, which
+    // is always safe - this is no callback of its own). If the mode is
+    // already off, exitHelpMode released it and a pending async
+    // deletion owns it instead.
+    if (helpBubble != nullptr)
+    {
+        helpBubble->removeFromDesktop();
+        helpBubble.reset();
+    }
     embeddedHostedEditor.reset(); // detach the hosted editor before anything else
     hostedViewport.setViewedComponent (nullptr, false);
 }
@@ -2024,10 +2159,16 @@ TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
 // v2.30: "?" -> the help mode. The overlay fills the editor and rides
 // on top of everything, including the hosted plugin; it follows the
 // window when resized() moves it.
+// v2.31 (remark 3): the bubble now rides in its own always-on-top
+// desktop window, so it floats in FRONT of the hosted plugin's
+// native view instead of being hidden behind it.
 void TheChannelStripAudioProcessorEditor::enterHelpMode()
 {
     if (helpOverlay != nullptr)
         return; // already on
+
+    // created first: the overlay drives it on every hover move
+    helpBubble = std::make_unique<HelpBubbleWindow> (*this);
 
     helpOverlay = std::make_unique<HelpOverlay> (*this);
     addAndMakeVisible (helpOverlay.get());
@@ -2036,14 +2177,33 @@ void TheChannelStripAudioProcessorEditor::enterHelpMode()
     helpOverlay->grabKeyboardFocus();
 }
 
-// v2.30: any click anywhere, or Esc. The overlay is deleted OUTSIDE
-// its own mouse/key callback (handed to the message queue), and if the
-// editor goes first its child-component cleanup makes the pending
-// deletion a no-op - no double delete either way.
+// v2.30 -> v2.31: any click anywhere, or Esc. Both mode components are
+// deleted OUTSIDE their own mouse/key callbacks (handed to the message
+// queue), and if the editor goes first: the overlay is its child, so
+// the child cleanup makes the pending deletion a no-op, and the bubble
+// is closed synchronously by the editor's destructor - no double
+// delete either way.
 void TheChannelStripAudioProcessorEditor::exitHelpMode()
 {
     if (helpOverlay == nullptr)
         return;
+
+    // the bubble goes first: hidden IMMEDIATELY (it cannot receive a
+    // click while hidden, so its editor reference can never be used
+    // after this line), then deleted outside this callback. The
+    // pending lambda touches no editor state, so it stays safe even
+    // if the editor is destroyed before it runs.
+    if (helpBubble != nullptr)
+    {
+        helpBubble->setVisible (false);
+        juce::Component::SafePointer<HelpBubbleWindow> safeBubble (helpBubble.release());
+
+        juce::MessageManager::callAsync ([safeBubble]
+        {
+            if (auto* bubble = safeBubble.getComponent())
+                delete bubble;
+        });
+    }
 
     juce::Component::SafePointer<HelpOverlay> safe (helpOverlay.release());
 
@@ -2054,17 +2214,41 @@ void TheChannelStripAudioProcessorEditor::exitHelpMode()
     });
 }
 
-// v2.30: the bubble text for whatever sits under the cursor: the
-// deepest component that carries one, walking up to the editor. The
-// help mode's own texts live in helpTexts (never in setTooltip - the
-// standing TooltipWindow would show those on plain hover); the
-// controls that already have a small tooltip (the consoles, tilt,
-// speed, Rescan...) reuse it, so every explanation stays in one
-// place per control.
-juce::String TheChannelStripAudioProcessorEditor::helpTextFor (juce::Component* component)
+// v2.30 -> v2.31: the bubble text for whatever sits under the cursor:
+// the deepest component that carries one, walking up to the editor.
+// Since v2.31 (Clement's remark 1) the help texts live ONLY here: the
+// controls carry no standing tooltips any more (only "?" keeps its
+// own, so the TooltipWindow stays quiet outside the mode) and every
+// sidebar explanation moved into helpTexts. The analyser is
+// position-aware (remark 2): its three clickable zones - the left dB
+// scale, the right EQ scale and the LUFS reference at 0 dB - each
+// return their own text instead of the panel's generic entry.
+juce::String TheChannelStripAudioProcessorEditor::helpTextFor (juce::Component* component,
+                                                                juce::Point<int> positionInEditor)
 {
     for (auto* c = component; c != nullptr; c = c->getParentComponent())
     {
+        // v2.31 (remark 2): the analyser zones - SpectrumPanel::
+        // helpZoneFor uses the SAME constants as its mouseDown, so the
+        // bubble always says exactly what a click in that zone does.
+        if (c == &spectrumPanel)
+        {
+            const auto zone = spectrumPanel.helpZoneFor (
+                spectrumPanel.getLocalPoint (this, positionInEditor));
+
+            if (zone == SpectrumPanel::HelpZone::lufsReference)
+                return "Loudness reference of the 0 dB line: Record -37, Mix -23 or"
+                       " Master -14 LUFS. Click it to cycle the reference.";
+
+            if (zone == SpectrumPanel::HelpZone::analyzerScale)
+                return "Left scale: the IN/OUT spectra's display scale. Click it to"
+                       " switch between 10 and 6 dB per division.";
+
+            if (zone == SpectrumPanel::HelpZone::eqScale)
+                return "Right scale: the EQ (OUT vs IN) curve's own scale. Click it"
+                       " to switch between 4 and 2 dB per division.";
+        }
+
         const auto entry = helpTexts.find (c);
 
         if (entry != helpTexts.end() && entry->second.isNotEmpty())

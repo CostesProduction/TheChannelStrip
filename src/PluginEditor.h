@@ -54,6 +54,13 @@ public:
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseExit (const juce::MouseEvent& e) override;
     void mouseDown (const juce::MouseEvent& e) override;
+    // v2.31 (Clement's remark 2): the interactive help mode asks which
+    // zone a point falls in so its bubble can document the two dB
+    // scales and the LUFS reference individually. Same zones and
+    // constants as mouseDown - the bubble always matches what a click
+    // there would do. Pure and const: no state is touched.
+    enum class HelpZone { graph, analyzerScale, eqScale, lufsReference };
+    HelpZone helpZoneFor (juce::Point<int> localPos) const;
     void setTilt (float newTiltDbPerOct);
     void setDbPerDiv (float dbPerDivision);   // v2.9: 10 or 6
     void setEqDbPerDiv (float dbPerDivision); // v2.8: 4 or 2
@@ -241,6 +248,11 @@ public:
 // full-editor, on top, transparent; it shows the hover bubbles and
 // swallows every click (see enterHelpMode).
 class HelpOverlay;
+// v2.31 (Clement's remark 3): the mode's bubble rides in its own
+// always-on-top DESKTOP window (also defined in the .cpp) - the hosted
+// plugin's native NSView sits above every JUCE-drawn layer, so only a
+// window of its own can float in front of it.
+class HelpBubbleWindow;
 
 class TheChannelStripAudioProcessorEditor : public juce::AudioProcessorEditor,
                                              private juce::Timer
@@ -271,13 +283,21 @@ private:
     void exitHelpMode();
     // v2.30: the bubble text for a hovered component (the deepest
     // component, or one of its parents, that carries a help entry).
-    // The help mode's own texts live in helpTexts (NOT setTooltip: a
-    // standing TooltipWindow is active and would show real tooltips
-    // on plain hover - and the analyser's would cover its readout).
-    juce::String helpTextFor (juce::Component* component);
+    // v2.31: the help texts live ONLY here now (Clement's remark 1):
+    // no control carries a standing tooltip any more (except "?"),
+    // so the standing TooltipWindow stays quiet outside the mode.
+    // The editor-local cursor position makes the analyser
+    // position-aware (remark 2): its three clickable zones - the
+    // left dB scale, the right EQ scale and the LUFS reference at
+    // 0 dB - each return their own text.
+    juce::String helpTextFor (juce::Component* component,
+                              juce::Point<int> positionInEditor);
     // v2.30: the overlay drives the mode end-to-end (Esc/click exits,
     // hover picks the text) - it touches the private members above.
     friend class HelpOverlay;
+    // v2.31: the bubble window's own click leaves the mode too, so it
+    // needs exitHelpMode as well (it touches nothing else private).
+    friend class HelpBubbleWindow;
     // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
     // (re)populate the preset combo box from the files on disk
     void refreshPresetList();
@@ -409,8 +429,16 @@ private:
     // v2.30: the help-mode overlay while it is on (see enterHelpMode).
     std::unique_ptr<HelpOverlay> helpOverlay;
 
-    // v2.30: the help-mode bubble texts for the controls that must
-    // NOT carry a standing tooltip (see helpTextFor). Filled in the
+    // v2.31 (remark 3): the help bubble's own always-on-top desktop
+    // window - a component drawn inside the editor would hide BEHIND
+    // the hosted plugin's native view. It is NOT a child of the
+    // editor, so the destructor closes it explicitly, before the
+    // editor tears down.
+    std::unique_ptr<HelpBubbleWindow> helpBubble;
+
+    // v2.30 -> v2.31: the help-mode bubble texts (since remark 1 the
+    // ONLY home of every sidebar and analyser explanation - the
+    // controls carry no standing tooltips any more). Filled in the
     // editor's constructor, read only by the help overlay.
     std::map<juce::Component*, juce::String> helpTexts;
 
