@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.26.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.27.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -253,6 +253,42 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.27.1**
+  - **Fix: the current preset's name and « * » could be dropped from a
+    saved session.** They were only written inside the console's
+    remembered state block; a console whose state was not on record at
+    save time (for instance not yet instantiated) lost its preset
+    tracking. The name and the « * » now travel with the session
+    independently of the state block, and come back on reload the
+    same way. (Caught by the offline test harness: 168/170 → all
+    green.)
+
+- **2.27.0**
+  - **Current-preset tracking (the « * » workflow).** The preset list
+    now always mirrors the **hosted console's current preset**:
+    - **Saving** a preset makes it the console's current one — the
+      list shows it right away. The save dialog opens with its name
+      field **focused** and **pre-filled with the current preset's
+      name, selected** (typing replaces it) — no click needed.
+    - **Switching consoles updates the name** — the console you land
+      on shows its own current preset, or **no name** if its state
+      never came from a preset.
+    - **Moving a knob on the console** adds a `*` **left of the
+      preset's name** — the preset is « modified ». Reloading it or
+      saving over it clears the `*`. The shell mutes its own state
+      pushes (preset loads, per-console memory, session restores), so
+      the `*` only reflects *your* moves.
+    - The name **and** the `*` are **saved with the session** and come
+      back on reload.
+  - **Export clarified:** the export tray acts on the hosted console's
+    **current preset only**, and the save dialog **opens with that
+    preset's own name pre-filled** — the exported file always matches.
+    Exporting with no current preset says so in the status area
+    instead of doing nothing.
+  - The preset list keeps listing **only the root of the preset
+    folder** (sub-folders were already ignored) — which is what makes
+    import/export useful.
 
 - **2.26.1**
   - **Preset buttons as icons, on a single line.** The four preset

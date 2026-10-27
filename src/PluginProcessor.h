@@ -17,7 +17,8 @@ class TheChannelStripAudioProcessorEditor;
 // stable smoothed LUFS correction (how much to add to the output to
 // match the input loudness); the user applies it by hand on the hosted
 // plugin's own controls.
-class TheChannelStripAudioProcessor : public juce::AudioProcessor
+class TheChannelStripAudioProcessor : public juce::AudioProcessor,
+                                       public juce::AudioProcessorParameter::Listener
 {
 public:
     // v2.13: seven consoles - the five originals plus the Focusrite SC
@@ -72,8 +73,26 @@ public:
     juce::String getCurrentPluginIdent() const { return currentPluginIdent; }
     // Last hosting event (scan result / instantiation error). Sticky.
     juce::String getHostStatus();
+    // v2.27: status posts from the editor (e.g. export with no current
+    // preset) share the processor's status area.
+    void logHostStatus (const juce::String& message);
     // True while a background scan is running (lets the UI skip the lock).
     bool isScanning() const { return scanning.load (std::memory_order_relaxed); }
+
+    // ---- v2.27: current-preset tracking (the "*" workflow) ----
+    // The name of the preset currently associated with the hosted
+    // console (empty = none), and whether its knobs have moved since
+    // that preset was loaded or saved (the "*" marker). The editor
+    // timer drains the lock-free knob-move flag first, then reads.
+    juce::String getCurrentPresetName() const;
+    bool isCurrentPresetModified() const;
+    void drainPresetDirtyFlag();
+    // ---- juce::AudioProcessorParameter::Listener (v2.27) ----
+    // Attached to the HOSTED console's parameters, so a knob move can
+    // flag the current preset as modified. Never a call into the
+    // plugin - the listener list lives in our JUCE parameter objects.
+    void parameterValueChanged (int parameterIndex, float newValue) override;
+    void parameterGestureChanged (int parameterIndex, bool gestureIsStarting) override;
 
     // v2.24 (roadmap point 7): a slot is no longer just found / greyed
     // out. Three distinct situations are reported to the editor so a
@@ -227,8 +246,13 @@ public:
 
 private:
     void runScan();
-    void logHostStatus (const juce::String& message);
     void scanDirectoryForFormat (const juce::File& directory);
+    // v2.27: fold the lock-free knob-move flag into the hosted
+    // console's "*" state. Message thread only (the editor timer, a
+    // console switch, a session save) - and it MUST run before
+    // currentPluginIdent changes, so a knob move made just before a
+    // switch stars the preset of the console it belongs to.
+    void flushPresetDirtyIntoCurrentConsole();
 
     // ---- v2.26: preset file helpers ----
     // deterministic name -> filename mapping (the user-given name is
@@ -295,7 +319,8 @@ private:
     std::atomic<float> tiltDb { -4.5f };
 
     // ---- v2.11: per-console settings memory (see the editor API above) ----
-    juce::CriticalSection consoleStateLock;
+    // v2.27: mutable - the current-preset getters take the lock too.
+    mutable juce::CriticalSection consoleStateLock;
     std::map<juce::String, juce::MemoryBlock> consoleStates; // keyed by plugin ident
     // v2.26: a preset whose console is NOT the currently hosted one is
     // applied right after that console is instantiated (see applyPreset
@@ -304,6 +329,28 @@ private:
     // manual selection (the hosting itself checks the ident anyway).
     juce::MemoryBlock pendingPresetState;
     juce::String pendingPresetIdent;
+    // v2.27: the name that belongs with the queued preset state above;
+    // consumed by instantiateHosted right next to it.
+    juce::String pendingPresetName;
+    // v2.27: current-preset tracking, keyed by plugin ident like
+    // consoleStates and persisted the same way (attributes on each
+    // <consoleState> element). consolePresetNames holds the preset
+    // associated with each console (empty = none), consolePresetModified
+    // whether its knobs have moved since that preset was loaded or
+    // saved (the "*" marker the editor shows left of the name).
+    // Guarded by consoleStateLock.
+    std::map<juce::String, juce::String> consolePresetNames;
+    std::map<juce::String, bool> consolePresetModified;
+    // v2.27: knob-move detection. Any state the SHELL pushes into the
+    // hosted plugin (a preset, the per-console remembered state, a
+    // session restore) is not a user modification, so the parameter
+    // listener is muted while the push runs (HostedStatePushGuard in
+    // PluginProcessor.cpp). The callback can fire on any thread
+    // (automation, the plugin's own editor), so it only raises this
+    // lock-free flag; drainPresetDirtyFlag (message thread) moves it
+    // into consolePresetModified.
+    std::atomic<bool> suppressPresetDirty { false };
+    std::atomic<bool> presetDirtyPending { false };
     // v2.8: display options + editor-open gate (see the editor API above).
     std::atomic<float> anaDbDiv { 10.0f };
     std::atomic<float> eqDbDiv { 4.0f };

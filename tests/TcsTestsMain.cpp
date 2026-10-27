@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.26.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.27.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -29,6 +29,11 @@
 //     export / import / delete against the real preset folder, plus
 //     the explicit refusals - nothing hosted, missing file, corrupt
 //     file)
+//   - current-preset tracking (v2.27: the saved/loaded preset becomes
+//     the console's current one, a knob move raises the "*" once the
+//     editor timer drains it, reloading or re-saving clears it, the
+//     name and the "*" survive a session roundtrip, deleting the
+//     current preset disowns it)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -1188,6 +1193,165 @@ void testPresetManager()
     proc.deletePreset (unique);
 }
 
+// v2.27: current-preset tracking - the name the combo box mirrors, the
+// "*" that appears when a console knob moves, and the session
+// roundtrip of both. The parameter listener is driven directly (the
+// drain is exactly what the editor timer calls); the mock console is
+// only pushed states, exactly like the real ones.
+void testCurrentPresetTracking()
+{
+    beginTest ("current-preset tracking: name + \"*\" + session roundtrip (v2.27)");
+
+    const auto unique = juce::String ("Tcs Test Preset 2727");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.deletePreset (unique); // clean slate from an interrupted run
+
+    auto mock = std::make_unique<MockPresetConsole>();
+    mock->value.store (42);
+    auto* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // 1. nothing tracked yet: no name, no "*"
+    expectTrue (proc.getCurrentPresetName().isEmpty(),
+                "no preset is associated with the hosted console at first");
+    expectTrue (! proc.isCurrentPresetModified(),
+                "no preset means no \"*\" marker");
+
+    // 2. a knob move on a console with no preset stays unstarred
+    proc.parameterValueChanged (0, 0.5f);
+    proc.drainPresetDirtyFlag();
+
+    expectTrue (! proc.isCurrentPresetModified(),
+                "a knob move without a current preset does not raise \"*\"");
+
+    // 3. saving makes the preset the console's current one, unmodified
+    expectTrue (proc.savePreset (unique), "saving the hosted state as a preset");
+
+    expectTrue (proc.getCurrentPresetName() == unique,
+                "a successful save makes the preset the console's current one");
+    expectTrue (! proc.isCurrentPresetModified(),
+                "a saved preset starts unmodified");
+
+    // 4. a knob move raises the lock-free flag; the drain (the editor
+    // timer's job) turns it into the "*"
+    proc.parameterValueChanged (0, 0.5f);
+
+    expectTrue (! proc.isCurrentPresetModified(),
+                "before the drain, the \"*\" has not landed yet");
+    proc.drainPresetDirtyFlag();
+    expectTrue (proc.isCurrentPresetModified(),
+                "a knob move after the drain marks the preset modified");
+    expectTrue (proc.getCurrentPresetName() == unique,
+                "the \"*\" does not change the preset's name");
+
+    // 5. reloading the preset clears the "*" (the pushed state is
+    // ours, so the listener is muted - and the knobs now match again)
+    expectTrue (proc.applyPreset (unique), "reloading the preset applies it");
+    expectTrue (mockPtr->value.load() == 42,
+                "the console is back to the saved state");
+    expectTrue (! proc.isCurrentPresetModified(),
+                "reloading the preset clears the \"*\"");
+    expectTrue (proc.getCurrentPresetName() == unique,
+                "the name survives the reload");
+
+    // 6. session persistence: the name AND the "*" are written as
+    // attributes on the console's <consoleState> element
+    proc.parameterValueChanged (0, 0.5f);
+    proc.drainPresetDirtyFlag();
+
+    juce::MemoryBlock saved;
+    proc.getStateInformation (saved);
+
+    std::unique_ptr<juce::XmlElement> xml (
+        juce::AudioProcessor::getXmlFromBinary (saved.getData(), (int) saved.getSize()));
+
+    expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
+                "the saved state parses as TCS XML");
+
+    bool nameSaved = false, starSaved = false;
+
+    if (xml != nullptr)
+        for (auto* e : xml->getChildIterator())
+            if (e->hasTagName ("consoleState")
+                && e->getStringAttribute ("presetName") == unique)
+            {
+                nameSaved = true;
+                starSaved = e->getIntAttribute ("presetModified") == 1;
+            }
+
+    expectTrue (nameSaved, "the current preset's name is saved with the session");
+    expectTrue (starSaved, "so is its \"*\" state");
+
+    // 7. a session that carries a preset name restores it, so the
+    // combo box shows it again on reload
+    const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
+    auto session = std::make_unique<juce::XmlElement> ("TCS");
+    session->setAttribute ("version", "2.27.1");
+    session->setAttribute ("hostedIdent", fakeIdent);
+
+    auto* cs = session->createNewChildElement ("consoleState");
+    cs->setAttribute ("ident", fakeIdent);
+    cs->setAttribute ("state", juce::MemoryBlock (5, true).toBase64Encoding());
+    cs->setAttribute ("presetName", unique);
+    cs->setAttribute ("presetModified", 1);
+
+    juce::MemoryBlock sessionBlock;
+    juce::AudioProcessor::copyXmlToBinary (*session, sessionBlock);
+
+    TheChannelStripAudioProcessor restored;
+    restored.setStateInformation (sessionBlock.getData(), (int) sessionBlock.getSize());
+
+    expectTrue (restored.getCurrentPluginIdent() == fakeIdent,
+                "the session's hosted ident is restored");
+    expectTrue (restored.getCurrentPresetName() == unique,
+                "the current preset's name comes back with the session");
+    expectTrue (restored.isCurrentPresetModified(),
+                "and so does its \"*\" state");
+
+    // 7b. a console whose preset is tracked but whose state block was
+    // not saved (it was not instantiated at save time) still carries
+    // its preset through a roundtrip - v2.27.1 regression guard.
+    auto* cs2 = session->createNewChildElement ("consoleState");
+    cs2->setAttribute ("ident", juce::String ("VST3|/fake/other|bx_console SSL 4000 G"));
+    cs2->setAttribute ("presetName", juce::String ("Tcs Other Preset"));
+    cs2->setAttribute ("presetModified", 1);
+
+    juce::MemoryBlock session2Block;
+    juce::AudioProcessor::copyXmlToBinary (*session, session2Block);
+
+    TheChannelStripAudioProcessor restored2;
+    restored2.setStateInformation (session2Block.getData(), (int) session2Block.getSize());
+
+    juce::MemoryBlock saved2;
+    restored2.getStateInformation (saved2);
+
+    std::unique_ptr<juce::XmlElement> xml2 (
+        juce::AudioProcessor::getXmlFromBinary (saved2.getData(), (int) saved2.getSize()));
+
+    bool otherNameSaved = false;
+
+    if (xml2 != nullptr)
+        for (auto* e : xml2->getChildIterator())
+            if (e->hasTagName ("consoleState")
+                && e->getStringAttribute ("ident") == "VST3|/fake/other|bx_console SSL 4000 G"
+                && e->getStringAttribute ("presetName") == "Tcs Other Preset"
+                && e->getIntAttribute ("presetModified") == 1)
+                otherNameSaved = true;
+
+    expectTrue (otherNameSaved,
+                "a preset tracked without a console state block survives the roundtrip");
+
+    // 8. deleting the current preset disowns it
+    expectTrue (proc.deletePreset (unique), "cleanup: delete the preset");
+
+    expectTrue (proc.getCurrentPresetName().isEmpty(),
+                "deleting the current preset clears its name");
+    expectTrue (! proc.isCurrentPresetModified(),
+                "and its \"*\" state");
+}
+
 // v2.24 (roadmap point 7): the silent-console watch. A licence-expired
 // console loads but emits digital silence; while the input is loud the
 // watch must post exactly ONE explicit warning per hosted instance.
@@ -1347,8 +1511,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.26.1",
-                "saved state carries the current version tag (2.26.1)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.27.1",
+                "saved state carries the current version tag (2.27.1)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -1696,7 +1860,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.26.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.27.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -1710,6 +1874,7 @@ int main (int argc, char* argv[])
     testEqUncorrelatedConsoleNoise();
     testConsoleSlotStatus();
     testPresetManager();
+    testCurrentPresetTracking();
     testSilentConsoleWarning();
     testHoverReadout();
     testStateRoundtrip();

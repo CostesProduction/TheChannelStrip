@@ -129,7 +129,7 @@ namespace
         Icon icon;
     };
 
-    // v2.26: the short console label for a preset entry ("SSL E - My
+    // v2.26.1: the short console label for a preset entry ("SSL E - My
     // preset"). A consoleName that is not one of the nine (an exotic
     // plugin the preset was made for) is truncated instead of resolved.
     juce::String shortConsoleNameFor (const juce::String& consoleName)
@@ -140,6 +140,16 @@ namespace
                 return TheChannelStripAudioProcessor::consoleLabel (i);
 
         return consoleName.substring (0, juce::jmin (consoleName.length(), 14));
+    }
+
+    // v2.27: one combo entry's text ("Console - Name"), with the "* "
+    // prefix when the entry is the hosted console's current preset and
+    // its knobs have moved since it was loaded or saved.
+    juce::String presetItemText (const TheChannelStripAudioProcessor::PresetInfo& info,
+                                 bool starred)
+    {
+        return (starred ? "* " : "")
+             + shortConsoleNameFor (info.consoleName) + " - " + info.name;
     }
 
     // v2.4: sidebar + centre column geometry, shared by paint() and
@@ -1177,7 +1187,7 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
     savePresetButton.onClick   = [this] { showSavePresetDialog(); };
     deletePresetButton.onClick = [this] { confirmDeletePreset(); };
-    exportPresetButton.onClick = [this] { exportSelectedPreset(); };
+    exportPresetButton.onClick = [this] { exportCurrentPreset(); };
     importPresetButton.onClick = [this] { importPresetFile(); };
 
     refreshPresetList();
@@ -1626,6 +1636,20 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     tryEmbedHostedEditor();
     refreshLufs();
 
+    // v2.27: keep the preset combo box in step with the hosted console
+    // - its current preset's name, and the "*" that appears the
+    // moment a knob moves. The drain moves the (lock-free) knob-move
+    // flag into the console's state first; the combo is only touched
+    // when something actually changed.
+    proc.drainPresetDirtyFlag();
+
+    if (proc.getCurrentPluginIdent() != lastSyncedPresetIdent
+        || proc.getCurrentPresetName() != lastSyncedPresetName
+        || proc.isCurrentPresetModified() != lastSyncedPresetModified)
+    {
+        syncPresetComboSelection();
+    }
+
     // v2.14.2: live channel-format readout (see the ctor comment for what
     // each state and suffix tells us).
     channelLabel.setText (proc.getChannelReadout(), juce::dontSendNotification);
@@ -1812,17 +1836,26 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
     addSection ("GAIN STAGING",       correctionLabel.getTooltip());
     addSection ("CHANNEL FORMAT",     channelLabel.getTooltip());
     addSection ("PRESETS",
-                "The list shows every preset on disk as \"Console - Name\". Select one to load "
-                "it: if its console is not the one hosted, the shell switches to that console "
-                "first. The preset holds the console's knobs only - display settings (tilt, "
-                "scales, LUFS) travel with the session. The four buttons beside the list are "
-                "icons: the floppy saves the hosted console's current settings as a named "
-                "preset file (.tcsPreset, a preset of the same name is overwritten); the bin "
-                "deletes the preset selected in the list (it asks first); the tray with the "
-                "outgoing arrow exports the selected preset to a file anywhere on disk, for "
-                "sharing between machines or projects; the tray with the incoming arrow "
-                "imports a .tcsPreset file from anywhere into the preset folder, so it "
-                "appears in the list.");
+                "The list shows every .tcsPreset file at the ROOT of the preset folder "
+                "(sub-folders are ignored - that is what import/export is for) as "
+                "\"Console - Name\". Select one to load it: if its console is not the "
+                "one hosted, the shell switches to that console first. The combo always "
+                "mirrors the hosted console's current preset - switching consoles "
+                "updates the name, and shows none when the console was not loaded from "
+                "a preset. The name comes back with the session too, along with the "
+                "\"*\" that marks a preset whose console knobs have moved since it was "
+                "loaded or saved - reloading the preset or saving over it clears the "
+                "\"*\". The preset holds the console's knobs only - display settings "
+                "(tilt, scales, LUFS) travel with the session. The four buttons beside "
+                "the list are icons: the floppy saves the hosted console's current "
+                "settings as a named preset file (.tcsPreset) - the name field is "
+                "focused and pre-filled with the current preset's name, selected, and "
+                "a preset of the same name is overwritten; the bin deletes the preset "
+                "selected in the list (it asks first); the tray with the outgoing "
+                "arrow exports the hosted console's CURRENT preset, with that "
+                "preset's own name pre-filled, for sharing between machines or "
+                "projects; the tray with the incoming arrow imports a .tcsPreset file "
+                "from anywhere into the preset folder, so it appears in the list.");
     addSection ("HOSTED CONSOLE",     hostedNameLabel.getTooltip());
     addSection ("PLUGIN DATABASE",    rescanButton.getTooltip());
 
@@ -1836,31 +1869,51 @@ void TheChannelStripAudioProcessorEditor::showHelpPopup()
 // ---------------------------------------------------------------------------
 void TheChannelStripAudioProcessorEditor::refreshPresetList()
 {
-    // keep the current selection across the rebuild when possible
-    juce::String selectedName;
-
-    {
-        const int id = presetCombo.getSelectedId();
-
-        if (id > 0 && id - 1 < presetList.size())
-            selectedName = presetList[id - 1].name;
-    }
-
     presetList = proc.getAvailablePresets();
     presetCombo.clear (juce::dontSendNotification);
 
     for (int i = 0; i < presetList.size(); ++i)
-        presetCombo.addItem (shortConsoleNameFor (presetList[i].consoleName)
-                             + " - " + presetList[i].name,
-                             i + 1);
+        presetCombo.addItem (presetItemText (presetList[i], false), i + 1);
 
-    if (selectedName.isNotEmpty())
-        for (int i = 0; i < presetList.size(); ++i)
-            if (presetList[i].name == selectedName)
-            {
-                presetCombo.setSelectedId (i + 1, juce::dontSendNotification);
-                break;
-            }
+    // v2.27: with presets on disk but none loaded on the hosted
+    // console, an empty list placeholder would be misleading.
+    presetCombo.setTextWhenNothingSelected (presetList.isEmpty() ? "(no presets)" : "(none)");
+
+    syncPresetComboSelection();
+}
+
+void TheChannelStripAudioProcessorEditor::syncPresetComboSelection()
+{
+    // v2.27: the combo box mirrors the hosted console's current preset
+    // (or no selection at all when the console has none). The current
+    // preset's entry grows a "* " prefix as soon as its knobs have
+    // moved since it was loaded or saved.
+    const auto name = proc.getCurrentPresetName();
+    const bool modified = proc.isCurrentPresetModified();
+
+    int match = -1;
+
+    for (int i = 0; i < presetList.size(); ++i)
+        if (presetList[i].name == name)
+        {
+            match = i;
+            break;
+        }
+
+    // refresh every item's text (the "*" comes and goes)
+    for (int i = 0; i < presetList.size(); ++i)
+        presetCombo.changeItemText (i + 1,
+            presetItemText (presetList[i], modified && presetList[i].name == name));
+
+    if (match < 0)
+        presetCombo.setSelectedId (0, juce::dontSendNotification);
+    else
+        presetCombo.setSelectedId (match + 1, juce::dontSendNotification);
+
+    // remember what is mirrored, so the timer only resyncs on change
+    lastSyncedPresetIdent = proc.getCurrentPluginIdent();
+    lastSyncedPresetName = name;
+    lastSyncedPresetModified = modified;
 }
 
 void TheChannelStripAudioProcessorEditor::onPresetSelected()
@@ -1871,7 +1924,13 @@ void TheChannelStripAudioProcessorEditor::onPresetSelected()
         return;
 
     // applyPreset posts its own success/failure to the status area
-    proc.applyPreset (presetList[id - 1].name);
+    if (! proc.applyPreset (presetList[id - 1].name))
+    {
+        // v2.27: a failed load (missing console, corrupt file) must
+        // not leave the failed entry selected - snap back to whatever
+        // the hosted console actually holds.
+        syncPresetComboSelection();
+    }
 }
 
 void TheChannelStripAudioProcessorEditor::showSavePresetDialog()
@@ -1879,10 +1938,13 @@ void TheChannelStripAudioProcessorEditor::showSavePresetDialog()
     // a small modal asking for the preset name. Async (a plugin must
     // never block the message thread); the window deletes itself after
     // the callback has run.
+    // v2.27: the field is pre-filled with the current preset's name
+    // (overwriting the preset you are on is the common case) and gets
+    // the keyboard focus straight away - one click saved.
     auto* aw = new juce::AlertWindow ("Save preset",
                                       "Name for the hosted console's current settings:",
                                       juce::MessageBoxIconType::NoIcon);
-    aw->addTextEditor ("name", {}, {});
+    aw->addTextEditor ("name", proc.getCurrentPresetName(), {});
     aw->addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -1893,11 +1955,26 @@ void TheChannelStripAudioProcessorEditor::showSavePresetDialog()
                              {
                                  const auto name = aw->getTextEditorContents ("name").trim();
 
+                                 // v2.27: a successful save makes the
+                                 // preset the console's current one -
+                                 // the combo box follows (remark 2).
                                  if (name.isNotEmpty() && proc.savePreset (name))
                                      refreshPresetList();
                              }
                          }),
                          true);
+
+    // v2.27: put the caret straight into the name field. Deferred by
+    // one message so the window is fully on screen; the SafePointer
+    // keeps the async call safe if the user closes it first. The field
+    // selects its pre-filled content, so typing replaces it at once.
+    juce::Component::SafePointer<juce::AlertWindow> awSafe (aw);
+    juce::MessageManager::callAsync ([awSafe]()
+    {
+        if (awSafe != nullptr)
+            if (auto* te = awSafe->getTextEditor ("name"))
+                te->grabKeyboardFocus();
+    });
 }
 
 void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
@@ -1926,19 +2003,24 @@ void TheChannelStripAudioProcessorEditor::confirmDeletePreset()
                                             }));
 }
 
-void TheChannelStripAudioProcessorEditor::exportSelectedPreset()
+void TheChannelStripAudioProcessorEditor::exportCurrentPreset()
 {
-    const int id = presetCombo.getSelectedId();
+    // v2.27: export acts on the hosted console's CURRENT preset - the
+    // one the combo box shows - and the dialog opens with that
+    // preset's own name pre-filled, so the exported file matches it.
+    const auto name = proc.getCurrentPresetName();
 
-    if (id < 1 || id - 1 >= presetList.size())
+    if (name.isEmpty())
+    {
+        proc.logHostStatus ("No preset is loaded on the hosted console - load or save"
+                            " one first, then export it.");
         return;
-
-    const auto name = presetList[id - 1].name;
+    }
 
     // the FileChooser must outlive launchAsync, hence the member
     presetFileChooser = std::make_unique<juce::FileChooser> (
         "Export preset '" + name + "'",
-        proc.getPresetsDir(),
+        proc.getPresetsDir().getChildFile (name + ".tcsPreset"),
         "*.tcsPreset");
 
     presetFileChooser->launchAsync (juce::FileBrowserComponent::saveMode

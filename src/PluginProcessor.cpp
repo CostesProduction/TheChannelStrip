@@ -7,6 +7,29 @@
 // scan helper spawned by the parent instance (see launchScanChildren()).
 static const char* scanChildFlag = "--tcs-scan-child";
 
+// ---------------------------------------------------------------------------
+// v2.27: mutes the preset-dirty parameter listener while the shell itself
+// pushes a state into the hosted plugin (a preset application, the
+// per-console remembered state, a session restore) - those changes are
+// ours, not the user's, and must not raise the preset's "*". Without this,
+// switching back to a console whose remembered state came from a preset
+// would flag it as modified the moment the fresh instance is initialised.
+// ---------------------------------------------------------------------------
+struct HostedStatePushGuard
+{
+    explicit HostedStatePushGuard (std::atomic<bool>& flag) : f (flag)
+    {
+        f.store (true, std::memory_order_relaxed);
+    }
+
+    ~HostedStatePushGuard() { f.store (false, std::memory_order_relaxed); }
+
+    HostedStatePushGuard (const HostedStatePushGuard&) = delete;
+    HostedStatePushGuard& operator= (const HostedStatePushGuard&) = delete;
+
+    std::atomic<bool>& f;
+};
+
 static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -532,6 +555,11 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     // back to it later restores these settings.
     rememberCurrentConsoleState();
 
+    // v2.27: fold any pending knob-move flag into the console being
+    // LEFT (its own preset's "*") before the ident changes - a knob
+    // turned just before the switch must not star the next console.
+    flushPresetDirtyIntoCurrentConsole();
+
     currentPluginIdent = identFor (slot.desc);
 
     logHostStatus ("Instantiating '" + slot.desc.name + "'...");
@@ -551,6 +579,7 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
         const juce::ScopedLock lock (consoleStateLock);
         pendingPresetState.reset();
         pendingPresetIdent = juce::String();
+        pendingPresetName = juce::String(); // v2.27
     }
 
     hostedStrip.clearPlugin();
@@ -698,7 +727,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.26.1");
+    xml->setAttribute ("version", "2.27.1");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -711,6 +740,16 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
                        + file.getFullPathName());
         return false;
     }
+
+    // v2.27: the saved preset becomes the console's current one, and
+    // the knobs now match it by definition - no "*".
+    {
+        const juce::ScopedLock lock (consoleStateLock);
+        consolePresetNames[currentPluginIdent] = trimmed;
+        consolePresetModified[currentPluginIdent] = false;
+    }
+
+    presetDirtyPending.store (false, std::memory_order_relaxed);
 
     logHostStatus ("Preset '" + trimmed + "' saved (" + consoleName + ").");
 
@@ -761,10 +800,21 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
         {
             if (auto* active = hostedStrip.getActivePlugin())
             {
-                active->setStateInformation (state.getData(), (int) state.getSize());
+                // v2.27: this push is ours, not the user's - the guard
+                // keeps the parameter listener from raising "*".
+                {
+                    const HostedStatePushGuard guard (suppressPresetDirty);
+                    active->setStateInformation (state.getData(), (int) state.getSize());
+                    presetDirtyPending.store (false, std::memory_order_relaxed);
+                }
 
                 const juce::ScopedLock lock (consoleStateLock);
                 consoleStates[currentPluginIdent] = state;
+
+                // v2.27: the loaded preset becomes the console's
+                // current one, unmodified by definition.
+                consolePresetNames[currentPluginIdent] = info.name;
+                consolePresetModified[currentPluginIdent] = false;
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
@@ -780,6 +830,7 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
             const juce::ScopedLock lock (consoleStateLock);
             pendingPresetState = state;
             pendingPresetIdent = identFor (slot.desc);
+            pendingPresetName = info.name; // v2.27
         }
 
         logHostStatus ("Switching to '" + info.consoleName + "' to load preset '"
@@ -796,12 +847,28 @@ bool TheChannelStripAudioProcessor::applyPreset (const juce::String& presetName)
         if (active->getName().containsIgnoreCase (info.consoleName)
             || info.consoleName.containsIgnoreCase (active->getName()))
         {
-            active->setStateInformation (state.getData(), (int) state.getSize());
+            // v2.27: same guard - the push must not raise "*".
+            {
+                const HostedStatePushGuard guard (suppressPresetDirty);
+                active->setStateInformation (state.getData(), (int) state.getSize());
+                presetDirtyPending.store (false, std::memory_order_relaxed);
+            }
 
             if (currentPluginIdent.isNotEmpty())
             {
                 const juce::ScopedLock lock (consoleStateLock);
                 consoleStates[currentPluginIdent] = state;
+            }
+
+            // v2.27: current-preset tracking, like above. The map key
+            // is currentPluginIdent whichever way it was resolved -
+            // every tracking site (save / delete / apply / drain /
+            // getters) uses the same key, so this stays consistent
+            // even for a directly-set instance with no console ident.
+            {
+                const juce::ScopedLock lock (consoleStateLock);
+                consolePresetNames[currentPluginIdent] = info.name;
+                consolePresetModified[currentPluginIdent] = false;
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
@@ -828,6 +895,21 @@ bool TheChannelStripAudioProcessor::deletePreset (const juce::String& presetName
     {
         logHostStatus ("ERROR: preset '" + presetName.trim() + "' could not be deleted.");
         return false;
+    }
+
+    // v2.27: deleting the hosted console's current preset disowns it -
+    // the console keeps its sound but no longer shows a preset name.
+    {
+        const juce::ScopedLock lock (consoleStateLock);
+
+        const auto trimmed = presetName.trim();
+        const auto it = consolePresetNames.find (currentPluginIdent);
+
+        if (it != consolePresetNames.end() && it->second == trimmed)
+        {
+            it->second = juce::String();
+            consolePresetModified[currentPluginIdent] = false;
+        }
     }
 
     logHostStatus ("Preset '" + presetName.trim() + "' deleted.");
@@ -923,6 +1005,64 @@ bool TheChannelStripAudioProcessor::importPreset (const juce::File& source)
     logHostStatus ("Preset '" + info.name + "' (" + info.consoleName + ") imported.");
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// v2.27: current-preset tracking (the "*" workflow). The editor drives
+// all of this from its timer: drain the (lock-free) knob-move flag,
+// read the hosted console's preset name and its "*" state, and mirror
+// both in the preset combo box.
+// ---------------------------------------------------------------------------
+
+juce::String TheChannelStripAudioProcessor::getCurrentPresetName() const
+{
+    const juce::ScopedLock lock (consoleStateLock);
+
+    const auto it = consolePresetNames.find (currentPluginIdent);
+
+    return it != consolePresetNames.end() ? it->second : juce::String();
+}
+
+bool TheChannelStripAudioProcessor::isCurrentPresetModified() const
+{
+    const juce::ScopedLock lock (consoleStateLock);
+
+    const auto n = consolePresetNames.find (currentPluginIdent);
+    const auto m = consolePresetModified.find (currentPluginIdent);
+
+    return n != consolePresetNames.end() && n->second.isNotEmpty()
+        && m != consolePresetModified.end() && m->second;
+}
+
+void TheChannelStripAudioProcessor::flushPresetDirtyIntoCurrentConsole()
+{
+    if (! presetDirtyPending.exchange (false, std::memory_order_relaxed))
+        return;
+
+    const juce::ScopedLock lock (consoleStateLock);
+
+    const auto it = consolePresetNames.find (currentPluginIdent);
+
+    if (it != consolePresetNames.end() && it->second.isNotEmpty())
+        consolePresetModified[currentPluginIdent] = true;
+}
+
+void TheChannelStripAudioProcessor::drainPresetDirtyFlag()
+{
+    // the editor timer's entry point (message thread)
+    flushPresetDirtyIntoCurrentConsole();
+}
+
+void TheChannelStripAudioProcessor::parameterValueChanged (int, float)
+{
+    // v2.27: any hosted-console knob move flags the current preset as
+    // modified. The callback can fire on any thread (the plugin's own
+    // editor, automation), so only a lock-free flag is raised here;
+    // drainPresetDirtyFlag (message thread) turns it into "*".
+    if (! suppressPresetDirty.load (std::memory_order_relaxed))
+        presetDirtyPending.store (true, std::memory_order_relaxed);
+}
+
+void TheChannelStripAudioProcessor::parameterGestureChanged (int, bool) {}
 
 // ---------------------------------------------------------------------------
 // v2.11: per-console settings memory. Switching consoles destroys and
@@ -1397,6 +1537,14 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
 
     hostedStrip.setPlugin (std::move (plugin));
 
+    // v2.27: watch the hosted console's parameters so a knob move can
+    // flag the console's current preset as modified ("*"). This only
+    // registers our listener in the JUCE parameter objects (never a
+    // call into the plugin), and the processor outlives every hosted
+    // instance, so no removal is needed.
+    for (auto* p : hostedStrip.getActivePlugin()->getParameters())
+        p->addListener (this);
+
     juce::String message = "Hosted '" + desc.name + "' ready (latency "
                          + juce::String (hostedStrip.getActivePlugin()->getLatencySamples())
                          + " samples, " + juce::String (numHostedParams) + " parameters"
@@ -1418,8 +1566,15 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
     {
         if (auto* active = hostedStrip.getActivePlugin())
         {
+            // v2.27: session restore is a shell push too - the "*"
+            // state comes back with the session (it is persisted on
+            // each <consoleState>), so it must not be re-derived here.
+            const HostedStatePushGuard guard (suppressPresetDirty);
             active->setStateInformation (savedHostedStateForRestore.getData(),
                                          (int) savedHostedStateForRestore.getSize());
+            // a plugin dispatching its parameter notifications just
+            // after the restore would star a clean preset for nothing.
+            presetDirtyPending.store (false, std::memory_order_relaxed);
 
             // v2.11: the state restored from the session becomes this
             // console's remembered state (captured BEFORE the reset below)
@@ -1444,6 +1599,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
         if (auto* active = hostedStrip.getActivePlugin())
         {
             juce::MemoryBlock presetToApply;
+            juce::String presetNameToApply; // v2.27
             bool presetMatches = false;
 
             {
@@ -1453,20 +1609,31 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                     && pendingPresetIdent == currentPluginIdent)
                 {
                     presetToApply = pendingPresetState;
+                    presetNameToApply = pendingPresetName; // v2.27
                     presetMatches = true;
 
                     pendingPresetState.reset();
                     pendingPresetIdent = juce::String();
+                    pendingPresetName = juce::String();
                 }
             }
 
             if (presetMatches)
             {
-                active->setStateInformation (presetToApply.getData(),
-                                            (int) presetToApply.getSize());
+                {
+                    const HostedStatePushGuard guard (suppressPresetDirty);
+                    active->setStateInformation (presetToApply.getData(),
+                                                (int) presetToApply.getSize());
+                    presetDirtyPending.store (false, std::memory_order_relaxed);
+                }
 
                 const juce::ScopedLock lock (consoleStateLock);
                 consoleStates[currentPluginIdent] = presetToApply;
+
+                // v2.27: the queued preset is now this console's
+                // current one, unmodified by definition.
+                consolePresetNames[currentPluginIdent] = presetNameToApply;
+                consolePresetModified[currentPluginIdent] = false;
             }
             else
             {
@@ -1481,8 +1648,15 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                 }
 
                 if (remembered.getSize() > 0)
+                {
+                    // v2.27: the remembered state is a shell push too
+                    // (switching back to a console whose state came
+                    // from a preset must not raise "*").
+                    const HostedStatePushGuard guard (suppressPresetDirty);
                     active->setStateInformation (remembered.getData(),
                                                  (int) remembered.getSize());
+                    presetDirtyPending.store (false, std::memory_order_relaxed);
+                }
             }
         }
     }
@@ -1555,7 +1729,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.26.1");
+    xml->setAttribute ("version", "2.27.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
@@ -1584,14 +1758,51 @@ void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& dest
     // saved session always holds its latest settings).
     rememberCurrentConsoleState();
 
+    // v2.27: flush a pending knob-move flag first, so the "*" state
+    // survives the save too (getStateInformation can run before the
+    // editor timer drained it).
+    flushPresetDirtyIntoCurrentConsole();
+
     {
         const juce::ScopedLock lock (consoleStateLock);
 
+        // v2.27.1: one element per remembered console state, plus any
+        // console whose preset tracking must survive even when no
+        // state block is on record (a console that was not
+        // instantiated when the session was saved) - the union of
+        // both key sets, so a preset name never rides on the state
+        // block being present.
+        juce::StringArray idents;
+
         for (const auto& [ident, state] : consoleStates)
+            idents.addIfNotAlreadyThere (ident);
+
+        for (const auto& [ident, name] : consolePresetNames)
+            if (name.isNotEmpty())
+                idents.addIfNotAlreadyThere (ident);
+
+        for (const auto& ident : idents)
         {
             auto* e = xml->createNewChildElement ("consoleState");
             e->setAttribute ("ident", ident);
-            e->setAttribute ("state", state.toBase64Encoding());
+
+            const auto st = consoleStates.find (ident);
+
+            if (st != consoleStates.end())
+                e->setAttribute ("state", st->second.toBase64Encoding());
+
+            // v2.27: the console's current preset travels with the
+            // session (name + "*" state), so a reopened project shows
+            // it again.
+            const auto pn = consolePresetNames.find (ident);
+
+            if (pn != consolePresetNames.end() && pn->second.isNotEmpty())
+            {
+                e->setAttribute ("presetName", pn->second);
+                const auto pm = consolePresetModified.find (ident);
+                e->setAttribute ("presetModified",
+                                 (pm != consolePresetModified.end() && pm->second) ? 1 : 0);
+            }
         }
     }
 
@@ -1695,21 +1906,51 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
 
         consoleStates.clear();
 
+        // v2.27.1: the preset tracking is part of the session too,
+        // so a restore replaces it wholesale instead of merging with
+        // whatever was tracked before (a host can call
+        // setStateInformation on an instance that already tracked
+        // presets). The pending preset is dropped for the same
+        // reason: the restored session is authoritative.
+        consolePresetNames.clear();
+        consolePresetModified.clear();
+        pendingPresetState.reset();
+        pendingPresetIdent = juce::String();
+        pendingPresetName = juce::String();
+
         for (auto* e : xml->getChildIterator())
         {
             if (! e->hasTagName ("consoleState"))
                 continue;
 
             const auto ident = e->getStringAttribute ("ident");
-            const auto b64 = e->getStringAttribute ("state");
 
-            if (ident.isEmpty() || b64.isEmpty())
+            if (ident.isEmpty())
                 continue;
 
-            juce::MemoryBlock block;
+            const auto b64 = e->getStringAttribute ("state");
 
-            if (block.fromBase64Encoding (b64) && block.getSize() > 0)
-                consoleStates[ident] = std::move (block);
+            if (b64.isNotEmpty())
+            {
+                juce::MemoryBlock block;
+
+                if (block.fromBase64Encoding (b64) && block.getSize() > 0)
+                    consoleStates[ident] = std::move (block);
+            }
+
+            // v2.27: the console's current preset comes back with the
+            // session. Older sessions have no attributes, so nothing
+            // is restored - the same graceful rule as the states
+            // above. v2.27.1: this is independent of the state
+            // block being present (a preset can be tracked for a
+            // console whose state was not saved).
+            const auto pn = e->getStringAttribute ("presetName");
+
+            if (pn.isNotEmpty())
+            {
+                consolePresetNames[ident] = pn;
+                consolePresetModified[ident] = e->getBoolAttribute ("presetModified", false);
+            }
         }
     }
 

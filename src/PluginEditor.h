@@ -258,18 +258,23 @@ private:
     // by the "?" button next to the studio logo).
     void showHelpPopup();
     // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
-    // (re)populate the preset combo box from the files on disk; keeps
-    // the current selection when the preset still exists
+    // (re)populate the preset combo box from the files on disk
     void refreshPresetList();
+    // v2.27: mirror the hosted console's current preset in the combo
+    // box (selection + "*" prefix when its knobs have moved)
+    void syncPresetComboSelection();
     // the combo selection changed -> load that preset
     void onPresetSelected();
-    // "Save" -> small modal asking for a name, then proc.savePreset
+    // the floppy -> small modal asking for a name (v2.27: the name
+    // field is focused straight away and pre-filled with the current
+    // preset's name, selected), then proc.savePreset
     void showSavePresetDialog();
-    // "Delete" -> confirmation, then proc.deletePreset
+    // the bin -> confirmation, then proc.deletePreset
     void confirmDeletePreset();
-    // "Export" -> native save dialog, then proc.exportPreset
-    void exportSelectedPreset();
-    // "Import" -> native open dialog, then proc.importPreset
+    // the outgoing-arrow tray -> export the hosted console's CURRENT
+    // preset (v2.27: the dialog pre-fills the preset's own name)
+    void exportCurrentPreset();
+    // the incoming-arrow tray -> native open dialog, then proc.importPreset
     void importPresetFile();
 
     // v1.0.4: renamed from "processor" to avoid shadowing the inherited
@@ -292,9 +297,10 @@ private:
     // then a single row of four icon buttons (v2.26.1: floppy = save,
     // bin = delete, tray with outgoing arrow = export, tray with incoming
     // arrow = import - no text, no tooltips; the "?" panel documents
-    // them). The combo selection loads the preset (switching consoles if
-    // needed); the buttons act on the selected entry, except Save (acts
-    // on the hosted console's current state).
+    // them). The combo selection loads the preset (switching consoles
+    // if needed). v2.27: the combo mirrors the hosted console's
+    // CURRENT preset ("*" when its knobs have moved), Save and Export
+    // act on the hosted console, Delete acts on the selected entry.
     // v2.26.1: the icon look-and-feels MUST be declared before the
     // buttons they are attached to, so they are destroyed after them.
     std::array<std::unique_ptr<juce::LookAndFeel>, 4> presetButtonLaFs;
@@ -307,6 +313,12 @@ private:
     // the combo entries, refreshed by refreshPresetList (itemId is
     // index+1 into this array)
     juce::Array<TheChannelStripAudioProcessor::PresetInfo> presetList;
+    // v2.27: what the timer last mirrored into the combo box - the
+    // sync only runs when the hosted console, its current preset or
+    // its "*" state actually changed.
+    juce::String lastSyncedPresetIdent;
+    juce::String lastSyncedPresetName;
+    bool lastSyncedPresetModified = false;
     // v2.26: the FileChoosers must outlive their async callbacks.
     std::unique_ptr<juce::FileChooser> presetFileChooser;
 
