@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.23.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.24.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -239,6 +239,49 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.24.1**
+  - **Test-harness compile fix** (plugin code unchanged): the new
+    MockSilenceConsole stub declared `getProgramName()` without the
+    `int` parameter of the pure virtual
+    `juce::AudioProcessor::getProgramName (int index)` — the harness
+    failed to build while the plugin itself built and linked cleanly.
+    The stub now matches the same signature the older mocks already
+    use. Everything else is identical to 2.24.0.
+
+- **2.24.0**
+  - **Clean missing-plugin / expired-licence handling (roadmap
+    point 7).** No console slot is ever a mysterious grey button any
+    more: every unavailable state is detected, explained and styled.
+    - **Missing consoles stay clickable.** A console that is not
+      installed keeps its button active with a dimmed style; clicking
+      it posts the exact situation to the status area ("was not found
+      in the scanned VST3 folders — check that it is installed, or
+      press Rescan") instead of silently doing nothing.
+    - **Blacklisted plugins are named.** A plugin that CRASHED the
+      out-of-process scanner is blacklisted; its slot now says so
+      ("crashed the plugin scanner and was blacklisted — update or
+      reinstall it, then press Rescan"), because a plain Rescan will
+      not fix that.
+    - **Moved/deleted files are detected.** A slot whose scanned file
+      no longer exists on disk reports the dead path ("was last seen
+      at '…' but that file no longer exists — moved or
+      uninstalled?").
+    - **Instantiation errors quote the file.** If creating the
+      instance fails, the ERROR line now carries the plugin's file
+      path too, so a moved .vst3 is immediately identifiable.
+    - **Silent-console watch (licence expired).** A lapsed licence
+      does not make a console fail to load — it loads and then emits
+      digital silence forever. The shell now watches the two
+      short-term LUFS meters it already runs: when the input carries
+      signal while the hosted console has produced nothing for 5
+      seconds, ONE explicit warning is posted ("'SSL 9000 J' produces
+      no output while its input is active — licence expired or plugin
+      not authorised?"). Once per hosted instance; swapping consoles
+      re-arms it. A paused track (silent input) never triggers it.
+    - **Status line colour.** ERROR: lines are red, WARNING: lines
+      amber, everything else grey — a licence warning no longer reads
+      like everyday scan chatter.
 
 - **2.23.0**
   - **Analyser visual pass - épurée (roadmap point 11, the aesthetic

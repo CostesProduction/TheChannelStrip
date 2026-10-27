@@ -75,12 +75,22 @@ public:
     // True while a background scan is running (lets the UI skip the lock).
     bool isScanning() const { return scanning.load (std::memory_order_relaxed); }
 
+    // v2.24 (roadmap point 7): a slot is no longer just found / greyed
+    // out. Three distinct situations are reported to the editor so a
+    // dead button always has an explanation:
+    //   - not found: nothing scanned matches the console name
+    //   - blacklisted: the plugin CRASHED the out-of-process scanner
+    //     and was blacklisted (update or reinstall it)
+    //   - fileMissing: a scanned description matches, but the file it
+    //     points to no longer exists (moved / uninstalled since the scan)
     struct ConsoleSlot
     {
         int index = -1;                    // 0..numConsoles-1
         juce::String name;                 // full plugin name
         juce::PluginDescription desc;     // valid only when found
         bool found = false;
+        bool blacklisted = false;
+        bool fileMissing = false;
     };
 
     // Exactly numConsoles entries, one per supported console (found = false
@@ -174,10 +184,32 @@ public:
     // logs it to the Terminal whenever it changes).
     int getForwardedLatency() const { return lastReportedLatency; }
 
+    // v2.24 (point 7): how many times the silent-console watch has fired
+    // over the life of the processor (each hosted instance can fire at
+    // most once). The test harness asserts the re-arm behaviour with it.
+    int getSilenceWarningCount() const
+    {
+        return silenceWarningCount.load (std::memory_order_relaxed);
+    }
+
 private:
     void runScan();
     void logHostStatus (const juce::String& message);
     void scanDirectoryForFormat (const juce::File& directory);
+
+    // ---- v2.24 (roadmap point 7): silent-console watch ----
+    // Detects the classic "licence expired" failure mode: a third-party
+    // console loads fine but produces digital silence (Plugin Alliance
+    // plugins do exactly this once their licence lapses). Runs from
+    // processBlock while the editor is open: when the input carries
+    // signal but the hosted console has emitted nothing for 5 seconds,
+    // ONE explicit warning is posted to the status area. Once per
+    // hosted instance - swapping consoles or re-hosting re-arms it.
+    void watchHostedSilence (int numSamples);
+    std::atomic<bool> silenceWarned { false };
+    std::atomic<int> silenceWarningCount { 0 };
+    double silenceWatchSeconds = 0.0;          // audio thread only
+    juce::AudioProcessor* silenceWatchedPlugin = nullptr; // audio thread only
 
     // ---- v1.0.10: out-of-process collection scan ----
     bool isStandaloneApp() const;

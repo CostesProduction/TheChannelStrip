@@ -327,6 +327,11 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         // v2.22: the console's output of the same block - this drain
         // advances the transfer frames (and computes the cross-spectra).
         transferAnalyzer.pushOutput (buffer);
+
+        // v2.24 (point 7): the silent-console watch rides the same
+        // measurement gate (the warning is a UI concern; a closed editor
+        // has nowhere to show it).
+        watchHostedSilence (numSamples);
     }
 
     // ---- forward the hosted plugin's reported latency to the host ----
@@ -355,6 +360,61 @@ void TheChannelStripAudioProcessor::setEditorOpen (bool isOpen)
     }
 }
 
+// v2.24 (roadmap point 7): the licence-expired detector. A lapsed Plugin
+// Alliance licence does not make its console fail to load - the plugin
+// instantiates happily and then emits DIGITAL SILENCE forever, which
+// used to look like a broken track with no hint about the cause. The
+// watch compares the two short-term LUFS meters that already run anyway:
+// input active (> -55 LUFS) while the hosted console has been silent
+// (< -80 LUFS) for 5 seconds in a row -> one explicit warning, then
+// silence until the hosted instance changes (swapping consoles or
+// re-hosting re-arms the watch). The LUFS short-term window is 3 s, so
+// the values the watch reads are themselves smoothed - the 5 s hold
+// means the condition held for ~2 s of real history, which no legit
+// gate or pause in a mix imitates while the input is this loud.
+// logHostStatus takes a lock and writes one Terminal line; this happens
+// at most once per hosted instance, which is acceptable on the audio
+// thread (and is the same one-shot diagnostic pattern as the latency
+// reporting right below it).
+void TheChannelStripAudioProcessor::watchHostedSilence (int numSamples)
+{
+    auto* active = hostedStrip.getActivePlugin();
+
+    // a new hosted instance (or none) re-arms the watch
+    if (active != silenceWatchedPlugin)
+    {
+        silenceWatchedPlugin = active;
+        silenceWatchSeconds = 0.0;
+        silenceWarned.store (false, std::memory_order_relaxed);
+    }
+
+    if (active == nullptr)
+        return;
+
+    const float inLufs  = lufsIn.getShortTermLufs();
+    const float outLufs = lufsOut.getShortTermLufs();
+
+    if (inLufs > -55.0f && outLufs < -80.0f)
+    {
+        silenceWatchSeconds += (double) numSamples / currentSampleRate;
+
+        if (silenceWatchSeconds >= 5.0
+            && ! silenceWarned.load (std::memory_order_relaxed))
+        {
+            silenceWarned.store (true, std::memory_order_relaxed);
+            silenceWarningCount.fetch_add (1, std::memory_order_relaxed);
+
+            logHostStatus ("WARNING: '" + active->getName() + "' produces no output"
+                           " while its input is active - licence expired or plugin"
+                           " not authorised? Open its interface to check.");
+        }
+    }
+    else
+    {
+        silenceWatchSeconds = 0.0;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // console selection
 // ---------------------------------------------------------------------------
@@ -365,9 +425,15 @@ TheChannelStripAudioProcessor::getConsoleSlots()
     std::array<ConsoleSlot, numConsoles> slots;
 
     juce::Array<juce::PluginDescription> types;
+    juce::StringArray blacklistedFiles;
+
     {
         const juce::ScopedLock lock (scanLock);
         types = hostedStrip.getKnownPluginList().getTypes();
+        // v2.24 (point 7): a plugin that CRASHED the out-of-process
+        // scanner lands here; the button must be able to say so instead
+        // of looking mysteriously unavailable.
+        blacklistedFiles = hostedStrip.getKnownPluginList().getBlacklistedFiles();
     }
 
     for (int i = 0; i < numConsoles; ++i)
@@ -395,6 +461,31 @@ TheChannelStripAudioProcessor::getConsoleSlots()
                 slots[(size_t) i].found = true;
             }
         }
+
+        // v2.24 (point 7): the scanner blacklisted a file that belongs to
+        // this console slot (it killed a scan helper). Reported BEFORE
+        // the plain "not found" case - the user needs to update or
+        // reinstall the plugin, a Rescan alone will not fix it.
+        for (auto& path : blacklistedFiles)
+        {
+            if (path.containsIgnoreCase (consoleNames[i]))
+            {
+                slots[(size_t) i].blacklisted = true;
+                break;
+            }
+        }
+
+        // v2.24 (point 7): the scanned description matches, but the file
+        // it points to is gone (uninstalled or moved since the last
+        // scan). exists() - not existsAsFile(): a mac VST3 is a bundle,
+        // i.e. a directory. Only checked for VST3: other formats use
+        // non-path identifiers.
+        if (slots[(size_t) i].found
+            && slots[(size_t) i].desc.pluginFormatName.equalsIgnoreCase ("VST3")
+            && ! juce::File (slots[(size_t) i].desc.fileOrIdentifier).exists())
+        {
+            slots[(size_t) i].fileMissing = true;
+        }
     }
 
     return slots;
@@ -407,6 +498,26 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
 
     auto slots = getConsoleSlots();
     const auto& slot = slots[(size_t) consoleIndex];
+
+    // v2.24 (point 7): clicking an unavailable console must always yield
+    // an explicit, actionable message in the status area - never a
+    // silent no-op. Three distinct situations, three distinct messages.
+    if (slot.blacklisted)
+    {
+        logHostStatus ("'" + juce::String (consoleNames[consoleIndex]) + "'"
+                       + " crashed the plugin scanner and was blacklisted."
+                         " Update or reinstall it, then press Rescan.");
+        return;
+    }
+
+    if (slot.fileMissing)
+    {
+        logHostStatus ("'" + juce::String (consoleNames[consoleIndex]) + "'"
+                       + " was last seen at '" + slot.desc.fileOrIdentifier + "'"
+                       + " but that file no longer exists - moved or uninstalled?"
+                         " Press Rescan.");
+        return;
+    }
 
     if (! slot.found)
     {
@@ -864,8 +975,13 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
     if (plugin == nullptr)
     {
         // v1.0.6 fix: this failure used to be completely silent.
+        // v2.24 (point 7): the message now carries the exact file path
+        // too, so a moved/deleted plugin is immediately identifiable.
         logHostStatus ("ERROR: cannot instantiate '" + desc.name + "': "
-                       + (error.isEmpty() ? juce::String ("unknown error") : error));
+                       + (error.isEmpty() ? juce::String ("unknown error") : error)
+                       + (desc.fileOrIdentifier.isNotEmpty()
+                              ? " (file: " + desc.fileOrIdentifier + ")"
+                              : juce::String()));
         return;
     }
 
@@ -1028,7 +1144,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.23.0");
+    xml->setAttribute ("version", "2.24.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

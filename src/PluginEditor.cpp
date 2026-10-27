@@ -1446,6 +1446,20 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
 
     statusLabel.setText (status.isNotEmpty() ? status : juce::String(),
                          juce::dontSendNotification);
+
+    // v2.24 (point 7): a warning or an error must not read like the
+    // everyday scan chatter - the line is red for ERROR:, amber for
+    // WARNING:, grey otherwise. The colour is cached so the label is
+    // only touched when it actually changes.
+    const juce::Colour statusColour = status.startsWith ("ERROR:")   ? juce::Colour (0xffe25b5b)
+                                      : status.startsWith ("WARNING:") ? juce::Colour (0xffe2a44b)
+                                                                       : juce::Colour (0xff8f9bb0);
+
+    if (statusColour != lastStatusColour)
+    {
+        lastStatusColour = statusColour;
+        statusLabel.setColour (juce::Label::textColourId, statusColour);
+    }
 }
 
 void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
@@ -1458,11 +1472,37 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
         auto& btn = consoleButtons[i];
         const auto& slot = slots[i];
 
-        btn.setEnabled (slot.found);
+        // v2.24 (roadmap point 7): an unavailable console is NO LONGER a
+        // disabled grey button. It stays clickable - clicking it makes
+        // selectConsole post the exact situation to the status area - and
+        // only the styling marks it: dimmed text, tooltip saying why.
+        styleConsoleButton (btn);
 
-        btn.setTooltip (slot.found
-                            ? "Host " + slot.desc.name
-                            : juce::String (slot.name) + " - not found (install it or Rescan)");
+        // any slot that cannot be hosted right now is dimmed (a missing
+        // console, a blacklisted one, or a file that vanished since the
+        // scan) - but every one of them stays clickable.
+        if (! slot.found || slot.fileMissing)
+        {
+            btn.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff141a26));
+            btn.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff141a26));
+            btn.setColour (juce::TextButton::textColourOffId,  juce::Colour (0xff5f6b82));
+            btn.setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff5f6b82));
+        }
+
+        juce::String tip;
+
+        if (slot.blacklisted)
+            tip = juce::String (slot.name)
+                  + " - crashed the scanner and was blacklisted (click for details)";
+        else if (slot.fileMissing)
+            tip = juce::String (slot.name)
+                  + " - file no longer exists (click for details)";
+        else if (slot.found)
+            tip = "Host " + slot.desc.name;
+        else
+            tip = juce::String (slot.name) + " - not found (install it or Rescan)";
+
+        btn.setTooltip (tip);
 
         const bool active = slot.found
                                 && proc.identFor (slot.desc) == proc.getCurrentPluginIdent();

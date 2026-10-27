@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.23.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.24.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -17,6 +17,14 @@
 //     that adds an independent 12 kHz tone; the cross-spectrum transfer
 //     reads flat 0 dB there while the coherence dips below 1 - the old
 //     power ratio would have read the tone as a +3 dB phantom boost)
+//   - console slot status reporting (v2.24, roadmap point 7: missing /
+//     blacklisted / moved-file slots each carry their own explanation,
+//     and clicking an unavailable console posts an explicit message
+//     instead of doing nothing)
+//   - silent-console watch (v2.24, roadmap point 7: a licence-expired
+//     stand-in console emits digital silence while the input is loud -
+//     exactly ONE explicit warning per hosted instance, none for a
+//     healthy console, none for a silent input, re-armed on swap)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -335,6 +343,58 @@ private:
     double tonePhase = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockToneConsole)
+};
+
+// ---------------------------------------------------------------------------
+// MockSilenceConsole (v2.24, roadmap point 7): the licence-expired
+// stand-in. It accepts the buses like any console but emits DIGITAL
+// SILENCE - exactly what a lapsed licence looks like on a Plugin
+// Alliance console: the plugin loads happily, every meter reads
+// nothing. The v2.24 silent-console watch must flag it ONCE while the
+// input is loud, and must stay quiet when the input itself is silent.
+// ---------------------------------------------------------------------------
+class MockSilenceConsole : public juce::AudioProcessor
+{
+public:
+    MockSilenceConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {}
+
+    const juce::String getName() const override { return "MockSilenceConsole"; }
+
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        return layouts.getMainInputChannelSet() == layouts.getMainOutputChannelSet()
+            && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.clear();
+    }
+
+    double getTailLengthSeconds() const override { return 2.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockSilenceConsole)
 };
 
 // ---------------------------------------------------------------------------
@@ -837,6 +897,206 @@ void testEqUncorrelatedConsoleNoise()
 // inverse frequency mapping and the value formatting - are exercised
 // here without a live editor (the panel itself needs the GUI, the math
 // does not).
+// v2.24 (roadmap point 7): every way a console can be unavailable must be
+// REPORTED, not just greyed out. Three distinct situations are driven
+// deterministically: nothing scanned (plain missing), a file the scanner
+// blacklisted (it crashed the out-of-process helper), and a scanned
+// description whose file has since vanished (moved / uninstalled).
+void testConsoleSlotStatus()
+{
+    beginTest ("console slot status: missing / blacklisted / moved file (v2.24, point 7)");
+
+    // The processor's DESTRUCTOR writes the known list back to
+    // scanned_plugins.xml, and this test scrubs that list - so the real
+    // database file is backed up before the scrub and restored after the
+    // instance is destroyed (a machine with a real scan history keeps it).
+    TheChannelStripAudioProcessor* proc = new TheChannelStripAudioProcessor();
+    proc->prepareToPlay (48000.0, 512);
+
+    const juce::File dbFile = proc->getAppDataDir().getChildFile ("scanned_plugins.xml");
+    const juce::File dbBackup = dbFile.getSiblingFile ("scanned_plugins.tcs-test-backup");
+    dbBackup.deleteFile();
+
+    const bool backedUp = dbFile.existsAsFile() && dbFile.copyFileTo (dbBackup);
+
+    // scrub the database loaded from disk so the suite is deterministic
+    // even on a machine with a real scanned_plugins.xml
+    {
+        const juce::ScopedLock lock (proc->getScanLock());
+        proc->getHostedStrip().getKnownPluginList().clear();
+    }
+
+    // 1. nothing installed: every slot is plain missing
+    for (const auto& slot : proc->getConsoleSlots())
+        expectTrue (! slot.found && ! slot.blacklisted && ! slot.fileMissing,
+                    "empty database: slot '" + slot.name + "' is plain missing");
+
+    proc->selectConsole (1);   // bx_console SSL 4000 E
+    expectTrue (proc->getHostStatus().contains ("was not found"),
+                "clicking a missing console posts the not-found explanation");
+    expectTrue (! proc->getHostStatus().startsWith ("ERROR:")
+                && ! proc->getHostStatus().startsWith ("WARNING:"),
+                "not-found is an explanation, not an error");
+
+    // 2. blacklisted: the scanner recorded a crash for a file that
+    //    belongs to the SSL J slot
+    proc->getHostedStrip().getKnownPluginList().addToBlacklist (
+        "/Library/Audio/Plug-Ins/VST3/bx_console SSL 9000 J.vst3");
+
+    {
+        const auto slots = proc->getConsoleSlots();
+        expectTrue (slots[3].blacklisted, "a blacklisted file marks the SSL J slot");
+        expectTrue (! slots[3].found,     "a blacklisted plugin is not hostable");
+        expectTrue (! slots[3].fileMissing,
+                    "a blacklisted slot is not confused with a moved file");
+    }
+
+    proc->selectConsole (3);
+    expectTrue (proc->getHostStatus().contains ("blacklisted"),
+                "clicking a blacklisted console says so explicitly");
+
+    // 3. moved file: a ghost description matches the SSL G slot but
+    //    points at a file that does not exist on disk
+    {
+        juce::PluginDescription ghost;
+        ghost.name = "bx_console SSL 4000 G (ghost)";
+        ghost.pluginFormatName = "VST3";
+        ghost.fileOrIdentifier = "/nonexistent/ghost/bx_console SSL 4000 G.vst3";
+        ghost.uniqueId = 0x12345678;
+
+        const juce::ScopedLock lock (proc->getScanLock());
+        expectTrue (proc->getHostedStrip().getKnownPluginList().addType (ghost),
+                    "the ghost description enters the known list");
+    }
+
+    {
+        const auto slots = proc->getConsoleSlots();
+        expectTrue (slots[2].found && slots[2].fileMissing,
+                    "a scanned description whose file is gone reports fileMissing");
+    }
+
+    proc->selectConsole (2);
+    expectTrue (proc->getHostStatus().contains ("no longer exists"),
+                "clicking a moved-file console names the dead path");
+    expectTrue (proc->getHostStatus().contains ("nonexistent/ghost"),
+                "the message quotes the file that no longer exists");
+
+    // the instance dies HERE (its destructor writes the scrubbed list);
+    // then the real database is put back exactly as it was
+    delete proc;
+
+    if (backedUp)
+    {
+        expectTrue (dbBackup.copyFileTo (dbFile),
+                    "the real scanned_plugins.xml is restored after the test");
+        dbBackup.deleteFile();
+    }
+    else
+    {
+        dbFile.deleteFile();  // there was no database: leave none behind
+    }
+}
+
+// v2.24 (roadmap point 7): the silent-console watch. A licence-expired
+// console loads but emits digital silence; while the input is loud the
+// watch must post exactly ONE explicit warning per hosted instance.
+// Negative cases: a healthy passthrough console and a silent input (a
+// paused track) must never trigger it. Re-hosting re-arms the watch.
+void testSilentConsoleWarning()
+{
+    beginTest ("silent-console watch, licence-expired stand-in (v2.24, point 7)");
+
+    // positive: loud input into a silent console -> one explicit warning
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+        proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+
+        juce::AudioBuffer<float> block (2, 512);
+        SineSource src (1000.0, 48000.0, 0.5f);
+        processBlocks (proc, src, 800, block);   // ~8.5 s of loud input
+
+        const auto status = proc.getHostStatus();
+        expectTrue (status.startsWith ("WARNING:"),
+                    "a silent hosted console while the input is loud is a WARNING");
+        expectTrue (status.contains ("produces no output"),
+                    "the warning says what it measures");
+        expectTrue (status.contains ("licence"),
+                    "the warning names the likely cause");
+        expectTrue (proc.getSilenceWarningCount() == 1,
+                    "the warning fires exactly once per hosted instance");
+
+        // keep feeding: still exactly one
+        processBlocks (proc, src, 100, block);
+        expectTrue (proc.getSilenceWarningCount() == 1,
+                    "continued silence does not re-fire the warning");
+    }
+
+    // negative 1: a console that passes the signal through never warns
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+        proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+
+        juce::AudioBuffer<float> block (2, 512);
+        SineSource src (1000.0, 48000.0, 0.5f);
+        processBlocks (proc, src, 800, block);
+
+        expectTrue (proc.getSilenceWarningCount() == 0,
+                    "a healthy passthrough console never triggers the warning");
+    }
+
+    // negative 2: a silent console fed a SILENT input: no warning - the
+    // input-active gate must hold even though the output is dead quiet
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+        proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer noMidi;
+
+        for (int n = 0; n < 800; ++n)
+        {
+            fillSilence (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectTrue (proc.getSilenceWarningCount() == 0,
+                    "a paused track (silent input) does not trigger the warning");
+    }
+
+    // re-arm: swapping consoles resets the watch, so a silent console
+    // hosted again warns again
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+
+        juce::AudioBuffer<float> block (2, 512);
+        SineSource src (1000.0, 48000.0, 0.5f);
+
+        proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+        processBlocks (proc, src, 800, block);
+        expectTrue (proc.getSilenceWarningCount() == 1, "first hosting warns");
+
+        proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+        processBlocks (proc, src, 100, block);   // ~1 s of healthy pass
+        expectTrue (proc.getSilenceWarningCount() == 1, "healthy pass adds no warning");
+
+        proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+        // 1000 blocks (~10.7 s): the output meter's 3 s short-term window
+        // still carries the HEALTHY console's last hops after the swap,
+        // so the warning needs ~3 s (window flush) + 5 s (watch hold).
+        processBlocks (proc, src, 1000, block);
+        expectTrue (proc.getSilenceWarningCount() == 2,
+                    "re-hosting a silent console warns again (the watch re-arms)");
+    }
+}
+
 void testHoverReadout()
 {
     beginTest ("hover readout mapping and formatting");
@@ -896,7 +1156,7 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.23.0",
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.24.1",
                 "saved state carries the current version tag");
 
     TheChannelStripAudioProcessor restored;
@@ -1245,7 +1505,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.23.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.24.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -1257,6 +1517,8 @@ int main (int argc, char* argv[])
     testSpectrumHighFrequency();
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
+    testConsoleSlotStatus();
+    testSilentConsoleWarning();
     testHoverReadout();
     testStateRoundtrip();
     testLatencyForwarding();

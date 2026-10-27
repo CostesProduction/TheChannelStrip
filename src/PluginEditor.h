@@ -284,6 +284,11 @@ private:
     // happens on the message thread, never in processBlock).
     int lastLoggedLatency = -1;
 
+    // v2.24 (point 7): cached colour of the status line (red on ERROR:,
+    // amber on WARNING:, grey otherwise) - the label is only touched when
+    // the colour actually changes.
+    juce::Colour lastStatusColour { 0xff8f9bb0 };
+
     std::array<juce::TextButton, (size_t) TheChannelStripAudioProcessor::numConsoles> consoleButtons;
     juce::Label tiltLabel { {}, "tilt" };
     // v2.12: the tilt and speed buttons are TextButtons styled like the
