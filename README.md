@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.18.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.18.3** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -210,6 +210,13 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.18.3**
+  - **Lighter studio logo asset.** The `CostesLogo.png` resource is
+    downsized locally from 755 KB to roughly 80-100 KB (the full
+    resolution was about ten times more than the displayed ~66 px
+    height needs). No code change; since the logo is compiled into the
+    binary data, the VST3/AU/Standalone artefacts are about 700 KB
+    lighter. A clean rebuild is required (binary data regeneration).
 - **2.18.2**
   - **Test harness expectation fix (LUFS check).** The v2.18.1 suite
     failed one check: it expected a stereo 1 kHz sine at -23 dBFS RMS
