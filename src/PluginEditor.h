@@ -414,9 +414,16 @@ private:
     // v2.26: the FileChoosers must outlive their async callbacks.
     std::unique_ptr<juce::FileChooser> presetFileChooser;
 
-    // (v2.1-v2.41 kept an editor-side 1.5 s dB EMA over the correction
-    // here; v2.42 moved the smoothing into the meters - see LufsMeter -
-    // so the editor only formats the value now.)
+    // v2.42.1 (Clement's remark): a settled average still flutters between
+    // two adjacent display values when the 30 Hz timer reformats the label
+    // every tick. The readout now updates at a calm 2 Hz cadence and only
+    // when the value actually moved (0.2 dB deadband) - see refreshLufs.
+    // (v2.1-v2.41 kept an editor-side 1.5 s dB EMA here; v2.42 moved the
+    // smoothing into the meters - see LufsMeter - so the editor only
+    // formats the value.)
+    float shownCorrectionDb = 0.0f;
+    bool correctionShownValid = false;
+    int correctionTickCount = 0;
 
     juce::TextButton rescanButton    { "Rescan" };
 

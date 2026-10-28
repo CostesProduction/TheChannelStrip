@@ -1479,6 +1479,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         addAndMakeVisible (*label);
     }
 
+    // v2.42.1: the correction label starts at "-- dB"; from then on it is
+    // the only writer of that text (refreshLufs), under the 2 Hz / 0.2 dB
+    // cadence+deadband gate.
+    correctionLabel.setText ("-- dB", juce::dontSendNotification);
+
     // v2.4: section headings + the hosted-plugin name, all in the sidebar.
     gainLabel.setText ("GAIN STAGING", juce::dontSendNotification);
     gainLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
@@ -2368,20 +2373,55 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     float delta = 0.0f;
     const bool valid = proc.getGainCorrectionDb (delta);
 
-    // v2.13: the readout states the action with an explicit "Add"
-    // prefix - "Add +0.7 dB" = the output is 0.7 dB too quiet (raise
-    // it by 0.7 dB), "Add -0.4 dB" = lower it by 0.4 dB.
-    // v2.13.1: "Add " goes through an explicit juce::String - a bare
-    // string literal concatenated with another const char* (the
-    // ternary) does not compile (same lesson as v2.0.0).
-    // v2.34: the readout sits under the halved logo in a narrow
-    // column, so it breaks after "Add" - two short lines instead of
-    // one clipped one.
-    correctionLabel.setText (valid
-                                 ? juce::String ("Add ") + (delta >= 0.0f ? "+" : "")
-                                       + juce::String (delta, 1) + " dB"
-                                 : "-- dB",
-                             juce::dontSendNotification);
+    // v2.42.1 (Clement's remark): even a settled average flutters between
+    // two adjacent display values when the 30 Hz timer reformats the
+    // label every tick ("Add 3.2" / "Add 3.1" / ...). Lowering the frame
+    // rate alone would only slow the flutter down; the fix is a CADENCE
+    // plus a DEADBAND. The label reconsiders its text at 2 Hz and only
+    // repaints when the value moved at least 0.2 dB from what it shows -
+    // a band the +/-0.05 dB rounding flutter can never cross. On steady
+    // material the readout is frozen; a genuine drift (the console's
+    // compression riding the song) shows within half a second. A
+    // validity flip always bypasses the gate, so a console going silent
+    // never lingers on a stale number. The meter itself still updates
+    // at the 10 Hz hop rate - invisible, free, and it feeds the average.
+    constexpr int correctionDisplayTicks = 15;      // the 30 Hz timer -> 2 Hz
+    constexpr float correctionDeadbandDb = 0.2f;
+
+    if (valid)
+    {
+        if (++correctionTickCount >= correctionDisplayTicks)
+        {
+            correctionTickCount = 0;
+
+            if (! correctionShownValid
+                || std::abs (delta - shownCorrectionDb) >= correctionDeadbandDb)
+            {
+                // v2.13: the readout states the action with an explicit
+                // "Add" prefix - "Add +0.7 dB" = the output is 0.7 dB too
+                // quiet (raise it by 0.7 dB), "Add -0.4 dB" = lower it.
+                // v2.13.1: "Add " goes through an explicit juce::String -
+                // a bare string literal concatenated with another
+                // const char* (the ternary) does not compile (same
+                // lesson as v2.0.0).
+                // v2.34: the readout sits under the halved logo in a
+                // narrow column, so it breaks after "Add" - two short
+                // lines instead of one clipped one.
+                shownCorrectionDb = delta;
+                correctionShownValid = true;
+                correctionLabel.setText (juce::String ("Add ")
+                                             + (delta >= 0.0f ? "+" : "")
+                                             + juce::String (delta, 1) + " dB",
+                                         juce::dontSendNotification);
+            }
+        }
+    }
+    else if (correctionShownValid)
+    {
+        correctionTickCount = 0;
+        correctionShownValid = false;
+        correctionLabel.setText ("-- dB", juce::dontSendNotification);
+    }
 }
 
 void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()

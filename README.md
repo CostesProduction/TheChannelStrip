@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.42.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.42.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -138,6 +138,9 @@ them in a clean, focused workflow:
   its small low bias), gated to ignore silence: it needs ~1 s of signal to
   appear, holds through short gaps, and falls back to "--" after 3 s of
   silence. You apply it by hand on the hosted plugin's own output knob.
+  The label itself repaints at a calm 2 Hz with a 0.2 dB deadband, so a
+  settled value never flutters between two adjacent digits - it only
+  moves when the correction genuinely drifts.
 - **Embedded hosted UI** — the hosted plugin's own editor is embedded in a
   viewport that fills the centre column below the analyzer, so the guest
   plugin is actually visible and usable. The layout is a **condensed left
@@ -297,6 +300,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.42.1**
+  - **A calm correction readout.** The "Add x dB" label flutters between
+    two adjacent values ("3.2" / "3.1" / ...) when the 30 Hz editor timer
+    reformats it every tick (Clement's remark after the first v2.42.0
+    session). Lowering the frame rate alone would only slow the flutter;
+    the label now reconsiders its text at **2 Hz** and repaints only when
+    the value moved at least **0.2 dB** from what it shows - a band the
+    rounding flutter can never cross. On steady material the readout is
+    frozen; a genuine drift shows within half a second, and a validity
+    flip (value to "--") still bypasses the gate immediately. The meter
+    keeps updating at its internal 10 Hz hop rate - the change is
+    display-only, zero audio-thread cost.
 - **2.42.0**
   - **Gain-staging readout: a real average (point 4).** The "Add x dB"
     value is now the meters' 5 s exponential average of the LUFS
