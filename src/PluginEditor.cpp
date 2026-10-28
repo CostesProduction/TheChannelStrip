@@ -1255,6 +1255,19 @@ private:
         const auto newText = editor.helpTextFor (newTarget, pt);
         const bool unchanged = (newTarget == target && newText == text);
 
+        // v2.40.0 (Clement's remark 2): sweeping the analyser with the
+        // mode on used to move the bubble's DESKTOP window on EVERY
+        // mouse-move - a native window move dozens of times per second
+        // is what stuttered the whole UI. Within one target with one
+        // text the bubble's geometry cannot change (it is a pure
+        // function of the two), so do NOTHING when both already match:
+        // the bubble now only moves when the target or the text
+        // actually change. If a resize hid it (stale screen coords),
+        // isVisible() is false and we fall through to recompute and
+        // re-show it on this very move.
+        if (unchanged && editor.helpBubble->isVisible())
+            return;
+
         target = newTarget;
         text = newText;
 
@@ -2055,6 +2068,11 @@ void TheChannelStripAudioProcessorEditor::resized()
         if (helpBubble != nullptr)
             helpBubble->setVisible (false);
     }
+
+    // v2.40.0: the contact card rides on the desktop over the plugin's
+    // on-screen rectangle - a resize under it leaves that geometry
+    // stale, so close it (one click on the logo reopens it).
+    closeContactCard();
 }
 
 void TheChannelStripAudioProcessorEditor::layoutHostedHolder()
@@ -2377,31 +2395,10 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
     fitWindowToHostedEditor();
 }
 
-// the editor's destructor is defined HERE, after the HelpOverlay class:
-// it destroys the helpOverlay unique_ptr, whose pointee type must be
-// complete at that point (the header only forward-declares it).
-TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
-{
-    stopTimer();
-    // v2.8: closing the editor stops all measurements (LUFS meters and
-    // spectrum analysers) until it is opened again.
-    proc.setEditorOpen (false);
-    // v2.31: the help bubble is a DESKTOP window, not a child - it must
-    // be closed HERE, explicitly, before the editor tears down (it is
-    // removed from the desktop while the editor is still alive, which
-    // is always safe - this is no callback of its own). If the mode is
-    // already off, exitHelpMode released it and a pending async
-    // deletion owns it instead.
-    if (helpBubble != nullptr)
-    {
-        helpBubble->removeFromDesktop();
-        helpBubble.reset();
-    }
-    // v2.33: the Doctor listener must go before the members fall apart.
-    studioLogo.removeMouseListener (&logoMouseListener);
-    embeddedHostedEditor.reset(); // detach the hosted editor before anything else
-    hostedViewport.setViewedComponent (nullptr, false);
-}
+// v2.40.0: the editor's destructor moved to the END of this file: the
+// contact card is a desktop window whose class is defined further down,
+// and its synchronous cleanup needs the complete type (the same reason
+// this destructor always sat after the HelpOverlay class).
 
 // v2.30: "?" -> the help mode. The overlay fills the editor and rides
 // on top of everything, including the hosted plugin; it follows the
@@ -2922,14 +2919,19 @@ private:
 // contact details, a French block with its English translation
 // underneath (Clement's choice for the zone A branding rework) - plus
 // "Copy mail" and "Open website" buttons. It holds NO editor reference,
-// so it needs no friend declaration and can never dangle; the
-// DialogWindow owns and destroys it.
+// so it needs no friend declaration and can never dangle; the desktop
+// window that shows it owns and destroys it.
 // ---------------------------------------------------------------------------
 namespace
 {
 class ContactPanel final : public juce::Component
 {
 public:
+    // v2.40.0: the card rides in its own desktop window (see
+    // ContactCardWindow below) - its Close button reports through this
+    // callback instead of hunting for a DialogWindow parent.
+    std::function<void()> closeRequested;
+
     ContactPanel()
     {
         // v2.34.1: juce::String (const char*) reads ASCII, not UTF-8,
@@ -2946,22 +2948,23 @@ public:
         titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
         addAndMakeVisible (titleLabel);
 
+        // v2.40.0 (Clement): the studio lines are gone, and "Ingénieur
+        // Centrale Nantes" now comes before the DJ Network certification.
         frLabel.setText (juce::String (juce::CharPointer_UTF8 ("Ingénieur son : prise de son, mixage & mastering.\n"
-                                                "Studio acoustiquement traité à Nantes + studio mobile"
-                                                " partout en France.\n"
-                                                "Certifié DJ Network 2022 - Ingénieur Centrale Nantes.")),
+                                                "Ingénieur Centrale Nantes - Certifié DJ Network 2022.")),
                          juce::dontSendNotification);
         frLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
         frLabel.setJustificationType (juce::Justification::centred);
         frLabel.setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
         addAndMakeVisible (frLabel);
 
+        // v2.40.0: studio lines gone, Centrale Nantes first - and the
+        // translation now renders at the SAME SIZE as the French block
+        // (was 11 px); the italic + grey still tell the two apart.
         enLabel.setText ("Sound engineer: recording, mixing & mastering.\n"
-                         "Acoustically treated studio in Nantes + mobile"
-                         " recording all over France.\n"
-                         "DJ Network certified 2022 - engineer, Centrale Nantes.",
+                         "Engineer, Centrale Nantes - DJ Network certified 2022.",
                          juce::dontSendNotification);
-        enLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::italic)));
+        enLabel.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::italic)));
         enLabel.setJustificationType (juce::Justification::centred);
         enLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
         addAndMakeVisible (enLabel);
@@ -2998,15 +3001,32 @@ public:
         };
         addAndMakeVisible (openWebButton);
 
+        // v2.40.0: the card lives in its own desktop window now (no
+        // DialogWindow) - the button reports through the callback the
+        // window wires up.
         closeButton.setButtonText ("Close");
         closeButton.onClick = [this]
         {
-            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-                dw->exitModalState (0);
+            if (closeRequested)
+                closeRequested();
         };
         addAndMakeVisible (closeButton);
 
-        setSize (460, 248);
+        // v2.40.0: the studio lines are gone and so is the DialogWindow
+        // chrome - the card is 2 text lines shorter and paints its own
+        // rounded background now (see paint below).
+        setSize (460, 214);
+    }
+
+    // v2.40.0: the panel draws its own card (no more dialog chrome):
+    // rounded corners in the theme's background + frame colours.
+    void paint (juce::Graphics& g) override
+    {
+        const auto card = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0xff141a26));
+        g.fillRoundedRectangle (card, 5.0f);
+        g.setColour (juce::Colour (0xff5f6b82));
+        g.drawRoundedRectangle (card, 5.0f, 1.0f);
     }
 
     void resized() override
@@ -3014,8 +3034,8 @@ public:
         auto area = getLocalBounds().reduced (10);
 
         titleLabel.setBounds (area.removeFromTop (30));
-        frLabel.setBounds    (area.removeFromTop (60));
-        enLabel.setBounds    (area.removeFromTop (52));
+        frLabel.setBounds    (area.removeFromTop (40));
+        enLabel.setBounds    (area.removeFromTop (40));
         mailLabel.setBounds  (area.removeFromTop (22));
         webLabel.setBounds   (area.removeFromTop (22));
         area.removeFromTop (10);
@@ -3030,21 +3050,122 @@ private:
     juce::Label titleLabel, frLabel, enLabel, mailLabel, webLabel;
     juce::TextButton copyMailButton, openWebButton, closeButton;
 };
+
 } // namespace
 
-// v2.34: the logo click handler - one click on the studio logo opens the
-// contact card (see showContactCard). Pure UI, message thread only.
+// ---------------------------------------------------------------------------
+// v2.40.0: the card's own always-on-top DESKTOP window, covering exactly
+// the editor's on-screen rectangle. Why a desktop window and not a plain
+// child overlay: the hosted plugin's native NSView sits above every
+// JUCE-drawn layer (the v2.31 lesson), so an in-editor overlay would be
+// hidden behind the hosted plugin. The window paints a light scrim over
+// the whole plugin - hosted plugin included - and THAT is what makes
+// "click outside closes" work everywhere: a click anywhere on the scrim
+// closes the card, clicks inside the panel are consumed by it, the Close
+// button routes through closeRequested, and Esc is handled too (best
+// effort - a desktop window may not get the keys in every host).
+//
+// NOTE - GLOBAL scope on purpose, exactly like HelpBubbleWindow above:
+// the header forward-declares ::ContactCardWindow and befriends it, and
+// a class hidden in an anonymous namespace would be a DIFFERENT type
+// than the declared one ("reference to 'ContactCardWindow' is
+// ambiguous", private-member errors from the friend that no longer
+// matches). ContactPanel stays anonymous - it appears in no header.
+// ---------------------------------------------------------------------------
+class ContactCardWindow final : public juce::Component
+{
+public:
+    ContactCardWindow (TheChannelStripAudioProcessorEditor& ed) : editor (ed)
+    {
+        setOpaque (false);
+        setVisible (false);
+        addToDesktop (0);
+        setAlwaysOnTop (true);
+        setWantsKeyboardFocus (true);
+
+        panel = std::make_unique<ContactPanel>();
+        panel->closeRequested = [this] { editor.closeContactCard(); };
+        addAndMakeVisible (panel.get());
+    }
+
+    ~ContactCardWindow() override { removeFromDesktop(); }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey)
+        {
+            editor.closeContactCard();
+            return true;
+        }
+        return false;
+    }
+
+    // a click anywhere on the scrim (i.e. outside the card) closes it;
+    // clicks inside the card never reach here - the panel consumes them.
+    void mouseDown (const juce::MouseEvent&) override { editor.closeContactCard(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        // the light scrim dims the plugin behind the card and makes the
+        // "click outside closes" affordance read at a glance.
+        g.fillAll (juce::Colour (0x48000000));
+    }
+
+    void resized() override
+    {
+        if (panel != nullptr)
+            panel->setBounds (getLocalBounds().withSizeKeepingCentre (panel->getWidth(),
+                                                                    panel->getHeight()));
+    }
+
+private:
+    TheChannelStripAudioProcessorEditor& editor;
+    std::unique_ptr<ContactPanel> panel;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ContactCardWindow)
+};
+
+
+// v2.34 -> v2.40.0 (Clement's remark 1): the logo click handler - one
+// click on the studio logo opens the contact card. The card now rides
+// in its own always-on-top desktop window covering exactly the
+// plugin's on-screen rectangle - like the help bubble, it must float
+// in FRONT of the hosted plugin's native view, which sits above every
+// JUCE-drawn child. The window's scrim catches the outside click
+// everywhere, and its Close button and Esc close it too (see
+// ContactCardWindow above). Pure UI, message thread only.
 void TheChannelStripAudioProcessorEditor::showContactCard()
 {
-    juce::DialogWindow::LaunchOptions options;
-    options.dialogTitle = "Costes Production";
-    options.content.setOwned (new ContactPanel());
-    options.componentToCentreAround = this;
-    options.dialogBackgroundColour = juce::Colour (0xff141a26);
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    options.launchAsync();
+    if (contactWindow != nullptr)
+        return; // already up
+
+    contactWindow = new ContactCardWindow (*this);
+    contactWindow->setBounds (getScreenBounds()); // exactly the plugin window
+    contactWindow->setVisible (true);
+    contactWindow->toFront (true); // take the keys so Esc closes the card
+}
+
+// v2.40.0: closes the contact card - outside click, Close button, Esc,
+// or a resize that made its screen geometry stale. The window is hidden
+// AT ONCE (hidden it can receive nothing, so its editor reference can
+// never dangle) and deleted OUTSIDE its own callback, the exact pattern
+// exitHelpMode uses for the help bubble; if the editor dies before the
+// pending deletion runs, the destructor removed the window from the
+// desktop synchronously and nothing touches the editor anymore.
+void TheChannelStripAudioProcessorEditor::closeContactCard()
+{
+    if (contactWindow == nullptr)
+        return;
+
+    contactWindow->setVisible (false);
+    juce::Component::SafePointer<ContactCardWindow> safe (contactWindow);
+    contactWindow = nullptr;
+
+    juce::MessageManager::callAsync ([safe]
+    {
+        if (auto* window = safe.getComponent())
+            delete window;
+    });
 }
 
 // v2.33 (roadmap idea 4): the Doctor handler - since v2.34 its trigger is
@@ -3090,4 +3211,44 @@ void TheChannelStripAudioProcessorEditor::LogoMouseListener::mouseDown (
 {
     if (owner != nullptr)
         owner->showContactCard();
+}
+
+// ---------------------------------------------------------------------------
+// v2.40.0: the editor's destructor lives HERE now (it used to sit right
+// after the constructor): the contact card's desktop window is defined
+// above, and closing it synchronously requires the complete type.
+// ---------------------------------------------------------------------------
+TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
+{
+    stopTimer();
+    // v2.8: closing the editor stops all measurements (LUFS meters and
+    // spectrum analysers) until it is opened again.
+    proc.setEditorOpen (false);
+    // v2.31: the help bubble is a DESKTOP window, not a child - it must
+    // be closed HERE, explicitly, before the editor tears down (it is
+    // removed from the desktop while the editor is still alive, which
+    // is always safe - this is no callback of its own). If the mode is
+    // already off, exitHelpMode released it and a pending async
+    // deletion owns it instead.
+    if (helpBubble != nullptr)
+    {
+        helpBubble->removeFromDesktop();
+        helpBubble.reset();
+    }
+    // v2.40.0: same for the contact card's desktop window - if it is up
+    // at teardown, close it synchronously (hidden first, off the
+    // desktop, delete immediately). A pending async deletion from
+    // closeContactCard may still hold the SafePointer, which nulls
+    // itself as the window dies.
+    if (contactWindow != nullptr)
+    {
+        contactWindow->setVisible (false);
+        contactWindow->removeFromDesktop();
+        delete contactWindow;
+        contactWindow = nullptr;
+    }
+    // v2.33: the Doctor listener must go before the members fall apart.
+    studioLogo.removeMouseListener (&logoMouseListener);
+    embeddedHostedEditor.reset(); // detach the hosted editor before anything else
+    hostedViewport.setViewedComponent (nullptr, false);
 }

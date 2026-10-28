@@ -253,6 +253,10 @@ class HelpOverlay;
 // plugin's native NSView sits above every JUCE-drawn layer, so only a
 // window of its own can float in front of it.
 class HelpBubbleWindow;
+// v2.40.0: the contact card's always-on-top desktop window (defined in
+// the .cpp, like the bubble's) - it covers the plugin's on-screen
+// rectangle, dims it with a scrim, and catches the outside click.
+class ContactCardWindow;
 
 class TheChannelStripAudioProcessorEditor : public juce::AudioProcessorEditor,
                                              private juce::Timer
@@ -299,6 +303,10 @@ private:
     // v2.31: the bubble window's own click leaves the mode too, so it
     // needs exitHelpMode as well (it touches nothing else private).
     friend class HelpBubbleWindow;
+    // v2.40.0: the contact card's window closes itself through
+    // closeContactCard (outside click, Close button, Esc) - it touches
+    // nothing else private.
+    friend class ContactCardWindow;
     // ---- v2.33 (roadmap idea 4) -> v2.34: the Doctor and the contact card ----
     // The DOCTOR (v2.33) builds the processor's diagnostic report, shows
     // it in a small non-blocking window, writes it to a file next to the
@@ -311,6 +319,9 @@ private:
     // one click to copy the mail or open the site. Static text, no
     // processor state, message thread only.
     void showContactCard();
+    // v2.40.0: closes the contact card's desktop window (outside click,
+    // Close button, Esc, or a resize that makes its geometry stale).
+    void closeContactCard();
     // Routes the logo's click to the contact card. juce::ImageComponent
     // has no mouseDown override, and keeping the logo's drawing
     // untouched is preferable to a subclass: a MouseListener attached
@@ -477,6 +488,12 @@ private:
 
     // v2.30: the help-mode overlay while it is on (see enterHelpMode).
     std::unique_ptr<HelpOverlay> helpOverlay;
+
+    // v2.40.0: the contact card's desktop window while it is up (see
+    // showContactCard). A RAW pointer, not a unique_ptr: the editor
+    // methods defined before the window's class in the .cpp (resized,
+    // the destructor pre-v2.40 location) only compare and null it.
+    ContactCardWindow* contactWindow = nullptr;
 
     // v2.31 (remark 3): the help bubble's own always-on-top desktop
     // window - a component drawn inside the editor would hide BEHIND

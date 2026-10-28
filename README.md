@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.39.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.40.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -291,6 +291,25 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.40.0**
+  - **Contact card rework (Clement's remarks).** The studio lines are
+    gone (French and English alike); "Ingénieur Centrale Nantes" now
+    comes before "Certifié DJ Network 2022" in both languages, and the
+    English translation renders at the same 13 px size as the French
+    block (still italic + grey). The card now floats in its own
+    always-on-top desktop window that covers the plugin's on-screen
+    rectangle: a light scrim dims the whole UI - hosted plugin included,
+    which is why a plain child overlay could not work (the native NSView
+    sits above every JUCE-drawn layer) - and a click anywhere outside the
+    card closes it; the Close button and Esc close it too. No more
+    separate dialog window with a title bar, and the card is 2 text
+    lines shorter (460×214).
+  - **Help mode over the analyser: lag fixed (Clement's remark).** The
+    help bubble's desktop window used to move on every single
+    mouse-move - dozens of native window moves per second while
+    sweeping the analyser, which stuttered the whole UI. The bubble now
+    only moves when the hovered target or its text actually change.
 
 - **2.39.0**
   - **Minimum width 1024 → 860 (Clement's remark).** Narrow channel
