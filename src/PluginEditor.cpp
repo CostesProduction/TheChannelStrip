@@ -184,6 +184,19 @@ namespace
     constexpr int layoutMargin        = 10;
     constexpr int columnGap           = 10;
     constexpr int analyserStripHeight = 180; // full-width strip above the plugin
+
+    // v2.35.0: the merged status zone under the console name shows the
+    // two-line integrity readout normally; an actionable alert (a missing
+    // or blacklisted console after a click, an ERROR:, a WARNING:) takes
+    // the zone over, coloured, until it is resolved. Everything else -
+    // hosting chatter, preset confirmations, doctor paths - stays in the
+    // Terminal and the Doctor report only: zero redundancy on the sidebar.
+    bool isSidebarAlert (const juce::String& s)
+    {
+        return s.startsWith ("ERROR:")
+            || s.startsWith ("WARNING:")
+            || s.contains ("Press Rescan");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,9 +1358,9 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.34.1: back by request - full-width gain rows with the big
     // correction readout, and the logo in its own band again (now the
     // monochrome variant at 50 px) -> 970 / 790.
-    setSize (1180, 970);
+    setSize (1180, 1000);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 1000 : 810, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1388,13 +1401,14 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     addAndMakeVisible (hostedNameLabel);
 
     // v2.34: the merged status block under the hosted console's name -
-    // one label, two lines fed by proc.getSidebarStatusLines(): the
-    // channel format (what the host feeds this instance, and why a mono
-    // track is bridged: "refused", a next-best layout like "2/2", or
-    // "multi-bus") plus the crossfade on line one, the forwarded
-    // latency plus the silence sentinel on line two. The v2.14.2
-    // channel readout and the v2.33 integrity bandeau collapsed into
-    // it with zero redundancy left ("shell: unity" never changes and
+    // one label fed by proc.getSidebarStatusLines(): the channel format
+    // (what the host feeds this instance, and why a mono track is
+    // bridged: "refused", a next-best layout like "2/2", or "multi-bus")
+    // plus the crossfade on line one, the forwarded latency plus the
+    // silence sentinel on line two. v2.35.0: the zone is four lines
+    // tall now - an actionable alert (missing/blacklisted console,
+    // ERROR:, WARNING:) takes it over, coloured, until resolved; the
+    // bottom status area is gone ("shell: unity" never changes and
     // lives in the Doctor report only).
     integrityLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
     integrityLabel.setJustificationType (juce::Justification::centred);
@@ -1404,7 +1418,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         "console's audio path, whether a console-swap crossfade is still "
         "blending, the delay forwarded to the host, and the sentinel that "
         "watches for a hosted console which stopped producing audio (a "
-        "lapsed licence does exactly that).";
+        "lapsed licence does exactly that). An actionable alert - a "
+        "missing or blacklisted console, an error, a warning - takes "
+        "this zone over until it is resolved; technical detail lives in "
+        "the Doctor report.";
     addAndMakeVisible (integrityLabel);
 
     // v2.1: the correction is the main readout: bigger and smoothed.
@@ -1780,12 +1797,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     addAndMakeVisible (hostedViewport);
     hostedViewport.setViewedComponent (&hostedHolder, false);
 
-    // v2.4: the status area sits at the bottom of the sidebar.
-    statusLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
-    statusLabel.setJustificationType (juce::Justification::centred);
-    statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
-    addAndMakeVisible (statusLabel);
-
     // v2.6: no bypass button/attachment anymore - the DAW and the hosted
     // plugin already provide a bypass, and the wrapper's crossfade path
     // was removed from processBlock with it.
@@ -1880,11 +1891,14 @@ void TheChannelStripAudioProcessorEditor::resized()
     hostedNameLabel.setBounds (sideX, y, sw, 24);
     y += 26;
 
-    // v2.34: the merged status block (channel format + integrity), two
-    // lines tall, right under the console name - the v2.14.1 channel
-    // readout row above the v2.33 integrity bandeau collapsed into it.
-    integrityLabel.setBounds (sideX, y, sw, 26);
-    y += 30;
+    // v2.35.0: ONE merged status zone, four lines tall, right under the
+    // console name - the two-line integrity readout normally, an
+    // actionable alert (missing/blacklisted console, ERROR:, WARNING:)
+    // taking it over until resolved. The v2.34 bottom status area is
+    // gone: console name and latency live here exactly once, and
+    // hosting chatter lives in the Doctor report.
+    integrityLabel.setBounds (sideX, y, sw, 53);
+    y += 57;
 
     // ---- v2.34.1 (Clement's suggestion): the display toggle rides at
     //      the top of the section, above Fast/Slow - a wide icon button
@@ -1923,18 +1937,12 @@ void TheChannelStripAudioProcessorEditor::resized()
     correctionLabel.setBounds (sideX, y, sw, 26);
     y += 30;
 
-    // ---- v2.34.1 (Clement's design): the studio logo sits in its own
-    //      band below the gain section, as before v2.34 - now the
-    //      monochrome variant (white design, transparent background,
-    //      rounded frame) at 75% of the old 66 px render, so it
-    //      integrates with the shell's dark palette. ----
-    {
-        const int logoH = 50;
-        studioLogo.setBounds (sideX, y + 4, sw, logoH);
-        y += logoH + 10;
-    }
-
-    statusLabel.setBounds (sideX, y, sw, juce::jmax (16, h - m - y - 32));
+    // ---- v2.35.0 (Clement's design, decided together): the frame-free
+    //      monochrome logo (pure white design on transparency - the
+    //      v2.34.1 baked frame is gone, it cut into the drawing) rides
+    //      ALONE in its own band pinned at the bottom of the sidebar,
+    //      just above the Rescan row, slightly taller than before. ----
+    studioLogo.setBounds (sideX, h - m - 26 - 12 - 58, sw, 58);
 
     // v2.6: Rescan is the only control pinned at the bottom (the bypass
     // button is gone). v2.34: the Doctor's heartbeat icon rides the same
@@ -2012,8 +2020,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.26.1: presets section now one icon row -> 973 / 793.
     // v2.33: the shell integrity bandeau -> 1003 / 823.
     // v2.34: zone A rework -> 890 / 710.
-    // v2.34.1: logo band back + full-width gain rows -> 970 / 790.
-    const int newH = juce::jlimit (showStrip ? 970 : 790, 1600, targetH);
+    // v2.35.0: merged status zone + bottom logo band -> 1000 / 810.
+    const int newH = juce::jlimit (showStrip ? 1000 : 810, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -2028,7 +2036,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 970 : 790, 2560, 1600); // v2.34.1: logo band back
+    setResizeLimits (1024, show ? 1000 : 810, 2560, 1600); // v2.35.0: taller zone + bottom logo
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -2042,8 +2050,16 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     // Skip the lock-dependent work until the scan finishes.
     if (proc.isScanning())
     {
-        statusLabel.setText ("Scanning the plugin folders... (progress is printed in the Terminal)",
-                             juce::dontSendNotification);
+        // v2.35.0: the scan progress rides the merged status zone (the
+        // rest of the tick needs the scan lock and would freeze the UI).
+        integrityLabel.setText ("Scanning the plugin folders... (progress is printed in the Terminal)",
+                                juce::dontSendNotification);
+
+        if (lastStatusColour != juce::Colour (0xff8f9bb0))
+        {
+            lastStatusColour = juce::Colour (0xff8f9bb0);
+            integrityLabel.setColour (juce::Label::textColourId, lastStatusColour);
+        }
         return;
     }
 
@@ -2076,37 +2092,42 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
         syncPresetComboSelection();
     }
 
-    // v2.34: the merged status block (the old channel readout plus the
-    // integrity bandeau, deduplicated) - one cheap string built from
-    // atomics on the processor; the label itself no-ops when the text
-    // has not changed. The crossfade visibly flickers to "active" for
-    // the ~50 ms of a console swap, which is exactly the point: the
-    // user SEES the shell doing its one transient job.
-    integrityLabel.setText (proc.getSidebarStatusLines(), juce::dontSendNotification);
-
     // v2.34: advance the preset-name marquee (no-op when the name fits
     // or nothing is selected).
     tickPresetMarquee();
 
-    // v2.3: the hosted plugin's name lives in the sidebar; the status
-    // area only carries scan progress and error messages.
+    // v2.35.0: the status area is gone from the bottom of the sidebar;
+    // the merged zone above the analyser section IS the status area now
+    // - the two-line integrity readout normally, an actionable alert
+    // (missing/blacklisted console, ERROR:, WARNING:) taking it over,
+    // coloured, until it is resolved. Everything else (hosting chatter,
+    // preset confirmations, doctor paths) stays in the Terminal and the
+    // Doctor report: zero redundancy.
     const auto status = proc.getHostStatus();
+    const bool alert = isSidebarAlert (status);
 
-    statusLabel.setText (status.isNotEmpty() ? status : juce::String(),
-                         juce::dontSendNotification);
+    // the label itself no-ops when the text has not changed. The
+    // crossfade visibly flickers to "active" for the ~50 ms of a console
+    // swap, which is exactly the point: the user SEES the shell doing
+    // its one transient job.
+    integrityLabel.setText (alert ? status
+                                  : proc.getSidebarStatusLines(),
+                            juce::dontSendNotification);
 
     // v2.24 (point 7): a warning or an error must not read like the
-    // everyday scan chatter - the line is red for ERROR:, amber for
-    // WARNING:, grey otherwise. The colour is cached so the label is
-    // only touched when it actually changes.
-    const juce::Colour statusColour = status.startsWith ("ERROR:")   ? juce::Colour (0xffe25b5b)
-                                      : status.startsWith ("WARNING:") ? juce::Colour (0xffe2a44b)
-                                                                       : juce::Colour (0xff8f9bb0);
+    // everyday scan chatter - the alert is red for ERROR:, amber for
+    // every other actionable line (WARNING: and the missing-console
+    // explanations), grey when the zone shows the integrity readout.
+    // The colour is cached so the label is only touched when it
+    // actually changes.
+    const juce::Colour statusColour = ! alert                        ? juce::Colour (0xff8f9bb0)
+                                      : status.startsWith ("ERROR:") ? juce::Colour (0xffe25b5b)
+                                                                     : juce::Colour (0xffe2a44b);
 
     if (statusColour != lastStatusColour)
     {
         lastStatusColour = statusColour;
-        statusLabel.setColour (juce::Label::textColourId, statusColour);
+        integrityLabel.setColour (juce::Label::textColourId, statusColour);
     }
 }
 
@@ -2825,7 +2846,10 @@ public:
         // String (CharPointer_UTF8 (...)) constructor.
         titleLabel.setText (juce::String (juce::CharPointer_UTF8 ("Clément Costes - Costes Production")),
                             juce::dontSendNotification);
-        titleLabel.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
+        // v2.35.0 (Clement): everything a bit bigger, and the card no
+        // taller than its content - the ~100 px of dead space below
+        // the buttons is gone.
+        titleLabel.setFont (juce::Font (juce::FontOptions (17.0f, juce::Font::bold)));
         titleLabel.setJustificationType (juce::Justification::centred);
         titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
         addAndMakeVisible (titleLabel);
@@ -2835,7 +2859,7 @@ public:
                                                 " partout en France.\n"
                                                 "Certifié DJ Network 2022 - Ingénieur Centrale Nantes.")),
                          juce::dontSendNotification);
-        frLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
+        frLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
         frLabel.setJustificationType (juce::Justification::centred);
         frLabel.setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
         addAndMakeVisible (frLabel);
@@ -2845,7 +2869,7 @@ public:
                          " recording all over France.\n"
                          "DJ Network certified 2022 - engineer, Centrale Nantes.",
                          juce::dontSendNotification);
-        enLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::italic)));
+        enLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::italic)));
         enLabel.setJustificationType (juce::Justification::centred);
         enLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
         addAndMakeVisible (enLabel);
@@ -2855,7 +2879,7 @@ public:
                            juce::dontSendNotification);
         for (auto* l : { &mailLabel, &webLabel })
         {
-            l->setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+            l->setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
             l->setJustificationType (juce::Justification::centred);
             l->setColour (juce::Label::textColourId, juce::Colour (0xff54c8e8));
             addAndMakeVisible (*l);
@@ -2890,21 +2914,21 @@ public:
         };
         addAndMakeVisible (closeButton);
 
-        setSize (460, 330);
+        setSize (460, 248);
     }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (10);
 
-        titleLabel.setBounds (area.removeFromTop (26));
-        frLabel.setBounds    (area.removeFromTop (52));
-        enLabel.setBounds    (area.removeFromTop (46));
-        mailLabel.setBounds  (area.removeFromTop (20));
-        webLabel.setBounds   (area.removeFromTop (20));
+        titleLabel.setBounds (area.removeFromTop (30));
+        frLabel.setBounds    (area.removeFromTop (60));
+        enLabel.setBounds    (area.removeFromTop (52));
+        mailLabel.setBounds  (area.removeFromTop (22));
+        webLabel.setBounds   (area.removeFromTop (22));
         area.removeFromTop (10);
 
-        auto buttons = area.removeFromTop (28);
+        auto buttons = area.removeFromTop (30);
         copyMailButton.setBounds (buttons.removeFromLeft (140));
         closeButton.setBounds    (buttons.removeFromRight (90));
         openWebButton.setBounds   (buttons);

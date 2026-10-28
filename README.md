@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.34.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.35.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -142,8 +142,8 @@ them in a clean, focused workflow:
   and the hosted plugin itself. The **window auto-fits the hosted editor**
   once it is embedded (and re-fits when you switch consoles, since their
   GUI sizes differ): the analyzer strip gets the plugin's full width and
-  nothing needs to scroll. The window stays resizable (1024×970 minimum
-  with the analyzer shown, 1024×790 with it hidden;
+  nothing needs to scroll. The window stays resizable (1024×1000 minimum
+  with the analyzer shown, 1024×810 with it hidden;
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
   on to the DAW, and re-forwarded whenever the plugin changes it at
@@ -283,6 +283,32 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.35.0**
+  - **One merged status zone, zero redundancy (Clement's design).** The
+    two "geek" text areas of the sidebar are gone as separate blocks:
+    the integrity readout and the former bottom status area are now a
+    single four-line zone right under the hosted console's name. The
+    persistent "Hosted '...' ready (latency ... samples, N parameters)"
+    line disappeared from the display entirely (console name and
+    latency live on the sidebar exactly once; parameter counts are
+    Doctor material). Actionable alerts — a missing, moved or
+    blacklisted console after a click, an `ERROR:`, a `WARNING:` — take
+    the zone over, coloured red or amber, until resolved; scan progress
+    rides it too. The v2.24 messages were compacted so their
+    call-to-action always stays visible in the zone.
+  - **Studio logo: frame-free, alone at the bottom (decided together).**
+    The v2.34.1 baked frame cut into the waveform and the COSTES
+    letters; it is gone (Clement chose the frame-free option on my
+    recommendation). The monochrome white design floats on its own band
+    pinned just above the Rescan row, slightly taller than before
+    (58 px).
+  - **Contact card: bigger text, no dead space.** All the lines grew
+    (title 17 px bold, French 13 px, translation 11 px, mail/web 13 px
+    bold) and the card is now exactly as tall as its content — the
+    ~100 px of empty space below the buttons are gone.
+  - Window heights: 1180×1000 / 1180×810 minimum (the merged zone and
+    the taller logo band need the room).
 
 - **2.34.1**
   - **Text encoding fixed everywhere (mojibake).** The accents of the

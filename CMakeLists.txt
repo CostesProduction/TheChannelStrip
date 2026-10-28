@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.34.1 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.35.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,10 +30,12 @@ juce_add_plugin(TheChannelStrip
 
 # v2.17: the studio logo embedded as a binary resource so the plugin
 # bundle is fully self-contained (no filesystem access at runtime).
-# v2.34.1: CostesLogoMono.png is the sidebar variant - only the black
+# v2.35.0: CostesLogoMono.png is the sidebar variant - only the black
 # design of the original kept and turned white, beige background made
-# transparent, rounded frame baked in (the sidebar logo integrates with
-# the shell's palette; the original colour logo stays for reference).
+# transparent, NO frame (the v2.34.1 baked frame cut into the drawing;
+# the frame-free option was decided with Clement) - the sidebar logo
+# integrates with the shell's palette; the original colour logo stays
+# for reference.
 juce_add_binary_data(TcsResources SOURCES resources/CostesLogo.png
                                            resources/CostesLogoMono.png)
 

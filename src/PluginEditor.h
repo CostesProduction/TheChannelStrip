@@ -492,7 +492,5 @@ private:
     // editor's constructor, read only by the help overlay.
     std::map<juce::Component*, juce::String> helpTexts;
 
-    juce::Label statusLabel;
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TheChannelStripAudioProcessorEditor)
 };
