@@ -297,7 +297,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.37.0 - Doctor report\n"
+    report << "TheChannelStrip 2.38.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -935,7 +935,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.37.0");
+    xml->setAttribute ("version", "2.38.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1252,7 +1252,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.37.0");
+    xml->setAttribute ("version", "2.38.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2051,7 +2051,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.37.0");
+    xml->setAttribute ("version", "2.38.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

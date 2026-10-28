@@ -219,8 +219,11 @@ namespace
     // v2.4: sidebar + centre column geometry, shared by paint() and
     // resized(). Everything lives in the condensed left sidebar.
     constexpr int sidebarWidth        = 132; // left: all wrapper controls
-    constexpr int layoutMargin        = 10;
-    constexpr int columnGap           = 10;
+    // v2.38.0 (Clement's remark): the general frame around everything
+    // is as small as it gets - half the previous margin, and the same
+    // tight gutter under the analyser strip / beside the sidebar.
+    constexpr int layoutMargin        = 5;
+    constexpr int columnGap           = 5;
     constexpr int analyserStripHeight = 180; // full-width strip above the plugin
 
     // v2.35.0: the merged status zone under the console name shows the
@@ -1396,9 +1399,12 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.34.1: back by request - full-width gain rows with the big
     // correction readout, and the logo in its own band again (now the
     // monochrome variant at 50 px) -> 970 / 790.
-    setSize (1180, 1000);
+    // v2.38.0: the minimal frame (margins/gutters halved) and the
+    // justified sidebar free enough room to shrink the default and the
+    // minimum - less wide, less tall.
+    setSize (1165, 970);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 1000 : 810, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1862,13 +1868,19 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
 void TheChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // v2.37.0 (Clement's remark): the window background used to be a
-    // near-black (0xff0c0f16) that showed as a dark frame around the
-    // navy panels (0xff121724) - two shades of dark. Everything is one
-    // dark navy now; the sidebar panel fill of v2.5 is gone with it
-    // (it would be invisible on a same-colour background), the zones
-    // read by their content alone.
-    g.fillAll (juce::Colour (0xff121724));
+    // v2.38.0 (Clement's feedback): the all-navy background of v2.37
+    // read lighter than what was before - back to the pre-v2.37 look:
+    // the near-black window background (0xff0c0f16) with the subtle
+    // navy sidebar panel (0xff121724) of v2.5 on top of it.
+    g.fillAll (juce::Colour (0xff0c0f16));
+
+    // v2.5: a subtle panel behind the sidebar (which starts under the
+    // full-width analyser strip) so the zones read at a glance.
+    const int zoneY = layoutMargin
+                    + (proc.getAnalyserVisible() ? analyserStripHeight + columnGap : 0);
+    g.setColour (juce::Colour (0xff121724));
+    g.fillRect (layoutMargin, zoneY,
+                sidebarWidth, getHeight() - layoutMargin - zoneY);
 }
 
 void TheChannelStripAudioProcessorEditor::resized()
@@ -1898,7 +1910,7 @@ void TheChannelStripAudioProcessorEditor::resized()
     int y = zoneY;
 
     titleLabel.setBounds (sideX, y, sw, 32);
-    y += 38;
+    y += 36;  // v2.38.0 (Clement): less air between title and presets
 
     // ---- v2.37.0 (Clement's proposal, v2.36 follow-up): the sidebar
     //      reads top to bottom as title, presets + consoles (the
@@ -1932,18 +1944,34 @@ void TheChannelStripAudioProcessorEditor::resized()
         y += 28 + 5;
     }
 
+    // ---- v2.38.0 (Clement's proposal): the sidebar is now JUSTIFIED.
+    //      The presets + consoles stack stays pinned right under the
+    //      title, the name & alarm block stays pinned just above the
+    //      Rescan row, and the three middle sections - logo, analyser,
+    //      gain staging - share the remaining vertical space evenly
+    //      (the leftover splits into the four gaps around them). ----
+    const int rescanY = h - m - 26;
+    const int alarmY  = rescanY - 42;   // 40 px zone, ends 2 px above Rescan
+    const int nameY   = alarmY - 22;
+
+    // section heights: logo band 60, analyser block 111 (toggle +
+    // Fast/Slow + tilt), gain staging 87 (heading + IN/OUT + correction)
+    const int leftover = (nameY - y) - (60 + 111 + 87);
+    const int gap      = juce::jmax (2, leftover / 4);
+
     // ---- v2.36.0: the frame-free monochrome logo, one click to the
-    //      contact card. v2.37.0 (Clement's proposal): it now sits
-    //      below the console block, as a signature closing the console
-    //      stack above the monitoring sections. ----
-    studioLogo.setBounds (sideX, y + 2, sw, 58);
-    y += 58 + 6;
+    //      contact card. v2.37.0: below the console block as the
+    //      signature of the console stack. ----
+    y += gap;
+    studioLogo.setBounds (sideX, y, sw, 58);
+    y += 60;
 
     // ---- v2.8: show/hide the analyser strip. v2.37.0 (Clement's
     //      design): the toggle carries the section heading - the
     //      "ANALYSER" label and the spectrum glyph share the button,
     //      saving the v2.36 heading row. Same toggle behaviour: blue
     //      when the analyser strip is shown. ----
+    y += gap;
     analyserToggle.setBounds (sideX, y, sw, 26);
     y += 26 + 8;
 
@@ -1967,6 +1995,7 @@ void TheChannelStripAudioProcessorEditor::resized()
     // ---- v2.34.1 (zone A, back by request): the gain-staging block is
     //      full-width again - IN/OUT rows, then the big single-line
     //      correction readout under them. ----
+    y += gap;
     gainLabel.setBounds (sideX, y, sw, 15);
     y += 17;
 
@@ -1981,20 +2010,17 @@ void TheChannelStripAudioProcessorEditor::resized()
     // ---- v2.36.0 (Clement's design): the console name and its alarm
     //      zone close the working stack right above the Rescan row - a
     //      "Press Rescan" alert lands next to the button that answers
-    //      it. The block is condensed: name 20 px, alarm zone three
-    //      lines, text anchored top so the integrity readout hugs the
-    //      console name. ----
-    y += 2;
-    hostedNameLabel.setBounds (sideX, y, sw, 20);
-    y += 22;
+    //      it. v2.38.0: the block is now PINNED to the Rescan row (the
+    //      alarm zone ends 2 px above it), condensed as before - name
+    //      20 px, three-line alarm zone anchored top. ----
+    hostedNameLabel.setBounds (sideX, nameY, sw, 20);
 
     // v2.35.0: ONE merged status zone - the two-line integrity readout
     // normally, an actionable alert (missing/blacklisted console,
     // ERROR:, WARNING:) taking it over until resolved; console name and
     // latency live here exactly once, hosting chatter lives in the
     // Doctor report. v2.36.0: condensed from four lines to three.
-    integrityLabel.setBounds (sideX, y, sw, 40);
-    y += 44;
+    integrityLabel.setBounds (sideX, alarmY, sw, 40);
 
     // v2.6: Rescan is the only control pinned at the bottom (the bypass
     // button is gone). v2.34: the Doctor's heartbeat icon rides the same
@@ -2073,9 +2099,10 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.33: the shell integrity bandeau -> 1003 / 823.
     // v2.34: zone A rework -> 890 / 710.
     // v2.35.0: merged status zone + bottom logo band -> 1000 / 810.
-    // v2.36.0: sidebar module re-order, same vertical budget (logo
-    // moved under the title; bottom band gone) -> 1000 / 810.
-    const int newH = juce::jlimit (showStrip ? 1000 : 810, 1600, targetH);
+    // v2.36.0: sidebar module re-order, same vertical budget -> 1000 / 810.
+    // v2.38.0: justified sidebar + minimal margins (the middle sections
+    // flex, the pinned stacks are tighter) -> 970 / 790.
+    const int newH = juce::jlimit (showStrip ? 970 : 790, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -2090,7 +2117,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 1000 : 810, 2560, 1600); // v2.35/v2.36: taller zone + logo row
+    setResizeLimits (1024, show ? 970 : 790, 2560, 1600); // v2.38.0: justified sidebar, minimal margins
     resized();
 
     if (embeddedHostedEditor != nullptr)
