@@ -297,7 +297,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.41.0 - Doctor report\n"
+    report << "TheChannelStrip 2.42.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -316,8 +316,21 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
                    ? "running (editor open)" : "paused (editor closed)") << "\n"
            << "  analyser: "
            << (analyserVisible.load (std::memory_order_relaxed)
-                   ? "shown (spectra running)" : "hidden (spectra paused)") << "\n"
-           << "\n"
+                   ? "shown (spectra running)" : "hidden (spectra paused)") << "\n";
+
+    // v2.42: the doctor shows the gain-staging line the same way the
+    // sidebar does (the smoothed 5 s average).
+    {
+        float doctorDelta = 0.0f;
+        report << "  gain staging: "
+               << (getGainCorrectionDb (doctorDelta)
+                       ? juce::String ("add ") + (doctorDelta >= 0.0f ? "+" : "")
+                             + juce::String (doctorDelta, 1) + " dB (5 s average)"
+                       : juce::String ("-- (no gated signal yet)"))
+               << "\n";
+    }
+
+    report << "\n"
            << "hosted console:\n";
 
     if (auto* hosted = hostedStrip.getActivePlugin())
@@ -980,7 +993,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.41.0");
+    xml->setAttribute ("version", "2.42.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1297,7 +1310,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.41.0");
+    xml->setAttribute ("version", "2.42.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1463,8 +1476,19 @@ void TheChannelStripAudioProcessor::rememberCurrentConsoleState()
 
 bool TheChannelStripAudioProcessor::getGainCorrectionDb (float& deltaDb) const
 {
-    const float inLufs  = lufsIn.getShortTermLufs();
-    const float outLufs = lufsOut.getShortTermLufs();
+    // v2.42 (point 4): the readout now uses the meters' smoothed outputs
+    // (5 s power-domain exponential average, silence-gated) instead of the
+    // short-term values. Clement asked for "a well-chosen average value,
+    // smoothed a bit more than today"; the Python simulation that decided
+    // this: averaging in the POWER domain (as BS.1770 integrated does)
+    // both kills the wander (~2.7x steadier on dynamic material) and
+    // removes the ~0.3 dB low bias of the old dB-domain EMA, because quiet
+    // passages stop weighing as much as loud ones. The old editor-side
+    // 1.5 s dB EMA is gone (the smoothing lives in the meters now); the
+    // short-term values still feed the v2.24 silent-console watch and the
+    // IN/OUT displays, untouched.
+    const float inLufs  = lufsIn.getSmoothedLufs();
+    const float outLufs = lufsOut.getSmoothedLufs();
 
     if (inLufs < -70.0f || outLufs < -70.0f)
         return false;
@@ -2096,7 +2120,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.41.0");
+    xml->setAttribute ("version", "2.42.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

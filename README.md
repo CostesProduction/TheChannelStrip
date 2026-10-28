@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.41.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.42.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -131,10 +131,13 @@ them in a clean, focused workflow:
   of instances carries no analysis overhead.
 - **LUFS gain staging (display)** — the sidebar continuously
   shows, in LUFS-derived dB, how much to raise (+) or lower (-) the sound
-  so the hosted console's output matches its input loudness (short-term
-  BS.1770). The readout is smoothed over ~1.5 s for a stable, readable
-  average and holds its last value while the signal is silent. You apply
-  it by hand on the hosted plugin's own output knob.
+  so the hosted console's output matches its input loudness. The value is
+  a **5 s power-domain exponential average** (averaged the way loudness is
+  meant to be averaged - quiet passages no longer weigh as much as loud
+  ones, which both steadies the readout on dynamic material and removes
+  its small low bias), gated to ignore silence: it needs ~1 s of signal to
+  appear, holds through short gaps, and falls back to "--" after 3 s of
+  silence. You apply it by hand on the hosted plugin's own output knob.
 - **Embedded hosted UI** — the hosted plugin's own editor is embedded in a
   viewport that fills the centre column below the analyzer, so the guest
   plugin is actually visible and usable. The layout is a **condensed left
@@ -294,6 +297,22 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.42.0**
+  - **Gain-staging readout: a real average (point 4).** The "Add x dB"
+    value is now the meters' 5 s exponential average of the LUFS
+    **power** (BS.1770-style, gated below -70 LUFS per 100 ms hop),
+    replacing the old short-term delta plus the editor-side 1.5 s dB
+    smoothing. A Python simulation drove the choice: on dynamic material
+    the readout is ~2.7x steadier (about ±0.1 dB of wander instead of
+    ±0.25 dB) AND more accurate - the old dB-domain averaging biased it
+    ~0.3 dB low by weighting quiet passages as much as loud ones. The
+    visible rhythm is unchanged in spirit: ~1 s of signal to appear, hold
+    through short silence gaps, "--" after 3 s of silence, so a muted
+    console cannot keep flashing a stale correction. The smoothing runs
+    inside the existing hop loop for a handful of flops per 100 ms per
+    meter - no allocation, no extra memory. The IN/OUT LUFS displays and
+    the silent-console watch still read the short-term window, untouched.
+  - The Doctor report now also prints the current gain-staging line.
 - **2.41.0**
   - **Bass stairs fixed (Clement's remark).** Below ~213 Hz at 48 kHz a
     display band is narrower than one FFT bin, so several consecutive

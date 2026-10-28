@@ -209,8 +209,11 @@ public:
     // output to sit at the same loudness as the input. v2.13: the readout
     // states the action ("Add +0.7 dB" = raise the output by 0.7 dB),
     // as in v2.1-v2.11 (the v2.12 measured-deviation reading went back
-    // to a correction at Clement's request). False when either side is
-    // silent (no reliable measurement yet).
+    // to a correction at Clement's request). v2.42 (point 4): the value
+    // is the meters' 5 s power-domain exponential average (silence-
+    // gated), computed on the audio thread for a handful of flops - not
+    // the short-term delta anymore. False when either side is silent
+    // (no reliable measurement yet).
     bool getGainCorrectionDb (float& deltaDb) const;
 
     // ---- analysis ----

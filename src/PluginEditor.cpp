@@ -2361,26 +2361,12 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     lufsInLabel.setText  ("IN "  + fmtLufs (inLufs),   juce::dontSendNotification);
     lufsOutLabel.setText ("OUT " + fmtLufs (outLufs),  juce::dontSendNotification);
 
+    // v2.42 (point 4): the smoothing moved INTO the meters - the readout
+    // is their 5 s power-domain, silence-gated average, so the editor
+    // only formats it now (the old v2.1 editor-side 1.5 s dB EMA and its
+    // hold-on-invalid bookkeeping are gone; the meters hold and gate).
     float delta = 0.0f;
     const bool valid = proc.getGainCorrectionDb (delta);
-
-    if (valid)
-    {
-        // v2.1: smooth the correction with a ~1.5 s time constant (the timer
-        // runs at 30 Hz) so the readout stays readable, and hold the last
-        // smoothed value while the signal is below the meter floor.
-        if (! correctionEverValid)
-        {
-            smoothedCorrectionDb = delta;
-            correctionEverValid = true;
-        }
-        else
-        {
-            constexpr float timeConstant = 1.5f;                                // seconds
-            constexpr float alpha = 1.0f / (1.0f + 30.0f * timeConstant);      // ~0.022
-            smoothedCorrectionDb += alpha * (delta - smoothedCorrectionDb);
-        }
-    }
 
     // v2.13: the readout states the action with an explicit "Add"
     // prefix - "Add +0.7 dB" = the output is 0.7 dB too quiet (raise
@@ -2391,9 +2377,9 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     // v2.34: the readout sits under the halved logo in a narrow
     // column, so it breaks after "Add" - two short lines instead of
     // one clipped one.
-    correctionLabel.setText (correctionEverValid
-                                 ? juce::String ("Add ") + (smoothedCorrectionDb >= 0.0f ? "+" : "")
-                                       + juce::String (smoothedCorrectionDb, 1) + " dB"
+    correctionLabel.setText (valid
+                                 ? juce::String ("Add ") + (delta >= 0.0f ? "+" : "")
+                                       + juce::String (delta, 1) + " dB"
                                  : "-- dB",
                              juce::dontSendNotification);
 }

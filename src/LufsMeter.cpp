@@ -76,6 +76,10 @@ void LufsMeter::resetMeasurement()
     historyPos = 0;
     hopsStored = 0;
     shortTermLufs.store (-120.0f, std::memory_order_relaxed);
+    smoothPower = 0.0;
+    smoothValidHops = 0;
+    smoothSilentHops = 0;
+    smoothedLufs.store (-120.0f, std::memory_order_relaxed);
 }
 
 void LufsMeter::process (const juce::AudioBuffer<float>& buffer)
@@ -113,17 +117,47 @@ void LufsMeter::storeHop()
         hopEnergy[(size_t) c][(size_t) historyPos] =
             (float) (channels[(size_t) c].hopSum / (double) hopSamples);
 
+    // v2.42 (point 4): the gain-staging readout source - a 5 s exponential
+    // average of the hop POWER (not dB: a dB-domain average weights a
+    // quiet passage as much as a loud one, which biased the old readout
+    // ~0.3 dB low on dynamic material; the Python simulation that settled
+    // this is preserved with the project work files). Hops under the
+    // -70 LUFS floor never enter the average: a silence gap holds the
+    // last value, and a full 3 s of silence invalidates the output (the
+    // same schedule the draining short-term window always had), so a
+    // muted console cannot keep flashing a stale correction. A handful
+    // of flops and one log10 per hop - no allocation, no extra memory.
+    {
+        double hopPower = 0.0;
+        for (int c = 0; c < numChans; ++c)
+            hopPower += hopEnergy[(size_t) c][(size_t) historyPos];
+
+        if (powerToLufs (hopPower) > -70.0)
+        {
+            smoothSilentHops = 0;
+            smoothPower += smoothAlpha * (hopPower - smoothPower);
+            if (++smoothValidHops >= smoothWarmupHops)
+                smoothedLufs.store (powerToLufs (smoothPower),
+                                    std::memory_order_relaxed);
+        }
+        else if (++smoothSilentHops >= smoothSilentHopsToInvalid)
+        {
+            smoothValidHops = 0;   // a real silence must re-warm for 1 s
+            smoothedLufs.store (-120.0f, std::memory_order_relaxed);
+        }
+    }
+
     historyPos = (historyPos + 1) % historyLength;
     hopsStored = juce::jmin (hopsStored + 1, historyLength);
 
     if (hopsStored < 4)
         return;
 
-    // short-term loudness over 3 s (30 hops of 100 ms). v2.32: this is
-    // now the meter's ONLY output. The BS.1770 integrated-loudness
-    // gating that used to run here (a std::vector push_back per 400 ms
-    // block, then two log10 loops over up to 20k entries to average
-    // them) was removed: nothing in the shell ever displayed it, it was
+    // short-term loudness over 3 s (30 hops of 100 ms). v2.32: the
+    // BS.1770 integrated-loudness gating that used to run here (a
+    // std::vector push_back per 400 ms block, then two log10 loops over
+    // up to 20k entries to average them) was removed: nothing in the
+    // shell ever displayed it, it was
     // the one remaining path that could ALLOCATE on the audio thread,
     // and the erase-from-front once the vector saturated copied 160 KB
     // every 400 ms. The realtime-safety audit (v2.32 test harness) now

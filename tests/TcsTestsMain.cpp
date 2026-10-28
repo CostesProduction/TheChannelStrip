@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.41.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.42.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -873,6 +873,74 @@ void testSilence()
                 "no gain correction readout in silence");
 }
 
+// v2.42 (point 4): the gain-staging readout is the meters' 5 s power-domain
+// exponential average, gated per hop below -70 LUFS. It stays "--" under
+// 1 s of gated signal, holds EXACTLY through a short silence gap, and
+// invalidates after 3 s of silence (the schedule the draining short-term
+// window always had, so a muted console cannot keep flashing a stale
+// correction).
+void testGainCorrectionSmoothing()
+{
+    beginTest ("gain correction smoothing (5 s power average, gated)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+    SineSource src (1000.0, 48000.0, 0.1f);
+
+    // ~0.85 s of signal: 8 hops, under the 10-hop (1 s) warm-up
+    for (int n = 0; n < 80; ++n)
+    {
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    float delta = 0.0f;
+    expectTrue (! proc.getGainCorrectionDb (delta),
+                "the smoothed readout stays invalid under 1 s of signal");
+
+    // ~6 s more: valid, and ~0 (nothing hosted - both meters see the same
+    // bit-exact passthrough, so the two averages stay identical)
+    for (int n = 0; n < 560; ++n)
+    {
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    expectTrue (proc.getGainCorrectionDb (delta),
+                "the smoothed readout is valid after 1 s of gated signal");
+    expectNear ((double) delta, 0.0, 0.05,
+                "the smoothed correction is ~0 with nothing hosted");
+
+    // a 1 s silence gap: the average holds EXACTLY (gated, not dragged)
+    for (int n = 0; n < 100; ++n)
+    {
+        fillSilence (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    float held = 0.0f;
+    expectTrue (proc.getGainCorrectionDb (held),
+                "the readout holds through a 1 s silence gap");
+    // exact bit equality via </> (no -Wfloat-equal): the meters were not
+    // updated during the gap, so the two reads must be identical
+    expectTrue (! (held < delta || held > delta),
+                "the held value is bit-identical to the pre-gap value");
+
+    // 3 s more of silence: the readout invalidates like the old ST window
+    for (int n = 0; n < 320; ++n)
+    {
+        fillSilence (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    expectTrue (! proc.getGainCorrectionDb (delta),
+                "3 s of silence invalidates the smoothed readout");
+}
+
 void testSpectrumPeak()
 {
     beginTest ("spectrum analyser peak location");
@@ -1551,7 +1619,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.41.0");
+        session->setAttribute ("version", "2.42.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1717,7 +1785,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.41.0");
+    session->setAttribute ("version", "2.42.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1940,8 +2008,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.41.0",
-                "saved state carries the current version tag (2.41.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.42.0",
+                "saved state carries the current version tag (2.42.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2279,7 +2347,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.41.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.42.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -2942,7 +3010,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.41.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.42.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -2951,6 +3019,7 @@ int main (int argc, char* argv[])
     testAnalyserGating();
     testLufsShortTerm();
     testSilence();
+    testGainCorrectionSmoothing();
     testSpectrumPeak();
     testSpectrumHighFrequency();
     testBassResolution();
