@@ -299,17 +299,23 @@ private:
     // v2.31: the bubble window's own click leaves the mode too, so it
     // needs exitHelpMode as well (it touches nothing else private).
     friend class HelpBubbleWindow;
-    // ---- v2.33 (roadmap idea 4): the Doctor ----
-    // Clicking the logo builds the processor's diagnostic report, shows
+    // ---- v2.33 (roadmap idea 4) -> v2.34: the Doctor and the contact card ----
+    // The DOCTOR (v2.33) builds the processor's diagnostic report, shows
     // it in a small non-blocking window, writes it to a file next to the
-    // plugin database and echoes it to the Terminal. Message thread
-    // only; the audio path is never touched.
+    // plugin database and echoes it to the Terminal. Since v2.34 its
+    // trigger is the heartbeat icon button on the Rescan row - the logo
+    // moved on. Message thread only; the audio path is never touched.
     void showDoctorReport();
-    // Routes the logo's click to the Doctor. juce::ImageComponent has
-    // no mouseDown override, and keeping the logo's drawing untouched
-    // is preferable to a subclass: a MouseListener attached to it in
-    // the constructor (and detached in the destructor) does exactly
-    // that, without a friend declaration or layout change.
+    // v2.34: the logo's new click target - a small card with Clement's
+    // contact details (mixing & mastering engineer, mail, website),
+    // one click to copy the mail or open the site. Static text, no
+    // processor state, message thread only.
+    void showContactCard();
+    // Routes the logo's click to the contact card. juce::ImageComponent
+    // has no mouseDown override, and keeping the logo's drawing
+    // untouched is preferable to a subclass: a MouseListener attached
+    // to it in the constructor (and detached in the destructor) does
+    // exactly that, without a friend declaration or layout change.
     struct LogoMouseListener : public juce::MouseListener
     {
         TheChannelStripAudioProcessorEditor* owner = nullptr;
@@ -349,15 +355,12 @@ private:
     // shown in the left sidebar (under the console buttons).
     juce::Label gainLabel;
     juce::Label hostedNameLabel;
-    // v2.14.1: channel-format diagnostic under the hosted console's name
-    // ("track: stereo" / "track: mono (native)" / "track: mono (bridge)").
-    juce::Label channelLabel;
-
-    // v2.33 (roadmap idea 3): the shell integrity bandeau - two compact
-    // lines right under the channel readout ("shell: unity · crossfade:
-    // idle" / "latency: N · sentinel: armed"), refreshed by the timer
-    // from proc.getShellIntegrityLine(). Pure display, quiet style, the
-    // answer to "is the shell transparent?" at a glance.
+    // v2.34: the merged status block under the hosted console's name -
+    // one label, two lines ("track: stereo · crossfade: idle" /
+    // "latency: N · sentinel: armed") fed by proc.getSidebarStatusLines().
+    // v2.33's separate integrity bandeau and the v2.14.2 channel readout
+    // collapsed into it (zero redundancy: "shell: unity" was a constant
+    // fact and lives in the Doctor report only).
     juce::Label integrityLabel;
 
     // ---- v2.26 (roadmap point 4): the presets sidebar section ----
@@ -375,7 +378,8 @@ private:
     // TOP of the sidebar, right under the shell's title.
     // v2.26.1: the icon look-and-feels MUST be declared before the
     // buttons they are attached to, so they are destroyed after them.
-    std::array<std::unique_ptr<juce::LookAndFeel>, 3> presetButtonLaFs;
+    // v2.34: a 4th slot draws the Doctor's heartbeat trace.
+    std::array<std::unique_ptr<juce::LookAndFeel>, 4> presetButtonLaFs;
     juce::Label presetLabel;
     juce::ComboBox presetCombo;
     juce::TextButton savePresetButton;
@@ -399,6 +403,24 @@ private:
     bool correctionEverValid = false;
 
     juce::TextButton rescanButton    { "Rescan" };
+
+    // v2.34: the Doctor icon button (a heartbeat trace), riding the
+    // Rescan row at the bottom of the sidebar. The logo's click moved
+    // to the contact card.
+    juce::TextButton doctorButton;
+
+    // v2.34: the preset-name marquee - the combo's own text field
+    // truncates long names, so the editor paints the current name over
+    // the combo (opaque fill, clicks pass through to the combo beneath)
+    // and scrolls it slowly in a loop when it does not fit. All state
+    // lives on the message thread, advanced by the editor's 30 Hz timer.
+    juce::String marqueeText;
+    float marqueeOffset = 0.0f;
+    int marqueePhase = 0;     // 0 = scrolling left, 1 = holding on the tail
+    int marqueeHold = 0;      // pause ticks (~3 s) at each end
+    juce::Rectangle<int> getMarqueeZone() const;
+    void tickPresetMarquee();
+    void paintOverChildren (juce::Graphics&) override;
 
     // v2.16.1: last latency value logged to the Terminal (change logging
     // happens on the message thread, never in processBlock).

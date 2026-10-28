@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.33.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.34.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1408,7 +1408,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.33.0");
+        session->setAttribute ("version", "2.34.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1574,7 +1574,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.33.0");
+    session->setAttribute ("version", "2.34.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1797,8 +1797,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.33.0",
-                "saved state carries the current version tag (2.33.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.34.0",
+                "saved state carries the current version tag (2.34.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2061,10 +2061,12 @@ void testFormatHotSwitch()
 // v2.33 (roadmap ideas 3+4: shell integrity readout + Doctor report)
 // ---------------------------------------------------------------------------
 
-// v2.33 (roadmap idea 3): the shell integrity readout - the two-line
-// bandeau the editor shows under the channel readout. The editor
-// displays these strings verbatim, so the asserts pin the wording, not
-// just keywords: unity, crossfade state, forwarded latency, sentinel.
+// v2.33 (roadmap idea 3): the shell integrity readout. Since v2.34 the
+// editor's sidebar shows the merged two-line block instead, but the
+// full wording (shell: unity included) still lives in the Doctor
+// report, which prints this string verbatim - so the asserts pin the
+// wording, not just keywords: unity, crossfade state, forwarded
+// latency, sentinel.
 void testShellIntegrityReadout()
 {
     beginTest ("shell integrity readout (v2.33 bandeau)");
@@ -2121,8 +2123,9 @@ void testShellIntegrityReadout()
 }
 
 // v2.33 (roadmap idea 4): the Doctor report - built entirely on the
-// message thread from state the harness already exercises; it is what
-// the logo click shows (and writes next to the plugin database). The
+// message thread from state the harness already exercises; since v2.34
+// the heartbeat button next to Rescan shows it (and it is written next
+// to the plugin database). The
 // asserts pin its key sections and the facts that must travel with a
 // support request.
 void testDoctorReport()
@@ -2133,7 +2136,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.33.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.34.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -2189,6 +2192,67 @@ void testDoctorReport()
                 "the report carries the silence warning itself");
     expectTrue (report.contains ("name: MockSilenceConsole"),
                 "the report names the currently hosted console");
+}
+
+// v2.34 (zone A rework): the merged sidebar status lines - the old
+// channel-format readout and the v2.33 integrity bandeau collapsed into
+// ONE two-line block with zero redundancy. The asserts pin both lines
+// and the fact that the constant "shell: unity" wording is gone (it
+// lives in the Doctor report only now).
+void testSidebarStatusLines()
+{
+    beginTest ("sidebar status lines (v2.34 merged block)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    auto lines = proc.getSidebarStatusLines();
+    expectTrue (lines.contains ("track: stereo"),
+                "line one carries the channel format");
+    expectTrue (lines.contains ("crossfade: idle"),
+                "no console -> the crossfade reads idle");
+    expectTrue (lines.contains ("latency: 0"),
+                "nothing hosted -> the forwarded latency reads 0");
+    expectTrue (lines.contains ("sentinel: armed"),
+                "the silence sentinel starts armed");
+    expectTrue (! lines.contains ("shell: unity"),
+                "the constant unity fact moved to the Doctor report only");
+
+    // a hosted console's latency reaches the merged block
+    auto mock = std::make_unique<MockConsole> (true);
+    mock->setLatencySamples (222);
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (1000.0, 48000.0, 0.5f);
+    processBlocks (proc, src, 2, block);
+
+    lines = proc.getSidebarStatusLines();
+    expectTrue (lines.contains ("latency: 222"),
+                "the hosted console's latency reaches the merged block");
+
+    // a swap makes the crossfade read ACTIVE until the fade has run out
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+    expectTrue (proc.getSidebarStatusLines().contains ("crossfade: active"),
+                "mid-swap the merged block shows an active crossfade");
+
+    processBlocks (proc, src, 12, block);   // 12 x 512 = 6144 samples > 50 ms fade
+    expectTrue (proc.getSidebarStatusLines().contains ("crossfade: idle"),
+                "the merged block settles back to idle once the fade is done");
+
+    // the licence-expired sentinel: a loud-but-silent console flips the
+    // block to "fired"; hosting a new console re-arms it
+    proc.setEditorOpen (true);
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+    processBlocks (proc, src, 880, block);   // ~9.3 s of loud input (crossfade eats 50 ms)
+
+    expectTrue (proc.getSidebarStatusLines().contains ("sentinel: fired"),
+                "a silent console under loud input flips the sentinel");
+
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+    processBlocks (proc, src, 2, block);
+    expectTrue (proc.getSidebarStatusLines().contains ("sentinel: armed"),
+                "hosting a fresh console re-arms the sentinel");
 }
 
 // ---------------------------------------------------------------------------
@@ -2724,7 +2788,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.33.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.34.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -2749,6 +2813,7 @@ int main (int argc, char* argv[])
     testFormatHotSwitch();
     testShellIntegrityReadout();
     testDoctorReport();
+    testSidebarStatusLines();
     testRealtimeSafetyAllocations();
     testTortureConsoleSwapStorm();
     testTortureFormatAndRateChurn();

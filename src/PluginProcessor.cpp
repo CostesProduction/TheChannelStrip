@@ -257,6 +257,25 @@ juce::String TheChannelStripAudioProcessor::getShellIntegrityLine() const
          + (sentinelFired ? "fired" : "armed");
 }
 
+// ---- v2.34: the sidebar's merged status lines --------------------------
+// One block instead of the v2.14.2 channel readout plus the v2.33
+// integrity bandeau: same atomics, zero redundancy between the sidebar
+// areas. The "shell: unity" fact never changes (the shell's audio path
+// IS the console's output at unity) so it moved to the Doctor report
+// alone. Same plain-"const char*" lesson as above: no
+// juce::CharPointer_UTF8 concatenation.
+juce::String TheChannelStripAudioProcessor::getSidebarStatusLines() const
+{
+    return getChannelReadout()
+         + " \xc2\xb7 crossfade: "
+         + (hostedStrip.isCrossfading() ? "active" : "idle")
+         + "\nlatency: "
+         + juce::String (juce::jmax (lastReportedLatency,
+                                     hostedStrip.getReportedLatency()))
+         + " \xc2\xb7 sentinel: "
+         + (silenceWarned.load (std::memory_order_relaxed) ? "fired" : "armed");
+}
+
 // ---- v2.33 (roadmap idea 4): the Doctor report ------------------------------
 // Built on the message thread when the logo is clicked (the editor shows it
 // in a small window and writes it next to the plugin database). It gathers
@@ -270,7 +289,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.33.0 - Doctor report\n"
+    report << "TheChannelStrip 2.34.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -902,7 +921,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.33.0");
+    xml->setAttribute ("version", "2.34.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1219,7 +1238,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.33.0");
+    xml->setAttribute ("version", "2.34.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2018,7 +2037,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.33.0");
+    xml->setAttribute ("version", "2.34.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

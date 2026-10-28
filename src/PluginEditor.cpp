@@ -29,7 +29,7 @@ namespace
     class PresetButtonLookAndFeel : public juce::LookAndFeel_V4
     {
     public:
-        enum class Icon { floppy, trash, importIn };
+        enum class Icon { floppy, trash, importIn, pulse };
 
         explicit PresetButtonLookAndFeel (Icon iconToDraw) : icon (iconToDraw) {}
 
@@ -104,6 +104,17 @@ namespace
                     path.startNewSubPath (p (5.3f, 7.3f));
                     path.lineTo (p (8, 10));
                     path.lineTo (p (10.7f, 7.3f));
+                    break;
+
+                case Icon::pulse:
+                    // v2.34: the Doctor's heartbeat trace - a flat ECG
+                    // line with one sharp beat
+                    path.startNewSubPath (p (2, 6.5f));
+                    path.lineTo (p (5.5f, 6.5f));
+                    path.lineTo (p (7, 2));
+                    path.lineTo (p (9, 11));
+                    path.lineTo (p (10.5f, 6.5f));
+                    path.lineTo (p (14, 6.5f));
                     break;
             }
 
@@ -1309,9 +1320,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.26.1: presets section now one icon row -> 973 / 793.
     // v2.33: the shell integrity bandeau under the channel readout
     // -> 1003 / 823.
-    setSize (1180, 1003);
+    // v2.34: zone A rework (channel readout merged into the status
+    // block, logo halved into the gain zone's right column) -> 890 / 710.
+    setSize (1180, 890);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 1003 : 823, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 890 : 710, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1321,9 +1334,14 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
     addAndMakeVisible (titleLabel);
 
-    for (auto* label : { &lufsInLabel, &lufsOutLabel, &correctionLabel })
+    // v2.34: the gain-staging readouts live in the LEFT part of the
+    // gain zone (the logo took the right side), so IN/OUT dropped from
+    // the old 12 pt row to 10 pt to keep "-14.2 LUFS" readable in the
+    // narrower column. The correction readout keeps its own style
+    // below.
+    for (auto* label : { &lufsInLabel, &lufsOutLabel })
     {
-        label->setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+        label->setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
         label->setJustificationType (juce::Justification::centred);
         label->setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
         addAndMakeVisible (*label);
@@ -1348,34 +1366,24 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         "The hosted console plugin, once one is selected.";
     addAndMakeVisible (hostedNameLabel);
 
-    // v2.14.2: live channel-format readout - what the DAW feeds this
-    // instance and which audio path the console takes. On a mono track the
-    // suffix says exactly why the console is bridged: "refused" (the plugin
-    // rejected the mono->mono layout), "2/2" (it answered with a next-best
-    // layout) or "multi-bus" (no main bus to negotiate).
-    channelLabel.setText ("track: stereo", juce::dontSendNotification);
-    channelLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
-    channelLabel.setJustificationType (juce::Justification::centred);
-    channelLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
-    helpTexts[&channelLabel] =
-        "Channel format the host gives this instance and the console's audio path.";
-    addAndMakeVisible (channelLabel);
-
-    // v2.33 (roadmap idea 3): the shell integrity bandeau - the answer to
-    // "is the shell transparent?" in two compact lines (the question of
-    // the +3 dB investigation): the shell runs at unity gain, whether a
-    // console-swap crossfade is in flight, the latency forwarded to the
-    // host and the silence sentinel's state. Same quiet style as the
-    // channel readout above it; the timer refreshes it.
+    // v2.34: the merged status block under the hosted console's name -
+    // one label, two lines fed by proc.getSidebarStatusLines(): the
+    // channel format (what the host feeds this instance, and why a mono
+    // track is bridged: "refused", a next-best layout like "2/2", or
+    // "multi-bus") plus the crossfade on line one, the forwarded
+    // latency plus the silence sentinel on line two. The v2.14.2
+    // channel readout and the v2.33 integrity bandeau collapsed into
+    // it with zero redundancy left ("shell: unity" never changes and
+    // lives in the Doctor report only).
     integrityLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
     integrityLabel.setJustificationType (juce::Justification::centred);
     integrityLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
     helpTexts[&integrityLabel] =
-        "Shell integrity: the shell processes at unity gain (it never "
-        "adds gain of its own), the crossfade shows whether a console "
-        "swap is still blending, the latency is the delay forwarded to "
-        "the host, and the sentinel watches for a hosted console that "
-        "stopped producing audio (a lapsed licence does exactly that).";
+        "Status: the channel format the host gives this instance and the "
+        "console's audio path, whether a console-swap crossfade is still "
+        "blending, the delay forwarded to the host, and the sentinel that "
+        "watches for a hosted console which stopped producing audio (a "
+        "lapsed licence does exactly that).";
     addAndMakeVisible (integrityLabel);
 
     // v2.1: the correction is the main readout: bigger and smoothed.
@@ -1384,8 +1392,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // display went back to an action at Clement's request), now with an
     // explicit "Add" prefix: "Add +0.7 dB" = raise the output by 0.7 dB
     // to match the input loudness; "Add -0.4 dB" = lower it by 0.4 dB.
+    // v2.34: the readout moved UNDER the halved logo (zone A rework),
+    // so it shrinks to 11 pt and splits on two lines ("Add" /
+    // "+0.7 dB") to fit the narrow right column.
     correctionLabel.setColour (juce::Label::textColourId, juce::Colour (0xff54c8e8));
-    correctionLabel.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    correctionLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     correctionLabel.setJustificationType (juce::Justification::centred);
     // v2.31 (remark 1): the correction's explanation moved into the
     // help-mode texts too - no standing tooltip any more.
@@ -1404,20 +1415,19 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
 
-    // v2.33 (roadmap idea 4): clicking the logo opens the Doctor - a
-    // full diagnostic snapshot of the shell (versions, plugin database,
-    // latency, integrity states), also written to a text file next to
-    // the plugin database and echoed to the Terminal. A MouseListener
-    // instead of a subclass keeps the logo's drawing and layout exactly
-    // as they were; the pointing-hand cursor says "clickable". The
+    // v2.34: clicking the logo opens the CONTACT CARD - who built the
+    // shell (mixing & mastering engineer), the mail and the website,
+    // one click to copy either. The Doctor (v2.33) moved to its own
+    // heartbeat icon button on the Rescan row. A MouseListener instead
+    // of a subclass keeps the logo's drawing and layout exactly as
+    // they were; the pointing-hand cursor says "clickable". The
     // listener is detached in the destructor.
     logoMouseListener.owner = this;
     studioLogo.addMouseListener (&logoMouseListener, false);
     studioLogo.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     helpTexts[&studioLogo] =
-        "Click the logo for the Doctor - a full diagnostic report of "
-        "the shell (versions, plugin database, latency, integrity "
-        "states), also saved as a text file next to the plugin database.";
+        "Click the logo for Clement's contact card - mixing & mastering "
+        "engineer, with the mail and the website one click away.";
 
     // v2.30: the "?" button no longer rides the logo band - it moved
     // to the presets button row (see the presets section below) and
@@ -1484,6 +1494,8 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     presetButtonLaFs[0] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::floppy);
     presetButtonLaFs[1] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::trash);
     presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
+    // v2.34: the 4th icon look-and-feel draws the Doctor's heartbeat.
+    presetButtonLaFs[3] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::pulse);
 
     savePresetButton.setLookAndFeel    (presetButtonLaFs[0].get());
     deletePresetButton.setLookAndFeel  (presetButtonLaFs[1].get());
@@ -1515,6 +1527,20 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                              " explanation. A click or Esc leaves it.";
     helpButton.onClick = [this] { enterHelpMode(); };
     addAndMakeVisible (helpButton);
+
+    // v2.34: the Doctor button - a heartbeat-trace icon on the Rescan
+    // row at the bottom of the sidebar. The Doctor itself is unchanged
+    // since v2.33 (full diagnostic snapshot, saved as a text file next
+    // to the plugin database); only its trigger moved, from the logo's
+    // click to this dedicated button.
+    doctorButton.setLookAndFeel (presetButtonLaFs[3].get());
+    styleConsoleButton (doctorButton);
+    doctorButton.onClick = [this] { showDoctorReport(); };
+    helpTexts[&doctorButton] =
+        "The Doctor: a full diagnostic report of the shell (versions, "
+        "host, plugin database, latency, integrity states), shown in a "
+        "window and saved as a text file next to the plugin database.";
+    addAndMakeVisible (doctorButton);
 
     // v2.30: short help texts for the help-mode bubbles. They live in
     // the editor's helpTexts map, NOT in setTooltip(): a standing
@@ -1818,12 +1844,10 @@ void TheChannelStripAudioProcessorEditor::resized()
     y += 2;
     hostedNameLabel.setBounds (sideX, y, sw, 24);
     y += 26;
-    // v2.14.1: channel-format readout sits right under the console name.
-    channelLabel.setBounds (sideX, y, sw, 14);
-    y += 18;
 
-    // v2.33 (roadmap idea 3): the shell integrity bandeau, two lines
-    // tall, closes the diagnostic cluster under the console name.
+    // v2.34: the merged status block (channel format + integrity), two
+    // lines tall, right under the console name - the v2.14.1 channel
+    // readout row above the v2.33 integrity bandeau collapsed into it.
     integrityLabel.setBounds (sideX, y, sw, 26);
     y += 30;
 
@@ -1848,41 +1872,29 @@ void TheChannelStripAudioProcessorEditor::resized()
     analyserToggle.setBounds (sideX, y, sw, 22);
     y += 22 + 10;
 
-    gainLabel.setBounds (sideX, y, sw, 15);
-    y += 17;
+    // ---- v2.34 (zone A rework): the gain-staging block shares its rows
+    // with the studio logo, as Clement mocked up: the IN/OUT readouts on
+    // the left, the logo (half its old square size) in the top-right
+    // corner, and the correction readout UNDER the logo. The logo no
+    // longer owns a full-width row between the gain section and the
+    // status area, which is what made the old sidebar so tall. ----
+    gainLabel.setBounds (sideX, y, sw - 46, 15);
+    studioLogo.setBounds (sideX + sw - 36, y - 2, 34, 34);
 
-    lufsInLabel.setBounds  (sideX, y, sw, 19);
-    y += 19;
-    lufsOutLabel.setBounds (sideX, y, sw, 19);
-    y += 21;
+    lufsInLabel.setBounds  (sideX, y + 17, sw - 46, 19);
+    lufsOutLabel.setBounds (sideX, y + 36, sw - 46, 19);
 
-    correctionLabel.setBounds (sideX, y, sw, 26);
-    y += 30;
+    correctionLabel.setBounds (sideX + sw - 46, y + 34, 46, 30);
 
-    // v2.17: the studio logo sits between the gain-staging section and
-    // the host status area. The block height follows the image's aspect
-    // ratio at the sidebar width, capped so the sidebar stays compact.
-    // v2.17.1: the logo is half its v2.17 size in both directions (the
-    // placement keeps the aspect ratio, so the width follows the height).
-    {
-        const auto logoImage = studioLogo.getImage();
-        const int logoH = logoImage.isValid()
-            ? juce::jlimit (20, 75, juce::roundToInt ((double) sw * logoImage.getHeight()
-                                                      / logoImage.getWidth()) / 2)
-            : 20;
-        studioLogo.setBounds (sideX, y + 4, sw, logoH);
-
-        // v2.30: the "?" button moved to the presets row (top of the
-        // sidebar) - no more help button on the logo band.
-
-        y += logoH + 10;
-    }
+    y += 68;
 
     statusLabel.setBounds (sideX, y, sw, juce::jmax (16, h - m - y - 32));
 
     // v2.6: Rescan is the only control pinned at the bottom (the bypass
-    // button is gone).
-    rescanButton.setBounds (sideX, h - m - 26, sw, 24);
+    // button is gone). v2.34: the Doctor's heartbeat icon rides the same
+    // row, to its right.
+    rescanButton.setBounds (sideX, h - m - 26, sw - 38, 24);
+    doctorButton.setBounds  (sideX + sw - 34, h - m - 26, 34, 24);
 
     // ---- centre column: the hosted plugin fills the rest, under the
     //      full-width analyser strip ----
@@ -1953,7 +1965,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.17.1: logo halved -> 900 / 720.
     // v2.26.1: presets section now one icon row -> 973 / 793.
     // v2.33: the shell integrity bandeau -> 1003 / 823.
-    const int newH = juce::jlimit (showStrip ? 1003 : 823, 1600, targetH);
+    // v2.34: zone A rework -> 890 / 710.
+    const int newH = juce::jlimit (showStrip ? 890 : 710, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1968,7 +1981,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 1003 : 823, 2560, 1600); // v2.33: integrity bandeau
+    setResizeLimits (1024, show ? 890 : 710, 2560, 1600); // v2.34: zone A rework
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -2016,16 +2029,17 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
         syncPresetComboSelection();
     }
 
-    // v2.14.2: live channel-format readout (see the ctor comment for what
-    // each state and suffix tells us).
-    channelLabel.setText (proc.getChannelReadout(), juce::dontSendNotification);
+    // v2.34: the merged status block (the old channel readout plus the
+    // integrity bandeau, deduplicated) - one cheap string built from
+    // atomics on the processor; the label itself no-ops when the text
+    // has not changed. The crossfade visibly flickers to "active" for
+    // the ~50 ms of a console swap, which is exactly the point: the
+    // user SEES the shell doing its one transient job.
+    integrityLabel.setText (proc.getSidebarStatusLines(), juce::dontSendNotification);
 
-    // v2.33 (roadmap idea 3): the integrity bandeau - one cheap string
-    // built from atomics on the processor; the label itself no-ops when
-    // the text has not changed. The crossfade visibly flickers to
-    // "active" for the ~50 ms of a console swap, which is exactly the
-    // point: the user SEES the shell doing its one transient job.
-    integrityLabel.setText (proc.getShellIntegrityLine(), juce::dontSendNotification);
+    // v2.34: advance the preset-name marquee (no-op when the name fits
+    // or nothing is selected).
+    tickPresetMarquee();
 
     // v2.3: the hosted plugin's name lives in the sidebar; the status
     // area only carries scan progress and error messages.
@@ -2157,8 +2171,11 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     // v2.13.1: "Add " goes through an explicit juce::String - a bare
     // string literal concatenated with another const char* (the
     // ternary) does not compile (same lesson as v2.0.0).
+    // v2.34: the readout sits under the halved logo in a narrow
+    // column, so it breaks after "Add" - two short lines instead of
+    // one clipped one.
     correctionLabel.setText (correctionEverValid
-                                 ? juce::String ("Add ") + (smoothedCorrectionDb >= 0.0f ? "+" : "")
+                                 ? juce::String ("Add\n") + (smoothedCorrectionDb >= 0.0f ? "+" : "")
                                        + juce::String (smoothedCorrectionDb, 1) + " dB"
                                  : "-- dB",
                              juce::dontSendNotification);
@@ -2404,6 +2421,16 @@ void TheChannelStripAudioProcessorEditor::syncPresetComboSelection()
     lastSyncedPresetIdent = proc.getCurrentPluginIdent();
     lastSyncedPresetName = name;
     lastSyncedPresetModified = modified;
+
+    // v2.34: feed the marquee with exactly what the combo would show
+    // (the selected entry's FULL text, "*" included - the combo's own
+    // field clips it, the marquee scrolls it) and reset the scroll
+    // state whenever the selection changes.
+    marqueeText = match < 0 ? juce::String()
+                           : presetItemText (presetList[match], modified);
+    marqueeOffset = 0.0f;
+    marqueePhase = 0;
+    marqueeHold = 45;   // ~1.5 s before a too-long name starts scrolling
 }
 
 void TheChannelStripAudioProcessorEditor::onPresetSelected()
@@ -2564,6 +2591,108 @@ void TheChannelStripAudioProcessorEditor::importPresetFile()
 }
 
 // ---------------------------------------------------------------------------
+// v2.34: the preset-name marquee. The combo box clips a long preset name
+// ("SSL E - My album - Some long name..."), so the editor paints the name
+// itself over the combo's text field: an opaque fill in the combo's exact
+// background colour hides the clipped text, and the name drifts left in a
+// slow loop whenever it is wider than the field. Painting (not a child
+// component) keeps every click flowing to the combo beneath - the menu
+// opens, the selection works, exactly as before. The 30 Hz timer advances
+// the offset; the repaint is limited to the combo's rectangle, and when
+// the name fits nothing animates at all.
+// ---------------------------------------------------------------------------
+
+// the combo's text zone: inset so the fill never covers the arrow
+juce::Rectangle<int> TheChannelStripAudioProcessorEditor::getMarqueeZone() const
+{
+    const auto r = presetCombo.getBounds();
+    return { r.getX() + 2, r.getY() + 3, r.getWidth() - 26, r.getHeight() - 6 };
+}
+
+void TheChannelStripAudioProcessorEditor::tickPresetMarquee()
+{
+    if (marqueeText.isEmpty())
+        return;
+
+    const auto zone = getMarqueeZone();
+    const auto font = presetCombo.getLookAndFeel().getComboBoxFont (presetCombo);
+    const float textW = juce::GlyphArrangement::getStringWidth (font, marqueeText);
+
+    if (textW <= (float) zone.getWidth())
+    {
+        if (marqueeOffset != 0.0f)
+        {
+            marqueeOffset = 0.0f;
+            repaint (presetCombo.getBounds());
+        }
+        return;   // fits: painted centred, nothing to animate
+    }
+
+    if (marqueeHold > 0)
+    {
+        --marqueeHold;
+        return;    // pause at either end of the loop
+    }
+
+    const float maxOffset = textW - (float) zone.getWidth();
+
+    if (marqueePhase == 0)
+    {
+        marqueeOffset += 0.5f;   // ~15 px/s at 30 Hz
+
+        if (marqueeOffset >= maxOffset)
+        {
+            marqueeOffset = maxOffset;
+            marqueePhase = 1;
+            marqueeHold = 90;    // ~3 s pause once the tail is readable
+        }
+
+        repaint (presetCombo.getBounds());
+    }
+    else
+    {
+        // the tail was shown: snap home and pause before the next pass
+        marqueeOffset = 0.0f;
+        marqueePhase = 0;
+        marqueeHold = 90;
+        repaint (presetCombo.getBounds());
+    }
+}
+
+void TheChannelStripAudioProcessorEditor::paintOverChildren (juce::Graphics& g)
+{
+    if (marqueeText.isEmpty())
+        return;   // nothing selected: the combo's "(none)" placeholder shows
+
+    const auto zone = getMarqueeZone();
+    const auto font = presetCombo.getLookAndFeel().getComboBoxFont (presetCombo);
+    const float textW = juce::GlyphArrangement::getStringWidth (font, marqueeText);
+
+    // hide the combo's own clipped text with its exact background colour
+    g.setColour (juce::Colour (0xff1a2130));
+    g.fillRect (zone);
+
+    g.setColour (juce::Colour (0xffdfe6f2));
+    g.setFont (font);
+
+    if (textW <= (float) zone.getWidth())
+    {
+        g.drawText (marqueeText, zone, juce::Justification::centred);
+        return;
+    }
+
+    // scrolled: left-aligned at the current offset, clipped to the zone
+    // so the text never bleeds over the combo's arrow
+    g.reduceClipRegion (zone);
+    g.drawText (marqueeText,
+                juce::Rectangle<int> (zone.getX() - juce::roundToInt (marqueeOffset),
+                                      zone.getY(),
+                                      (int) textW + 8,
+                                      zone.getHeight()),
+                juce::Justification::centredLeft);
+}
+
+// ---------------------------------------------------------------------------
 // v2.33 (roadmap idea 4): the Doctor window's content. A read-only,
 // monospaced, scrollable text area with the report plus Copy / Close
 // buttons. It holds NO editor reference (the report text is passed in
@@ -2628,7 +2757,131 @@ private:
 };
 } // namespace
 
-// v2.33 (roadmap idea 4): the logo click handler. The report is built on
+// ---------------------------------------------------------------------------
+// v2.34: the contact card's content. Static text - who Clement is, his
+// contact details, a French block with its English translation
+// underneath (Clement's choice for the zone A branding rework) - plus
+// "Copy mail" and "Open website" buttons. It holds NO editor reference,
+// so it needs no friend declaration and can never dangle; the
+// DialogWindow owns and destroys it.
+// ---------------------------------------------------------------------------
+namespace
+{
+class ContactPanel final : public juce::Component
+{
+public:
+    ContactPanel()
+    {
+        titleLabel.setText ("Clément Costes - Costes Production",
+                            juce::dontSendNotification);
+        titleLabel.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
+        titleLabel.setJustificationType (juce::Justification::centred);
+        titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
+        addAndMakeVisible (titleLabel);
+
+        frLabel.setText ("Ingénieur son : prise de son, mixage & mastering.\n"
+                         "Studio acoustiquement traité à Nantes + studio mobile"
+                         " partout en France.\n"
+                         "Certifié DJ Network 2022 - Ingénieur Centrale Nantes.",
+                         juce::dontSendNotification);
+        frLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
+        frLabel.setJustificationType (juce::Justification::centred);
+        frLabel.setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
+        addAndMakeVisible (frLabel);
+
+        enLabel.setText ("Sound engineer: recording, mixing & mastering.\n"
+                         "Acoustically treated studio in Nantes + mobile"
+                         " recording all over France.\n"
+                         "DJ Network certified 2022 - engineer, Centrale Nantes.",
+                         juce::dontSendNotification);
+        enLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::italic)));
+        enLabel.setJustificationType (juce::Justification::centred);
+        enLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+        addAndMakeVisible (enLabel);
+
+        mailLabel.setText ("mail: clem.costes@gmail.com", juce::dontSendNotification);
+        webLabel.setText  ("web: sites.google.com/view/costesproduction",
+                           juce::dontSendNotification);
+        for (auto* l : { &mailLabel, &webLabel })
+        {
+            l->setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+            l->setJustificationType (juce::Justification::centred);
+            l->setColour (juce::Label::textColourId, juce::Colour (0xff54c8e8));
+            addAndMakeVisible (*l);
+        }
+
+        copyMailButton.setButtonText ("Copy mail");
+        copyMailButton.onClick = [this]
+        {
+            juce::SystemClipboard::copyTextToClipboard ("clem.costes@gmail.com");
+            copyMailButton.setButtonText ("Copied!");
+        };
+        addAndMakeVisible (copyMailButton);
+
+        // v2.34: open the site in the default browser; if the launch is
+        // refused, at least leave the URL on the clipboard.
+        openWebButton.setButtonText ("Open website");
+        openWebButton.onClick = []
+        {
+            const juce::URL site ("https://sites.google.com/view/costesproduction");
+
+            if (! site.launchInDefaultBrowser())
+                juce::SystemClipboard::copyTextToClipboard (
+                    "https://sites.google.com/view/costesproduction");
+        };
+        addAndMakeVisible (openWebButton);
+
+        closeButton.setButtonText ("Close");
+        closeButton.onClick = [this]
+        {
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->exitModalState (0);
+        };
+        addAndMakeVisible (closeButton);
+
+        setSize (460, 330);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (10);
+
+        titleLabel.setBounds (area.removeFromTop (26));
+        frLabel.setBounds    (area.removeFromTop (52));
+        enLabel.setBounds    (area.removeFromTop (46));
+        mailLabel.setBounds  (area.removeFromTop (20));
+        webLabel.setBounds   (area.removeFromTop (20));
+        area.removeFromTop (10);
+
+        auto buttons = area.removeFromTop (28);
+        copyMailButton.setBounds (buttons.removeFromLeft (140));
+        closeButton.setBounds    (buttons.removeFromRight (90));
+        openWebButton.setBounds   (buttons);
+    }
+
+private:
+    juce::Label titleLabel, frLabel, enLabel, mailLabel, webLabel;
+    juce::TextButton copyMailButton, openWebButton, closeButton;
+};
+} // namespace
+
+// v2.34: the logo click handler - one click on the studio logo opens the
+// contact card (see showContactCard). Pure UI, message thread only.
+void TheChannelStripAudioProcessorEditor::showContactCard()
+{
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = "Costes Production";
+    options.content.setOwned (new ContactPanel());
+    options.componentToCentreAround = this;
+    options.dialogBackgroundColour = juce::Colour (0xff141a26);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
+}
+
+// v2.33 (roadmap idea 4): the Doctor handler - since v2.34 its trigger is
+// the heartbeat button on the Rescan row. The report is built on
 // the message thread (it takes the console-state and scan locks, which the
 // audio thread never holds), echoed to the Terminal, saved as a text file
 // next to the plugin database, and shown in a small NON-BLOCKING window
@@ -2662,11 +2915,12 @@ void TheChannelStripAudioProcessorEditor::showDoctorReport()
     options.launchAsync();
 }
 
-// v2.33: the logo's MouseListener - one click on the studio logo opens
-// the Doctor (see showDoctorReport).
+// v2.33 -> v2.34: the logo's MouseListener - one click on the studio logo
+// now opens the contact card (see showContactCard); the Doctor lives on
+// its own heartbeat button since v2.34.
 void TheChannelStripAudioProcessorEditor::LogoMouseListener::mouseDown (
     const juce::MouseEvent&)
 {
     if (owner != nullptr)
-        owner->showDoctorReport();
+        owner->showContactCard();
 }

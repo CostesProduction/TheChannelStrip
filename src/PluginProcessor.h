@@ -280,6 +280,17 @@ public:
     // ints only - no locks - and safe to call from the 30 Hz UI timer.
     juce::String getShellIntegrityLine() const;
 
+    // ---- v2.34: the sidebar's merged status lines --------------------------
+    // The two compact lines under the hosted console's name: channel
+    // format + crossfade on line one, forwarded latency + sentinel on
+    // line two. The v2.33 integrity bandeau and the v2.14.2 channel
+    // readout collapsed into this single block with ZERO redundancy
+    // between the sidebar areas: "shell: unity" is a constant
+    // architectural fact and lives in the Doctor report only. Same
+    // facts as getChannelReadout() / getShellIntegrityLine(), which the
+    // Doctor report keeps using untouched. Display-only, message thread.
+    juce::String getSidebarStatusLines() const;
+
     // ---- v2.33 (roadmap idea 4): the Doctor report ----
     // A plain-text snapshot of everything worth knowing when something
     // misbehaves: shell and JUCE versions, host and wrapper, sample

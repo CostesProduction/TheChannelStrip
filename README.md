@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.33.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.34.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -136,13 +136,14 @@ them in a clean, focused workflow:
   viewport that fills the centre column below the analyzer, so the guest
   plugin is actually visible and usable. The layout is a **condensed left
   sidebar + centre column, nothing else** (v2.4): the sidebar carries the
-  console choice, the hosted name, the tilt, the LUFS/delta readouts and
-  Rescan; the centre column is used only by the analyzer strip
+  console choice, the hosted name, the tilt, the LUFS/delta readouts,
+  Rescan and the Doctor heartbeat button (the Costes logo opens a
+  contact card); the centre column is used only by the analyzer strip
   and the hosted plugin itself. The **window auto-fits the hosted editor**
   once it is embedded (and re-fits when you switch consoles, since their
   GUI sizes differ): the analyzer strip gets the plugin's full width and
-  nothing needs to scroll. The window stays resizable (1024×800 minimum
-  with the analyzer shown, 1024×610 with it hidden;
+  nothing needs to scroll. The window stays resizable (1024×890 minimum
+  with the analyzer shown, 1024×710 with it hidden;
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
   on to the DAW, and re-forwarded whenever the plugin changes it at
@@ -282,6 +283,45 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.34.0**
+  - **Sidebar zone A rework: preset marquee.** Long preset names
+    (album tags included) no longer read as a truncated line: when the
+    text fits, it stays centred and frozen; when it doesn't, it
+    scrolls slowly in a loop inside the combo box — a steady
+    ~15 px/s drift with a short hold at both ends so the eye can
+    catch the start and the end. The scroll repaints only the combo
+    box's own rectangle, on the UI timer, nothing else in the
+    window moves, and the audio path is untouched.
+  - **Doctor gets its own heartbeat button.** The Doctor report no
+    longer hides behind the logo: a dedicated pulse-trace button
+    (an ECG-style heartbeat icon) sits next to Rescan at the bottom
+    of the sidebar, styled like the other console buttons. The
+    logo's click is freed for something better —
+  - **Contact card on the logo.** Clicking the Costes logo now opens
+    a compact contact card: who Clément is (mix & mastering
+    engineer, Nantes studio + mobile rig, in English below the
+    French), the mail and the website, both one click away
+    (**Copy mail** to clipboard, **Open website** in the default
+    browser with a clipboard fallback). Message thread only.
+  - **Logo halved into the gain-staging zone (zone A).** The Costes
+    logo renders at ~half its former size and moves to the right of
+    the GAIN STAGING block, with the big **Add +X dB** correction
+    readout now sitting **under the logo** in the same right column
+    — the block keeps a clean two-column shape and the sidebar gets
+    its full-height breathing room back. The whole zone is ~95 px
+    shorter, and the window's auto-fit heights drop accordingly
+    (890 with the analyzer shown, 710 with it hidden, minimum
+    1024×890 / 1024×710).
+  - **Merged status lines, zero redundancy.** The v2.33 integrity
+    bandeau and the channel-format readout above it collapse into
+    ONE compact two-line block under the hosted console's name:
+    `track: stereo · crossfade: idle` / `latency: 0 · sentinel:
+    armed`. The constant `shell: unity` fact (an architecture
+    invariant, always identical) left the sidebar for good — the
+    Doctor report is where it's explained. Crossfade, forwarded
+    latency and the silence sentinel still update live from the
+    same atomics, still with zero audio-thread cost.
 
 - **2.33.0**
   - **Shell integrity bandeau (roadmap idea 3).** A compact two-line
