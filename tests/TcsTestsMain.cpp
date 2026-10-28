@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.43.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.43.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1356,11 +1356,19 @@ void testEqUncorrelatedConsoleNoise()
 // injects a deterministic band-limited noise floor INSIDE the console
 // (uncorrelated with the input, in-band level equal to the input PSD -
 // the reference simulation's console-noise scenario, where the raw
-// curve's band-to-band jaggedness measured ~2 dB). The v2.43 frequency-
-// domain smoothing (5-tap binomial kernel over the accumulated
-// cross-spectra) must bring that jaggedness down ~10x while the curve
-// stays flat 0 dB (the console is a passthrough): smooth, but still an
-// honest measurement.
+// curve's band-to-band jaggedness measured ~1.35 dB). The v2.43
+// frequency-domain smoothing over the accumulated cross-spectra must
+// bring that jaggedness down while the curve stays flat 0 dB (the
+// console is a passthrough): smooth, but still an honest measurement.
+//
+// v2.43.1 (Clement's "vaguelettes" remark): the single 5-tap pass
+// still left small waves on real material, so the kernel now runs 3
+// cascaded passes (13-tap binomial, ~half an octave). The reference
+// simulation on this exact mock scenario: jaggedness max 1.35 dB raw
+// / 0.27 (1 pass, v2.43.0) / 0.08 dB (3 passes), rms 0.58 / 0.12 /
+// 0.04 - the rms assertion below (0.1 dB) sits between the v2.43.0
+// single pass and the 3-pass cascade with margin on both sides, so a
+// revert to the narrower kernel FAILS it.
 void testEqCurveSmoothing()
 {
     beginTest ("EQ curve frequency smoothing (v2.43)");
@@ -1437,24 +1445,38 @@ void testEqCurveSmoothing()
                 "the smoothed curve stays flat 0 dB on average (got "
                 + juce::String (meanDb, 3) + " dB)");
 
-    // 3. THE metric: band-to-band jaggedness - the max deviation from
-    // the 3-band local mean across the region. Reference simulation
-    // on this exact scenario: raw per-band estimates ~2.0 dB, the
-    // v2.43-smoothed curve ~0.2 dB; the 0.8 dB threshold sits between
-    // with margin on both sides.
+    // 3. THE metrics: band-to-band jaggedness - the deviation from
+    // the 3-band local mean across the region, max (regression guard
+    // against no smoothing at all) and rms (v2.43.1: discriminates the
+    // 3-pass cascade from the old single 5-tap pass). Reference
+    // simulation on this exact scenario: raw 1.35 max / 0.58 rms,
+    // single pass (v2.43.0) 0.27 / 0.12, 3 passes (v2.43.1) 0.08 /
+    // 0.04 dB.
     float jaggedness = 0.0f;
+    double jagSq = 0.0;
 
     for (int b = lo + 1; b < hi; ++b)
     {
         const float localMean = (eqDb[b - 1] + eqDb[b] + eqDb[b + 1]) / 3.0f;
-        jaggedness = juce::jmax (jaggedness, std::abs (eqDb[b] - localMean));
+        const float dev = std::abs (eqDb[b] - localMean);
+        jaggedness = juce::jmax (jaggedness, dev);
+        jagSq += (double) dev * (double) dev;
     }
+
+    const double jagRms = std::sqrt (jagSq / (double) juce::jmax (1, hi - lo - 1));
 
     expectTrue (jaggedness < 0.8f,
                 "the EQ curve is frequency-smoothed (max band-to-band "
                 "deviation " + juce::String (jaggedness, 3) + " dB < 0.8; "
-                "the raw per-band estimates measured ~2 dB in the "
+                "the raw per-band estimates measured ~1.4 dB in the "
                 "reference simulation)");
+
+    expectTrue (jagRms < 0.1,
+                "the smoothing cascade is the wide v2.43.1 kernel (rms "
+                "band-to-band deviation " + juce::String (jagRms, 3)
+                + " dB < 0.1; the single 5-tap pass of v2.43.0 measured "
+                  "~0.12, the 3-pass cascade ~0.04 in the reference "
+                  "simulation)");
 }
 
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
@@ -1787,7 +1809,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.43.0");
+        session->setAttribute ("version", "2.43.1");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1953,7 +1975,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.43.0");
+    session->setAttribute ("version", "2.43.1");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2176,8 +2198,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.43.0",
-                "saved state carries the current version tag (2.43.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.43.1",
+                "saved state carries the current version tag (2.43.1)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2515,7 +2537,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.43.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.43.1"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3178,7 +3200,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.43.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.43.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

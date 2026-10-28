@@ -252,41 +252,61 @@ void TransferAnalyzer::compute()
     // Because ALL the EMAs were just updated by the same frame, every
     // neighbour is at the same temporal state: the kernel averages
     // estimates of the SAME instant, so no temporal lag is added. The
-    // clamped index replicates the edge bands, the weight sum stays a
-    // constant 16, and H = Sxy/Sxx + g2 are ratios: the 1/16 scale
-    // cancels in both (it is kept so the smoothed spectra stay on the
-    // physical scale of the accumulators). ~5k flops per frame, zero
-    // allocations.
+    // clamped index replicates the edge bands and the weight sum stays
+    // a constant 16 per pass, and H = Sxy/Sxx + g2 are ratios: the
+    // pass scale cancels in both (it is kept so the smoothed spectra
+    // stay on the physical scale of the accumulators).
+    //
+    // v2.43.1: the smoothing runs as smoothPasses CASCADES of the
+    // same 5-tap kernel (3 passes = the 13-tap binomial(12), ~half an
+    // octave span - see the header for the simulation numbers that
+    // settled it). Ping-pong between the two scratch buffers: pass 0
+    // reads the EMAs, each next pass reads what the previous one
+    // wrote. ~15k flops per frame, zero allocations.
+    const double* sm[4] = { emaSxx.data(), emaSyy.data(),
+                           emaSxyRe.data(), emaSxyIm.data() };
+
+    for (int pass = 0; pass < smoothPasses; ++pass)
+    {
+        double* const buf = smoothScratch[pass & 1].data();
+
+        for (int q = 0; q < 4; ++q)
+        {
+            const double* const src = sm[q];
+            double* const dst = buf + (size_t) (q * numScopeBins);
+
+            for (int b = 0; b < numScopeBins; ++b)
+            {
+                double acc = 0.0;
+
+                for (int t = 0; t < 5; ++t)
+                {
+                    const int nb = juce::jlimit (0, numScopeBins - 1,
+                                                 b + t - 2);
+                    acc += smoothTapWeights[t] * src[nb];
+                }
+
+                dst[b] = acc * (1.0 / 16.0);
+            }
+
+            sm[q] = dst;
+        }
+    }
+
     for (int b = 0; b < numScopeBins; ++b)
     {
-        double smSxx = 0.0, smSyy = 0.0, smSre = 0.0, smSim = 0.0;
-
-        for (int t = 0; t < 5; ++t)
-        {
-            const size_t nb = (size_t) juce::jlimit (0, numScopeBins - 1,
-                                                     b + t - 2);
-            const double w = smoothTapWeights[t];
-
-            smSxx += w * emaSxx  [nb];
-            smSyy += w * emaSyy  [nb];
-            smSre += w * emaSxyRe[nb];
-            smSim += w * emaSxyIm[nb];
-        }
-
-        const double inv16 = 1.0 / 16.0;
-        smSxx *= inv16;
-        smSyy *= inv16;
-        smSre *= inv16;
-        smSim *= inv16;
-
         const size_t bi = (size_t) b;
+
+        const double smSxx = sm[0][bi];
+        const double smSyy = sm[1][bi];
 
         // H1 transfer estimate: H = Sxy / Sxx. The dB form uses
         // 20*log10|H| (== 10*log10|H|^2), the same scale the old power
         // ratio produced for a pure gain, so the display keeps its
         // meaning. Both are computed from the smoothed quantities, so
         // the curve is the honest neighbourhood average transfer.
-        const double magH = std::sqrt (smSre * smSre + smSim * smSim);
+        const double magH = std::sqrt (sm[2][bi] * sm[2][bi]
+                                    + sm[3][bi] * sm[3][bi]);
         const double db = smSxx > 1.0e-30
             ? 20.0 * std::log10 (juce::jmax (magH / smSxx, 1.0e-30))
             : 0.0;

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.43.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.43.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,26 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.43.1**
+  - **Goodbye, "vaguelettes" (Clement's remark on the real Lindell 80
+    session).** The v2.43.0 smoothing had killed the fine band-to-band
+    jitter, but small waves were still visible on real material - the
+    per-frame estimates wobble a little with the program, and the eye
+    tracks that as gentle ripples. The smoothing kernel now runs three
+    cascaded passes of the same 5-tap binomial (the cascade convolves
+    into a 13-tap binomial spanning ~half an octave), and the display's
+    one-pole doubles its time constant to 0.5 s so the residual glides
+    instead of shimmering. Reference simulation on the exact regression
+    scenario: band-to-band jaggedness 0.27 -> 0.08 dB max, 0.12 ->
+    0.04 dB rms (3.3x calmer than v2.43.0); the raw curve measures
+    1.35 dB there. Honesty preserved: a Q1 EQ peak loses 0.02 dB, a
+    tight Q2 peak 0.06 dB, a steep lowpass flank does not move, and
+    the coherence is still recomputed from the same smoothed spectra.
+    A +6 dB knob turn still settles in the same ~3.2 s (the wider
+    kernel adds no lag; the calmer display pole adds ~0.3 s). ~15k
+    flops per analysis frame, zero allocations. The one documented
+    cost: a pathological Q8/-18 dB notch (no console EQ is that
+    narrow) fills ~3 dB more than before.
 - **2.43.0**
   - **A smooth EQ curve (Clement's "courbe brute" remark).** Every display
     band is an independent H1 measurement, so on real material the raw

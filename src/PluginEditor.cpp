@@ -622,7 +622,15 @@ void SpectrumPanel::updateBallistics()
     // (~1.4 s effective); the frequency-dependent settling and
     // confidence weights of v2.13/v2.21 tuned per-frame dB ratios that
     // no longer exist, so the display EMA here is a single light
-    // one-pole (tau 0.25 s at 30 Hz) for continuity only.
+    // one-pole for continuity only.
+    // v2.43.1 (Clement's "vaguelettes" remark): tau doubled to 0.5 s.
+    // The v2.43.0 frequency smoothing killed the band-scale jitter,
+    // but on real material slower wave-shaped residuals remain - the
+    // analyzer's per-frame estimates wobble a little from frame to
+    // frame with the program, and the eye tracks that as small waves.
+    // A calmer display pole (still only +0.34 s on a knob turn's
+    // settle, measured in the v2.43.1 reference simulation) lets the
+    // residual glide instead of shimmer.
     {
         float peakIn = -100.0f;
 
@@ -638,7 +646,7 @@ void SpectrumPanel::updateBallistics()
         processor.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
                                                           SpectrumAnalyzer::numScopeBins);
 
-        const float eqAlpha = 1.0f / (1.0f + 30.0f * 0.25f);
+        const float eqAlpha = 1.0f / (1.0f + 30.0f * 0.5f);
 
         for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
         {
