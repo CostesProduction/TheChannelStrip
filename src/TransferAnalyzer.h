@@ -166,10 +166,13 @@ private:
 
     // per-display-band EMAs of the band-aggregated spectra. The complex
     // pair (SxyRe, SxyIm) is accumulated complex - that is what cancels
-    // the uncorrelated output junk over time. alpha = 1/8 per ~170 ms
-    // frame: an effective average over the last ~8 frames (~1.4 s),
-    // enough for the random-phase junk to average down, and a settle
-    // time close to the v2.21.1 power EMAs.
+    // the uncorrelated output junk over time. v2.45: alpha = 1/32 per
+    // ~170 ms frame (was 1/8), an effective average over the last ~32
+    // frames (~5.4 s). The v2.44 smoothing kernel could not remove the
+    // slow programme-driven waves a 1/8 average leaves on dynamic
+    // music (see crossEmaAlpha in the .cpp for the full story); the
+    // longer average removes them at the source at the documented
+    // price of a ~5-10 s knob settle time.
     std::array<double, (size_t) numScopeBins> emaSxx {}, emaSyy {};
     std::array<double, (size_t) numScopeBins> emaSxyRe {}, emaSxyIm {};
 

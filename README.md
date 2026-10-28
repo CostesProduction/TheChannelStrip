@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.44.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.45.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,43 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.45.0**
+  - **The programme-driven waves: longer averaging, not another
+    kernel.** After 2.44.0's Savitzky-Golay pass Clement still saw
+    slow 1-2-octave waves riding the EQ curve - but only on real
+    dynamic music, never on stationary pink noise. That signature
+    identified the mechanism: the waves are the ESTIMATOR VARIANCE on
+    intermittent energy (a band only measures while its instruments
+    play; each burst leaves a slightly different energy-weighted
+    estimate behind, so the curve wanders with the programme), not a
+    frequency-domain smoothing problem. A 1-2-octave wave is locally
+    cubic: every kernel that could remove it would also eat a genuine
+    Q1 EQ peak, so the kernel family is exhausted - the only
+    remaining discriminator is time (a console response is fixed,
+    variance waves move with the music).
+  - **The dead end, documented.** A per-band deviation detector (a
+    fast EMA watching for the slow display EMA to be overtaken, as a
+    "tracking" mode that keeps fast knob response while averaging
+    long) was simulated on a 12-instrument bursty reference mock: a
+    real +6 dB Q1 knob step measures only ~+2.9 dB at band level
+    (energy-weighted aggregation dilutes the peak), while the
+    steady-state deviation noise is ~1.2 dB rms - the detector cannot
+    tell a knob from a wave. It was dropped.
+  - **The fix: the cross-spectrum EMA now averages over ~32 frames
+    (~5.4 s) instead of ~8 (~1.4 s).** Same estimator, same kernel,
+    one constant. On the bursty mock the typical band's wave drops
+    from 2.67 dB peak-to-peak to 0.19 dB (x14 calmer, invisible on
+    the display); the random-phase cancellation of console junk in
+    the accumulated complex cross-spectrum only improves with more
+    frames.
+  - **Documented price:** a knob turn now needs ~5-10 s to fully
+    settle (was ~2 s) - Clement's accepted trade: the calmest
+    possible curve even if a control takes longer to stabilise. On
+    the harshest simulated mock the settle is 9.4 s; on real music
+    (bands energised far more often) it lands at the low end of that
+    range. Warmup is unchanged: the ratio estimates are
+    self-normalising, so a band becomes measurable as soon as it
+    carries energy.
 - **2.44.0**
   - **The "lissage malin" (Clement's framing: display the smart
     smoothing of the measured points, not the raw points).** The 256

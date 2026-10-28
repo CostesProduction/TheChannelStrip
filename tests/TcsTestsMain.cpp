@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.44.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.45.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1288,8 +1288,10 @@ void testEqUncorrelatedConsoleNoise()
     auto mock = std::make_unique<MockToneConsole>();
     proc.getHostedStrip().setPlugin (std::move (mock));
 
-    // 6 s (the cross-spectrum EMAs average over the last ~8 frames of
-    // ~170 ms; the random-phase tone only cancels across frames)
+    // 6 s (since v2.45 the cross-spectrum EMAs average over the last
+    // ~32 frames of ~170 ms; the stationary mock needs no settling
+    // margin - the ratio estimates are self-normalising - and the
+    // random-phase tone only cancels across frames)
     for (int n = 0; n < (int) (6.0 * 48000.0 / 512.0); ++n)
     {
         src.fill (block);
@@ -1396,8 +1398,10 @@ void testEqCurveSmoothing()
     mock->setBandNoise (0.3f); // in-band noise PSD == input PSD, g2 ~ 0.5
     proc.getHostedStrip().setPlugin (std::move (mock));
 
-    // 4 s: ~24 cross-spectrum frames of 8192 samples; the EMAs average
-    // over the last ~8 of them, as in the reference simulation
+    // 4 s: ~24 cross-spectrum frames of 8192 samples; since v2.45 the
+    // EMAs average over ~32 frames (~5.4 s), so the estimate mixes the
+    // warmup - harmless here: the mock is stationary, the ratios are
+    // self-normalising, and the jaggedness metrics only improve
     for (int n = 0; n < (int) (4.0 * 48000.0 / 512.0); ++n)
     {
         src.fill (block);
@@ -1854,7 +1858,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.44.0");
+        session->setAttribute ("version", "2.45.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -2020,7 +2024,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.44.0");
+    session->setAttribute ("version", "2.45.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2243,8 +2247,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.44.0",
-                "saved state carries the current version tag (2.44.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.45.0",
+                "saved state carries the current version tag (2.45.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2582,7 +2586,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.44.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.45.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3245,7 +3249,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.44.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.45.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

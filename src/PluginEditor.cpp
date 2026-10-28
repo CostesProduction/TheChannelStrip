@@ -619,7 +619,7 @@ void SpectrumPanel::updateBallistics()
     // measured once stays drawn, holding its last value).
     //
     // The measurement is already time-averaged in the analyzer's EMAs
-    // (~1.4 s effective); the frequency-dependent settling and
+    // (~5.4 s effective since v2.45); the frequency-dependent settling and
     // confidence weights of v2.13/v2.21 tuned per-frame dB ratios that
     // no longer exist, so the display EMA here is a single light
     // one-pole for continuity only.
