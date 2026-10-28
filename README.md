@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.38.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.39.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -137,21 +137,21 @@ them in a clean, focused workflow:
   viewport that fills the centre column below the analyzer, so the guest
   plugin is actually visible and usable. The layout is a **condensed left
   sidebar + centre column, nothing else** (v2.4): the sidebar reads as
-  one column of modules (v2.38.0) — the shell's title, PRESETS and the
-  nine console buttons pinned right under it, then the frame-free
-  Costes logo (which opens a contact card), the ANALYSER section (its
+  one column of four blocks with an identical vertical space between
+  them (v2.39.0) — (1) the shell's title, PRESETS and the nine console
+  buttons pinned at the top; (2) the frame-free Costes logo (which
+  opens a contact card) with the ANALYSER section right under it (its
   toggle carries the heading: "ANALYSER" and the spectrum glyph share
-  the button, followed by response speed and tilt) and GAIN STAGING
-  (LUFS/delta readouts) spread evenly across the remaining height, the
-  hosted name with its alarm zone pinned just above Rescan and the
-  Doctor heartbeat button; the centre column is used only by the
+  the button, followed by response speed and tilt); (3) GAIN STAGING
+  (LUFS/delta readouts); (4) the hosted name with its alarm zone glued
+  to the Rescan / Doctor row at the bottom; the centre column is used only by the
   analyzer strip and the hosted plugin itself. The frame around
   everything is minimal (5 px margins and gutters). The **window
   auto-fits the hosted editor** once it is embedded (and re-fits when
   you switch consoles, since their GUI sizes differ): the analyzer
   strip gets the plugin's full width and nothing needs to scroll. The
-  window stays resizable (1024×970 minimum with the analyzer shown,
-  1024×790 with it hidden;
+  window stays resizable (860×970 minimum with the analyzer shown,
+  860×790 with it hidden;
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
   on to the DAW, and re-forwarded whenever the plugin changes it at
@@ -291,6 +291,21 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.39.0**
+  - **Minimum width 1024 → 860 (Clement's remark).** Narrow channel
+    strips were drowning in dead margin at the old width floor; the
+    auto-fit window now hugs them down to the sidebar's own needs,
+    and whatever margin remains reads as one dark field (see below).
+  - **The sidebar reads as four blocks** separated by an identical
+    vertical space: title + presets + consoles (pinned at the top),
+    logo + analyser, gain staging, and the name & alarm block glued
+    to the Rescan / Doctor row (pinned at the bottom, 2 px apart).
+  - **The shell's dark is the hosted plugins' own black.** The
+    near-black had a blue tint; the window background and the field
+    behind the hosted plugin are now the neutral black of the
+    brainworx-style plugin frames, so the hosted GUIs visually embed
+    into the shell. The navy stays the sidebar panel's colour.
 
 - **2.38.0**
   - **Back to the pre-v2.37 colours.** The all-navy background read

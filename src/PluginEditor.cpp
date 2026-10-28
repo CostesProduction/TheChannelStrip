@@ -1114,7 +1114,13 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
 
 void HostedEditorHolder::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff121724));
+    // v2.39.0 (Clement's remark D): the field behind the hosted plugin
+    // is the same neutral black as the hosted plugins' own frame, so
+    // the GUIs embed seamlessly - whatever dead margin remains (narrow
+    // strip at the width floor, short GUI at the height floor) reads
+    // as one dark field with the plugin in it. The navy is the sidebar
+    // panel's colour, not the centre's.
+    g.fillAll (juce::Colour (0xff0f0f0f));
 }
 
 // ---------------------------------------------------------------------------
@@ -1404,7 +1410,10 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // minimum - less wide, less tall.
     setSize (1165, 970);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
+    // v2.39.0 (Clement): the minimum WIDTH drops to 860 - the
+    // sidebar needs 147, narrow channel strips were drowning in
+    // dead margin at the old 1024 floor.
+    setResizeLimits (860, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1868,11 +1877,12 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
 void TheChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // v2.38.0 (Clement's feedback): the all-navy background of v2.37
-    // read lighter than what was before - back to the pre-v2.37 look:
-    // the near-black window background (0xff0c0f16) with the subtle
-    // navy sidebar panel (0xff121724) of v2.5 on top of it.
-    g.fillAll (juce::Colour (0xff0c0f16));
+    // v2.39.0 (Clement's remark D): the dark of the shell is now the
+    // NEUTRAL black of the hosted plugins' own frame (brainworx & co,
+    // ~0x0f0f0f - the previous 0xff0c0f16 carried a blue tint), so the
+    // hosted GUIs visually embed into the shell. The navy stays the
+    // sidebar panel's colour.
+    g.fillAll (juce::Colour (0xff0f0f0f));
 
     // v2.5: a subtle panel behind the sidebar (which starts under the
     // full-width analyser strip) so the zones read at a glance.
@@ -1944,34 +1954,32 @@ void TheChannelStripAudioProcessorEditor::resized()
         y += 28 + 5;
     }
 
-    // ---- v2.38.0 (Clement's proposal): the sidebar is now JUSTIFIED.
-    //      The presets + consoles stack stays pinned right under the
-    //      title, the name & alarm block stays pinned just above the
-    //      Rescan row, and the three middle sections - logo, analyser,
-    //      gain staging - share the remaining vertical space evenly
-    //      (the leftover splits into the four gaps around them). ----
+    // ---- v2.39.0 (Clement's blocks): the sidebar is FOUR blocks
+    //      separated by an IDENTICAL vertical space - (1) title +
+    //      presets + consoles, pinned at the top; (2) logo + analyser;
+    //      (3) gain staging; (4) the name & alarm block glued to the
+    //      Rescan / Doctor row, pinned at the bottom. ----
     const int rescanY = h - m - 26;
     const int alarmY  = rescanY - 42;   // 40 px zone, ends 2 px above Rescan
     const int nameY   = alarmY - 22;
 
-    // section heights: logo band 60, analyser block 111 (toggle +
-    // Fast/Slow + tilt), gain staging 87 (heading + IN/OUT + correction)
-    const int leftover = (nameY - y) - (60 + 111 + 87);
-    const int gap      = juce::jmax (2, leftover / 4);
+    // block heights: logo + analyser 173 (58 logo, 4 inner gap, 111
+    // analyser: toggle + Fast/Slow + tilt), gain staging 87 (heading +
+    // IN/OUT + correction); the leftover splits into the three gaps.
+    const int leftover = (nameY - y) - (173 + 87);
+    const int gap      = juce::jmax (4, leftover / 3);
 
-    // ---- v2.36.0: the frame-free monochrome logo, one click to the
-    //      contact card. v2.37.0: below the console block as the
-    //      signature of the console stack. ----
+    // ---- block 2: the frame-free monochrome logo (one click to the
+    //      contact card) with the analyser section right under it. ----
     y += gap;
     studioLogo.setBounds (sideX, y, sw, 58);
-    y += 60;
+    y += 58 + 4;
 
     // ---- v2.8: show/hide the analyser strip. v2.37.0 (Clement's
     //      design): the toggle carries the section heading - the
     //      "ANALYSER" label and the spectrum glyph share the button,
     //      saving the v2.36 heading row. Same toggle behaviour: blue
     //      when the analyser strip is shown. ----
-    y += gap;
     analyserToggle.setBounds (sideX, y, sw, 26);
     y += 26 + 8;
 
@@ -2007,12 +2015,11 @@ void TheChannelStripAudioProcessorEditor::resized()
     correctionLabel.setBounds (sideX, y, sw, 26);
     y += 30;
 
-    // ---- v2.36.0 (Clement's design): the console name and its alarm
-    //      zone close the working stack right above the Rescan row - a
-    //      "Press Rescan" alert lands next to the button that answers
-    //      it. v2.38.0: the block is now PINNED to the Rescan row (the
-    //      alarm zone ends 2 px above it), condensed as before - name
-    //      20 px, three-line alarm zone anchored top. ----
+    // ---- block 4 (v2.39.0): the console name and its alarm zone
+    //      GLUED to the Rescan / Doctor row (the alarm zone ends 2 px
+    //      above it) - a "Press Rescan" alert lands next to the button
+    //      that answers it. Condensed as before: name 20 px, three-line
+    //      alarm zone anchored top. ----
     hostedNameLabel.setBounds (sideX, nameY, sw, 20);
 
     // v2.35.0: ONE merged status zone - the two-line integrity readout
@@ -2088,7 +2095,11 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     const int targetW = 2 * layoutMargin + sidebarWidth + columnGap + ew;
     const int targetH = 2 * layoutMargin + stripH + eh;
 
-    const int newW = juce::jlimit (1024, 2560, targetW);
+    // v2.39.0: the width floor drops 1024 -> 860 so a narrow hosted
+    // channel strip no longer gets a wide dead margin (the window
+    // hugs it down to the sidebar's own needs; below that the
+    // viewport scrolls).
+    const int newW = juce::jlimit (860, 2560, targetW);
     // v2.8: dynamic minimum so the condensed sidebar always fits.
     // v2.10: +30 px for the A/B row. v2.12: the two scale rows moved
     // onto the analyser. v2.13: two more console buttons -> 770 / 520.
@@ -2117,7 +2128,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 970 : 790, 2560, 1600); // v2.38.0: justified sidebar, minimal margins
+    setResizeLimits (860, show ? 970 : 790, 2560, 1600); // v2.39.0: min width 860
     resized();
 
     if (embeddedHostedEditor != nullptr)
