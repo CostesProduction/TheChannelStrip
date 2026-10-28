@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.36.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.37.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -17,8 +17,8 @@ them in a clean, focused workflow:
   situation to the status area. Selection is exclusive (radio
   behaviour), one console at a time, and the sidebar shows the hosted
   console's name.
-- **Named presets** — a PRESETS section in the sidebar, **grouped with
-  the console buttons** (v2.36.0)
+- **Named presets** — a PRESETS section at the **top of the sidebar,
+  right under the title** (v2.37.0),
   lists every preset in the preset folder, root and albums alike:
   the **root is the general list** (« Console - Name »), and each
   **sub-folder is an album**, its presets listed with an
@@ -137,12 +137,13 @@ them in a clean, focused workflow:
   viewport that fills the centre column below the analyzer, so the guest
   plugin is actually visible and usable. The layout is a **condensed left
   sidebar + centre column, nothing else** (v2.4): the sidebar reads as
-  one column of modules (v2.36.0) — the masthead (title, then the
-  frame-free Costes logo, which opens a contact card), the ANALYSER
-  block (display toggle, response speed, tilt), GAIN STAGING
-  (LUFS/delta readouts), PRESETS, the console buttons, the hosted
-  name with its alarm zone, then Rescan and the Doctor heartbeat
-  button; the centre column is used only by the analyzer strip
+  one column of modules (v2.37.0) — the shell's title, PRESETS, the
+  nine console buttons, the frame-free Costes logo (which opens a
+  contact card), the ANALYSER section (its toggle carries the heading:
+  "ANALYSER" and the spectrum glyph share the button, followed by
+  response speed and tilt), GAIN STAGING (LUFS/delta readouts), the
+  hosted name with its alarm zone, then Rescan and the Doctor
+  heartbeat button; the centre column is used only by the analyzer strip
   and the hosted plugin itself. The **window auto-fits the hosted editor**
   once it is embedded (and re-fits when you switch consoles, since their
   GUI sizes differ): the analyzer strip gets the plugin's full width and
@@ -287,6 +288,26 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.37.0**
+  - **Sidebar re-ordered to Clement's proposal.** Top to bottom: the
+    shell's title, PRESETS, the nine console buttons, the frame-free
+    Costes logo, the ANALYSER section, GAIN STAGING, the hosted
+    console's name and its alarm zone, then the pinned Rescan / Doctor
+    row. The presets now sit right under the title with the consoles
+    they belong to, and the logo moved from the masthead to below the
+    console block, signing the console stack above the monitoring
+    sections. Window heights unchanged (1180×1000 default, 1024×1000
+    / 1024×810 minimum).
+  - **The ANALYSER heading lives inside its toggle.** The separate
+    ANALYSER heading row is gone: the display toggle is now a wider
+    button carrying "ANALYSER" and the spectrum glyph side by side,
+    saving the heading's space. Same behaviour (blue when the
+    analyser strip is shown).
+  - **One background colour.** The window background was a near-black
+    (one shade of dark) framing the navy panels (another shade);
+    everything is the one dark navy now — the v2.5 sidebar panel fill
+    is gone with it, the zones read by their content.
 
 - **2.36.0**
   - **The sidebar reads as one column of modules (Clement's design,

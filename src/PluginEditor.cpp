@@ -29,7 +29,8 @@ namespace
     class PresetButtonLookAndFeel : public juce::LookAndFeel_V4
     {
     public:
-        enum class Icon { floppy, trash, importIn, pulse, spectrum };
+        enum class Icon { floppy, trash, importIn, pulse, spectrum,
+                           spectrumLabelled };
 
         explicit PresetButtonLookAndFeel (Icon iconToDraw) : icon (iconToDraw) {}
 
@@ -133,9 +134,46 @@ namespace
                     }
                     break;
                 }
+
+                case Icon::spectrumLabelled:
+                {
+                    // v2.37.0 (Clement's design): the display toggle
+                    // carries the ANALYSER heading itself - the label and
+                    // the four spectrum bars share the button, and the
+                    // heading row the v2.36 layout needed is saved.
+                    const juce::Font labelFont (juce::FontOptions (11.0f,
+                                                                   juce::Font::bold));
+                    const float textWidth
+                        = juce::GlyphArrangement::getStringWidth (labelFont,
+                                                                  "ANALYSER");
+                    const float glyphScale = juce::jlimit (0.75f, 1.0f,
+                                area.getHeight() / 13.0f);
+                    const float glyphWidth  = 16.0f * glyphScale;
+                    const float totalWidth  = textWidth + 6.0f + glyphWidth;
+                    const float xStart = area.getX()
+                                       + (area.getWidth() - totalWidth) * 0.5f;
+                    g.setFont (labelFont);
+                    g.drawText ("ANALYSER",
+                                juce::Rectangle<float> (xStart, area.getY(),
+                                                        textWidth,
+                                                        area.getHeight()),
+                                juce::Justification::centred);
+                    const float barX[4]   = { 1.5f, 4.7f, 7.9f, 11.1f };
+                    const float barTop[4] = { 9.0f, 5.0f, 2.0f, 6.0f };
+                    const float bx = xStart + textWidth + 6.0f;
+                    const float by = area.getY()
+                                   + (area.getHeight()
+                                      - 13.0f * glyphScale) * 0.5f;
+                    for (int i = 0; i < 4; ++i)
+                        path.addRectangle (bx + barX[i] * glyphScale,
+                                           by + barTop[i] * glyphScale,
+                                           2.0f * glyphScale,
+                                           (13.0f - barTop[i]) * glyphScale);
+                    break;
+                }
             }
 
-            if (icon == Icon::spectrum)
+            if (icon == Icon::spectrum || icon == Icon::spectrumLabelled)
                 g.fillPath (path);   // bars, not strokes
             else
                 g.strokePath (path, juce::PathStrokeType (1.6f,
@@ -1388,15 +1426,6 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     gainLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
     addAndMakeVisible (gainLabel);
 
-    // v2.36.0: the ANALYSER heading labels the display block (spectrum
-    // toggle, response speed, tilt) under the masthead - same style as
-    // the GAIN STAGING / PRESETS headings.
-    analyserLabel.setText ("ANALYSER", juce::dontSendNotification);
-    analyserLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    analyserLabel.setJustificationType (juce::Justification::centred);
-    analyserLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
-    addAndMakeVisible (analyserLabel);
-
     hostedNameLabel.setText ("--", juce::dontSendNotification);
     hostedNameLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     hostedNameLabel.setJustificationType (juce::Justification::centred);
@@ -1551,8 +1580,9 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
     // v2.34: the 4th icon look-and-feel draws the Doctor's heartbeat.
     presetButtonLaFs[3] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::pulse);
-    // v2.34.1: the 5th draws the analyser display toggle's spectrum bars.
-    presetButtonLaFs[4] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::spectrum);
+    // v2.34.1: the 5th draws the analyser display toggle's spectrum
+    // bars - v2.37.0: labelled variant, "ANALYSER" + bars in one button.
+    presetButtonLaFs[4] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::spectrumLabelled);
 
     savePresetButton.setLookAndFeel    (presetButtonLaFs[0].get());
     deletePresetButton.setLookAndFeel  (presetButtonLaFs[1].get());
@@ -1785,9 +1815,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
     // ---- v2.8: show/hide the analyser strip ----
     // v2.34.1 (Clement's suggestion): the old "Display" text toggle
-    // became a wide icon button - a small spectrum glyph, the height of
-    // the tilt buttons - styled like the other console buttons. Same
-    // toggle behaviour: blue when the analyser strip is shown.
+    // became a wide icon button, styled like the other console buttons.
+    // v2.37.0 (Clement's design): the button carries the section heading
+    // itself - "ANALYSER" and the spectrum glyph share it, so the
+    // separate heading row is gone. Same toggle behaviour: blue when the
+    // analyser strip is shown.
     analyserToggle.setLookAndFeel (presetButtonLaFs[4].get());
     styleConsoleButton (analyserToggle);
     analyserToggle.setClickingTogglesState (true);
@@ -1830,17 +1862,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
 void TheChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff0c0f16));
-
-    // v2.5: a subtle panel behind the sidebar (which starts under the
-    // full-width analyser strip) so the zones read at a glance.
-    // v2.8: with the analyser hidden the sidebar starts right below the
-    // top margin (the strip and its gap are gone).
-    const int zoneY = layoutMargin
-                    + (proc.getAnalyserVisible() ? analyserStripHeight + columnGap : 0);
-    g.setColour (juce::Colour (0xff121724));
-    g.fillRect (layoutMargin, zoneY,
-                sidebarWidth, getHeight() - layoutMargin - zoneY);
+    // v2.37.0 (Clement's remark): the window background used to be a
+    // near-black (0xff0c0f16) that showed as a dark frame around the
+    // navy panels (0xff121724) - two shades of dark. Everything is one
+    // dark navy now; the sidebar panel fill of v2.5 is gone with it
+    // (it would be invisible on a same-colour background), the zones
+    // read by their content alone.
+    g.fillAll (juce::Colour (0xff121724));
 }
 
 void TheChannelStripAudioProcessorEditor::resized()
@@ -1872,25 +1900,52 @@ void TheChannelStripAudioProcessorEditor::resized()
     titleLabel.setBounds (sideX, y, sw, 32);
     y += 38;
 
-    // ---- v2.36.0 (Clement's design): the sidebar reads as one column
-    //      of modules, top to bottom - masthead, monitoring, console,
-    //      maintenance. The frame-free monochrome logo sits right under
-    //      the shell's title: the signature anchors the column, and a
-    //      click still opens the contact card. ----
+    // ---- v2.37.0 (Clement's proposal, v2.36 follow-up): the sidebar
+    //      reads top to bottom as title, presets + consoles (the
+    //      consoles a preset belongs to, together), logo, analyser
+    //      section, gain staging, then the name & alarm block above the
+    //      pinned Rescan row. ----
+
+    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
+    //      global preset list, then one row of icon buttons).
+    //      v2.36.0: grouped with the consoles. v2.37.0: directly under
+    //      the title, per Clement's proposal. ----
+    presetLabel.setBounds (sideX, y, sw, 15);
+    y += 17;
+
+    presetCombo.setBounds (sideX, y, sw, 22);
+    y += 26;
+
+    // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
+    // save, bin = delete, tray with the incoming arrow = load).
+    // v2.30: the "?" help button takes the 4th slot and enters the
+    // interactive help mode.
+    savePresetButton.setBounds   (sideX,       y, 30, 22);
+    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
+    importPresetButton.setBounds (sideX + 66,  y, 30, 22);
+    helpButton.setBounds         (sideX + 99,  y, 30, 22);
+    y += 22 + 8;
+
+    for (size_t i = 0; i < consoleButtons.size(); ++i)
+    {
+        consoleButtons[i].setBounds (sideX, y, sw, 28);
+        y += 28 + 5;
+    }
+
+    // ---- v2.36.0: the frame-free monochrome logo, one click to the
+    //      contact card. v2.37.0 (Clement's proposal): it now sits
+    //      below the console block, as a signature closing the console
+    //      stack above the monitoring sections. ----
     studioLogo.setBounds (sideX, y + 2, sw, 58);
     y += 58 + 6;
 
-    // ---- v2.36.0: the ANALYSER heading labels the display block
-    //      (spectrum toggle, response speed, tilt), same style as the
-    //      GAIN STAGING / PRESETS headings. ----
-    analyserLabel.setBounds (sideX, y, sw, 15);
-    y += 17;
-
-    // ---- v2.34.1 (Clement's suggestion): the display toggle rides at
-    //      the top of the section, above Fast/Slow - a wide icon button
-    //      with a small spectrum glyph, no text. ----
-    analyserToggle.setBounds (sideX, y, sw, 22);
-    y += 22 + 8;
+    // ---- v2.8: show/hide the analyser strip. v2.37.0 (Clement's
+    //      design): the toggle carries the section heading - the
+    //      "ANALYSER" label and the spectrum glyph share the button,
+    //      saving the v2.36 heading row. Same toggle behaviour: blue
+    //      when the analyser strip is shown. ----
+    analyserToggle.setBounds (sideX, y, sw, 26);
+    y += 26 + 8;
 
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
     for (size_t j = 0; j < speedButtons.size(); ++j)
@@ -1922,32 +1977,6 @@ void TheChannelStripAudioProcessorEditor::resized()
 
     correctionLabel.setBounds (sideX, y, sw, 26);
     y += 30;
-
-    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
-    //      global preset list, then one row of icon buttons).
-    //      v2.36.0 (Clement's design): it moved under the monitoring
-    //      block, grouped with the consoles a preset belongs to. ----
-    presetLabel.setBounds (sideX, y, sw, 15);
-    y += 17;
-
-    presetCombo.setBounds (sideX, y, sw, 22);
-    y += 26;
-
-    // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
-    // save, bin = delete, tray with the incoming arrow = load).
-    // v2.30: the "?" help button takes the 4th slot and enters the
-    // interactive help mode.
-    savePresetButton.setBounds   (sideX,       y, 30, 22);
-    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
-    importPresetButton.setBounds (sideX + 66,  y, 30, 22);
-    helpButton.setBounds         (sideX + 99,  y, 30, 22);
-    y += 22 + 8;
-
-    for (size_t i = 0; i < consoleButtons.size(); ++i)
-    {
-        consoleButtons[i].setBounds (sideX, y, sw, 28);
-        y += 28 + 5;
-    }
 
     // ---- v2.36.0 (Clement's design): the console name and its alarm
     //      zone close the working stack right above the Rescan row - a
