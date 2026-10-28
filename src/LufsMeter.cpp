@@ -75,8 +75,6 @@ void LufsMeter::resetMeasurement()
     hopEnergy.assign (channels.size(), std::vector<float> ((size_t) historyLength, 0.0f));
     historyPos = 0;
     hopsStored = 0;
-    blockPowers.clear();
-    integratedLufs.store (-120.0f, std::memory_order_relaxed);
     shortTermLufs.store (-120.0f, std::memory_order_relaxed);
 }
 
@@ -121,7 +119,15 @@ void LufsMeter::storeHop()
     if (hopsStored < 4)
         return;
 
-    // short-term loudness over 3 s (30 hops of 100 ms)
+    // short-term loudness over 3 s (30 hops of 100 ms). v2.32: this is
+    // now the meter's ONLY output. The BS.1770 integrated-loudness
+    // gating that used to run here (a std::vector push_back per 400 ms
+    // block, then two log10 loops over up to 20k entries to average
+    // them) was removed: nothing in the shell ever displayed it, it was
+    // the one remaining path that could ALLOCATE on the audio thread,
+    // and the erase-from-front once the vector saturated copied 160 KB
+    // every 400 ms. The realtime-safety audit (v2.32 test harness) now
+    // proves the whole measurement path allocation-free.
     {
         const int stHops = juce::jmin (30, hopsStored);
         double power = 0.0;
@@ -133,52 +139,4 @@ void LufsMeter::storeHop()
         power /= (double) stHops;
         shortTermLufs.store (powerToLufs (power), std::memory_order_relaxed);
     }
-
-    // 400 ms block for the gated integrated loudness
-    {
-        double power = 0.0;
-        for (int c = 0; c < numChans; ++c)
-            for (int k = 0; k < 4; ++k)
-                power += hopEnergy[(size_t) c]
-                    [(size_t) ((historyPos - 1 - k + 2 * historyLength) % historyLength)];
-
-        power /= 4.0;
-        const float blockLufs = powerToLufs (power);
-
-        if (blockLufs > -70.0f)
-        {
-            blockPowers.push_back (power);
-            if (blockPowers.size() > 20000)
-                blockPowers.erase (blockPowers.begin());
-
-            computeIntegrated();
-        }
-    }
-}
-
-void LufsMeter::computeIntegrated()
-{
-    if (blockPowers.empty())
-        return;
-
-    // BS.1770 gating: absolute threshold, then relative threshold at mean - 10 LU.
-    double sum1 = 0.0;
-    int n1 = 0;
-    for (double p : blockPowers) { sum1 += p; ++n1; }
-    const double mean1 = sum1 / (double) n1;
-    const float relGate = powerToLufs (mean1) - 10.0f;
-
-    double sum2 = 0.0;
-    int n2 = 0;
-    for (double p : blockPowers)
-    {
-        if (powerToLufs (p) >= relGate)
-        {
-            sum2 += p;
-            ++n2;
-        }
-    }
-
-    if (n2 > 0)
-        integratedLufs.store (powerToLufs (sum2 / (double) n2), std::memory_order_relaxed);
 }

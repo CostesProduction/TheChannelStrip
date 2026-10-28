@@ -5,8 +5,9 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 // BS.1770-style loudness meter: K-weighting (high-shelf + RLB high-pass),
-// 100 ms hop, 400 ms gated blocks for the integrated value, 3 s window for
-// the short-term value.
+// 100 ms hops, 3 s window for the short-term value (the only readout the
+// shell uses - the gain-staging delta and the silent-console watch).
+// v2.32: the never-displayed integrated value was removed (see below).
 class LufsMeter
 {
 public:
@@ -17,7 +18,6 @@ public:
     void resetMeasurement();
     void process (const juce::AudioBuffer<float>& buffer);
 
-    float getIntegratedLufs() const { return integratedLufs.load (std::memory_order_relaxed); }
     float getShortTermLufs() const  { return shortTermLufs.load (std::memory_order_relaxed); }
 
 private:
@@ -50,7 +50,6 @@ private:
     }
 
     void storeHop();
-    void computeIntegrated();
 
     double sampleRate = 48000.0;
     int hopSamples = 480;
@@ -61,8 +60,14 @@ private:
 
     std::vector<ChannelState> channels;
     std::vector<std::vector<float>> hopEnergy; // [channel][historyIndex]
-    std::vector<double> blockPowers;
 
-    std::atomic<float> integratedLufs { -120.0f };
+    // v2.32: the BS.1770 integrated-loudness bookkeeping (blockPowers +
+    // its gated average) was REMOVED from the audio thread. Nothing in
+    // the shell ever displayed it, and it was the only remaining path
+    // that could allocate on the audio thread (a std::vector growth
+    // every 400 ms block) plus two log10 loops over up to 20k entries.
+    // The short-term window below is the only value the shell reads
+    // (the gain-staging delta and the v2.24 silent-console watch).
+
     std::atomic<float> shortTermLufs { -120.0f };
 };

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.31.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.32.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -213,6 +213,15 @@ measurement gating, LUFS short-term metering, spectrum peak location
 the hover readout mapping and formatting, state save/restore, latency forwarding (static and runtime changes),
 click-free console swapping, native mono vs stereo-bridge hosting, and
 stereo ↔ mono hot switching without re-creating the instance.
+The **v2.32 suite** adds a **realtime-safety audit** (the harness
+replaces the global `operator new`/`operator delete` pair with a
+counting sentinel and proves every steady-state `processBlock` branch —
+stereo with the editor open and closed, native mono, the mono bridge
+and no console hosted — runs **allocation-free** after warm-up) and
+**torture tests** (a 50-swap console storm mid-playback with a full
+clear in the middle, sample-rate / block-size / track-format churn on
+a never-recreated instance, and hostile session states — garbage
+bytes, empty, truncated, huge valid-XML fakes — fed during playback).
 
 Pass `--integration` to additionally host a **real** console found in the
 saved plugin database (launch the Standalone once first so a scan has
@@ -273,6 +282,36 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.32.0**
+  - **Realtime-safety audit, enforced by the test harness.** The
+    shell's audio thread is now *proven* allocation-free in steady
+    state: the harness replaces the global `operator new` / `delete`
+    pair with a counting sentinel and asserts that every
+    `processBlock` branch (stereo with the editor open and closed,
+    native mono, the mono bridge, no console hosted) allocates
+    **nothing** after warm-up. A heap lock with an unbounded worst
+    case is a dropout hazard by definition; now the build fails if
+    one ever sneaks back in. The audit found and removed the one
+    remaining offender: the BS.1770 **integrated**-loudness
+    bookkeeping in the LUFS meter — a value nothing in the shell ever
+    displayed, recomputed with a `std::vector` growth (an audio-thread
+    allocation every 400 ms block) plus two `log10` loops over up to
+    20k entries, and a 160 KB erase-from-front once saturated. The
+    short-term window (the gain-staging delta and the silent-console
+    watch) is untouched.
+  - **Torture tests: the shell is abused the way real sessions do.**
+    A 50-swap console storm mid-playback (the 50 ms crossfade
+    interrupted over and over, plus a full clear in the middle) must
+    keep producing bounded audio and converge on the last console;
+    sample-rate / block-size / track-format churn (down to 1-sample
+    buffers, 44.1–96 kHz, mono ↔ stereo) must never re-create the
+    hosted instance and must keep the readout and latency forwarding
+    truthful; hostile session states (garbage bytes, empty, truncated,
+    huge valid-XML fakes naming unscanned plugin paths) fed during
+    playback must change nothing, crash nothing, and leave the hosted
+    console intact — with a clean session roundtrip restoring a fully
+    consistent shell afterwards.
 
 - **2.31.2**
   - **The console in use is now unmistakable in the sidebar.** The

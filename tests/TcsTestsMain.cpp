@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.31.2 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.32.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -49,6 +49,16 @@
 //   - native mono negotiation vs stereo-bridge fallback (the v2.14
 //     machinery, driven by a mock that accepts / refuses the mono layout)
 //   - stereo <-> mono hot switching without re-creating the instance
+//   - realtime-safety audit (v2.32): the harness replaces the global
+//     operator new / delete pair with a counting sentinel, then proves
+//     every steady-state processBlock branch - stereo with the editor
+//     open and closed, native mono, the mono bridge, and no console
+//     hosted - runs ALLOCATION-FREE after warm-up
+//   - torture tests (v2.32): a 50-swap console storm mid-playback with
+//     a full clear in the middle, sample-rate / block-size / format
+//     churn on a never-recreated instance, and hostile session states
+//     (garbage bytes, empty, truncated, huge valid-XML fakes) fed
+//     during playback
 //
 // Run after a build:
 //
@@ -82,9 +92,11 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <vector>
 
 #include <juce_events/juce_events.h>                 // ScopedJuceInitialiser_GUI
@@ -98,6 +110,92 @@
 // juce_audio_plugin_client, which a console app does not link). Declare it
 // explicitly so this translation unit can call it.
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
+
+// ---------------------------------------------------------------------------
+// v2.32 realtime-safety audit: the harness replaces the global
+// operator new / operator delete pair (malloc / aligned_alloc + free,
+// the standard sentinel pattern), so a test can COUNT every heap
+// allocation made while a flag is raised. The steady-state processBlock
+// must allocate NOTHING: a std::vector / std::string / std::function
+// growth on the audio thread means a heap lock with an unbounded worst
+// case - a dropout hazard by definition. The replacement is active
+// process-wide from static start-up, so every allocation of this test
+// binary (harness, production sources, statically linked JUCE code)
+// passes through it.
+//
+// Two honest limits, audited by READING the code instead (documented
+// here so the audit stays truthful):
+//   - juce::HeapBlock (and therefore juce::AudioBuffer's internal
+//     storage) goes straight to malloc and is NOT counted. The only
+//     HeapBlock users on the audio path are the HostedStrip scratch /
+//     dry buffers and the processor's mono stereoBridge: they are
+//     sized in prepareToPlay and only ever re-sized with
+//     avoidReallocating = true, i.e. never in steady state.
+//   - when a console fade-out COMPLETES inside processBlock,
+//     HostedStrip launches the retirement of the outgoing instance on
+//     a background thread (one std::function + one thread per console
+//     SWITCH - never per block; the v2.1 click-free swap design). The
+//     audit windows below simply contain no swap, and the swap storm
+//     covers that path separately for stability.
+// ---------------------------------------------------------------------------
+namespace tcsAllocSentinel
+{
+    std::atomic<bool>      recording { false };
+    std::atomic<long long> count     { 0 };
+}
+
+void* operator new (std::size_t size)
+{
+    if (size == 0)
+        ++size;
+
+    if (tcsAllocSentinel::recording.load (std::memory_order_relaxed))
+        tcsAllocSentinel::count.fetch_add (1, std::memory_order_relaxed);
+
+    if (void* p = std::malloc (size))
+        return p;
+
+    throw std::bad_alloc {};
+}
+
+void* operator new[] (std::size_t size)
+{
+    return ::operator new (size);
+}
+
+void* operator new (std::size_t size, std::align_val_t alignment)
+{
+    if (tcsAllocSentinel::recording.load (std::memory_order_relaxed))
+        tcsAllocSentinel::count.fetch_add (1, std::memory_order_relaxed);
+
+    // C++17 std::aligned_alloc requires a size that is a multiple of
+    // the alignment.
+    const std::size_t a = (std::size_t) alignment < sizeof (void*) * 2
+        ? sizeof (void*) * 2
+        : (std::size_t) alignment;
+    const std::size_t rounded = juce::jmax ((size + a - 1) / a * a, a);
+
+    if (void* p = std::aligned_alloc (a, rounded))
+        return p;
+
+    throw std::bad_alloc {};
+}
+
+void* operator new[] (std::size_t size, std::align_val_t alignment)
+{
+    return ::operator new (size, alignment);
+}
+
+// Every new path above returns malloc / aligned_alloc memory, so every
+// delete path frees with free() - the pairs always match.
+void operator delete (void* p) noexcept { std::free (p); }
+void operator delete (void* p, std::size_t) noexcept { std::free (p); }
+void operator delete (void* p, std::align_val_t) noexcept { std::free (p); }
+void operator delete (void* p, std::size_t, std::align_val_t) noexcept { std::free (p); }
+void operator delete[] (void* p) noexcept { std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept { std::free (p); }
+void operator delete[] (void* p, std::align_val_t) noexcept { std::free (p); }
+void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { std::free (p); }
 
 // ---------------------------------------------------------------------------
 // tiny framework
@@ -1310,7 +1408,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.31.2");
+        session->setAttribute ("version", "2.32.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1476,7 +1574,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.31.2");
+    session->setAttribute ("version", "2.32.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1699,8 +1797,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.31.2",
-                "saved state carries the current version tag (2.31.2)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.32.0",
+                "saved state carries the current version tag (2.32.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -1959,6 +2057,450 @@ void testFormatHotSwitch()
                 "latency survived the format switches");
 }
 
+// ---------------------------------------------------------------------------
+// v2.32 (roadmap: torture tests + realtime-safety audit)
+// ---------------------------------------------------------------------------
+
+// The realtime-safety audit (idea 2): every steady-state branch of
+// processBlock must run allocation-free. Each scenario warms every
+// lazy one-time cost up first (buffer sizing, first FFT frames, first
+// latency report), then raises the sentinel flag around a steady-state
+// run. No expectTrue may run inside a recording window (its juce::String
+// argument allocates); the flag is always lowered before asserting.
+void testRealtimeSafetyAllocations()
+{
+    beginTest ("realtime safety: steady-state processBlock never allocates");
+
+    // Background mock-retirement threads from earlier tests must be
+    // done before the first recording window (they only free memory,
+    // but the windows must be perfectly quiet).
+    juce::Thread::sleep (300);
+
+    // 0) the sentinel itself must be live, otherwise the audit below
+    //    would pass vacuously.
+    tcsAllocSentinel::count.store (0);
+    tcsAllocSentinel::recording.store (true);
+    {
+        std::vector<int> probe;
+        probe.reserve (1000);
+    }
+    tcsAllocSentinel::recording.store (false);
+
+    expectTrue (tcsAllocSentinel::count.load() > 0,
+                "the allocation sentinel intercepts operator new");
+
+    // 1) the FULL stereo path with an open editor: passthrough + hosted
+    //    console + both LUFS meters + both spectrum analysers + the
+    //    cross-spectrum transfer measurement. This is the heaviest the
+    //    shell ever gets.
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 256);
+        proc.setEditorOpen (true);
+        proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+
+        juce::AudioBuffer<float> block (2, 256);
+        juce::MidiBuffer noMidi;
+        SineSource src (1000.0, 48000.0, 0.4f);
+
+        for (int n = 0; n < 120; ++n)   // ~0.64 s of warm-up
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        tcsAllocSentinel::count.store (0);
+        tcsAllocSentinel::recording.store (true);
+
+        for (int n = 0; n < 60; ++n)   // ~0.32 s of steady state
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        tcsAllocSentinel::recording.store (false);
+
+        expectTrue (tcsAllocSentinel::count.load() == 0,
+                    "stereo path, editor open: no allocation in steady state");
+
+        // editor closed: the measurement path is skipped entirely, so
+        // the same steady state must be just as clean.
+        proc.setEditorOpen (false);
+
+        tcsAllocSentinel::count.store (0);
+        tcsAllocSentinel::recording.store (true);
+
+        for (int n = 0; n < 20; ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        tcsAllocSentinel::recording.store (false);
+
+        expectTrue (tcsAllocSentinel::count.load() == 0,
+                    "stereo path, editor closed: no allocation in steady state");
+
+        // 2) the native-mono path (mono track + a console that
+        //    accepted the mono layout) - same scope, same instance.
+        proc.releaseResources();
+        proc.setBusesLayout (makeLayout (true));
+        proc.prepareToPlay (48000.0, 256);
+
+        juce::AudioBuffer<float> monoBlock (1, 256);
+
+        for (int n = 0; n < 20; ++n)   // warm-up: mono scratch buffers
+        {
+            src.fill (monoBlock);
+            proc.processBlock (monoBlock, noMidi);
+        }
+
+        tcsAllocSentinel::count.store (0);
+        tcsAllocSentinel::recording.store (true);
+
+        for (int n = 0; n < 30; ++n)
+        {
+            src.fill (monoBlock);
+            proc.processBlock (monoBlock, noMidi);
+        }
+
+        tcsAllocSentinel::recording.store (false);
+
+        expectTrue (tcsAllocSentinel::count.load() == 0,
+                    "native mono path: no allocation in steady state");
+    }
+
+    // 3) the mono BRIDGE path (a console that refused the native mono
+    //    layout: the stereo bridge up/down-mixes every block).
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 256);
+        proc.setEditorOpen (true);
+        proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (false));
+
+        proc.releaseResources();
+        proc.setBusesLayout (makeLayout (true));
+        proc.prepareToPlay (48000.0, 256);
+
+        juce::AudioBuffer<float> monoBlock (1, 256);
+        juce::MidiBuffer noMidi;
+        SineSource src (1000.0, 48000.0, 0.4f);
+
+        for (int n = 0; n < 20; ++n)   // warm-up: the bridge sizes itself
+        {
+            src.fill (monoBlock);
+            proc.processBlock (monoBlock, noMidi);
+        }
+
+        tcsAllocSentinel::count.store (0);
+        tcsAllocSentinel::recording.store (true);
+
+        for (int n = 0; n < 30; ++n)
+        {
+            src.fill (monoBlock);
+            proc.processBlock (monoBlock, noMidi);
+        }
+
+        tcsAllocSentinel::recording.store (false);
+
+        expectTrue (tcsAllocSentinel::count.load() == 0,
+                    "mono bridge path: no allocation in steady state");
+    }
+
+    // 4) no console hosted at all (the pure shell + measurement path).
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 256);
+        proc.setEditorOpen (true);
+
+        juce::AudioBuffer<float> block (2, 256);
+        juce::MidiBuffer noMidi;
+        SineSource src (1000.0, 48000.0, 0.4f);
+
+        for (int n = 0; n < 120; ++n)   // warm-up: first FFT frames
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        tcsAllocSentinel::count.store (0);
+        tcsAllocSentinel::recording.store (true);
+
+        for (int n = 0; n < 60; ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        tcsAllocSentinel::recording.store (false);
+
+        expectTrue (tcsAllocSentinel::count.load() == 0,
+                    "no console hosted: no allocation in steady state");
+    }
+}
+
+// What a user flipping console buttons as fast as the UI allows does
+// (idea 1): a new plugin every two blocks, so the 50 ms crossfade is
+// interrupted mid-flight over and over, plus a full clear in the middle
+// of the storm. The strip must keep producing sane bounded audio,
+// never lose the hosted slot, and converge on the last console.
+void testTortureConsoleSwapStorm()
+{
+    beginTest ("torture: console swap storm during playback");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);   // stress the measurement path too
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (250.0, 48000.0, 0.4f);
+
+    MockConsole* lastMock = nullptr;
+
+    for (int n = 0; n < 50; ++n)
+    {
+        auto mock = std::make_unique<MockConsole> (true);
+        mock->gain.store ((n % 2 == 0) ? 1.0f : 0.5f);
+
+        if (n == 49)
+            lastMock = mock.get();
+
+        proc.getHostedStrip().setPlugin (std::move (mock));
+        processBlocks (proc, src, 2, block);
+
+        // one full clear mid-storm: the strip must survive hosting
+        // nothing for a moment, then go straight back to swapping
+        if (n == 24)
+            proc.clearHostedPlugin();
+    }
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == lastMock,
+                "after the storm the last console is hosted");
+
+    // 100 blocks = the last interrupted crossfade completes and the
+    // output must have converged on the last console's gain (0.5).
+    processBlocks (proc, src, 100, block);
+
+    expectTrue (lastMock->lastChannelCount.load() == 2,
+                "the last console was fed a stereo buffer throughout");
+    expectNear ((double) peakOf (block), 0.4 * 0.5, 0.01,
+                "the output converged on the last console (peak ~0.2)");
+    expectTrue (lastMock->processCallCount.load() >= 100,
+                "the last console processed every settling block");
+
+    // a full clear at the end must land on EXACT dry passthrough
+    proc.clearHostedPlugin();
+    processBlocks (proc, src, 12, block);   // the outgoing fade (~5 blocks)
+
+    juce::AudioBuffer<float> reference;
+    juce::MidiBuffer noMidi;
+    src.fill (block);
+    reference.makeCopyOf (block);
+    proc.processBlock (block, noMidi);
+
+    expectTrue (maxAbsDifference (block, reference) == 0.0f,
+                "after clearing, the shell is exactly transparent again");
+    expectTrue (proc.getHostedStrip().getActivePlugin() == nullptr,
+                "no console is hosted after the clear");
+
+    // and the strip must be fully serviceable right after the storm
+    auto fresh = std::make_unique<MockConsole> (true);
+    fresh->gain.store (0.25f);
+    auto* freshPtr = fresh.get();
+    proc.getHostedStrip().setPlugin (std::move (fresh));
+
+    processBlocks (proc, src, 100, block);
+
+    expectNear ((double) peakOf (block), 0.4 * 0.25, 0.01,
+                "a console hosted after the storm behaves normally");
+    expectTrue (freshPtr->lastChannelCount.load() == 2,
+                "the post-storm console received a stereo buffer");
+}
+
+// A host that keeps changing its mind mid-session (idea 1): sample
+// rate, block size and track format all churn while the same console
+// instance keeps playing. The instance must NEVER be re-created, the
+// readout must always tell the truth, and the audio must stay bounded.
+void testTortureFormatAndRateChurn()
+{
+    beginTest ("torture: sample-rate / block-size / format churn");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    auto mock = std::make_unique<MockConsole> (true);   // accepts native mono
+    mock->setLatencySamples (222);
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (250.0, 48000.0, 0.4f);
+    processBlocks (proc, src, 8, block);   // fade-in done
+
+    const auto* instanceBefore = proc.getHostedStrip().getActivePlugin();
+    expectTrue (instanceBefore != nullptr, "a console is hosted before the churn");
+
+    struct Leg { double rate; int blockSize; bool mono; };
+    const Leg legs[] = {
+        { 44100.0,   64, false },
+        { 96000.0, 2048, false },
+        { 48000.0,    1, false },
+        { 48000.0,  512, true  },
+        { 88200.0,  128, true  },
+        { 48000.0,  512, false }
+    };
+
+    int legsDone = 0;
+    juce::MidiBuffer noMidi;
+
+    for (const auto& leg : legs)
+    {
+        juce::AudioBuffer<float> legBlock (leg.mono ? 1 : 2, leg.blockSize);
+        SineSource legSrc (250.0, leg.rate, 0.4f);
+
+        // enough audio per leg for a reliable peak measurement even at
+        // a block size of 1
+        const int legBlocks = juce::jmax (10, 2048 / leg.blockSize);
+
+        proc.releaseResources();
+        expectTrue (proc.setBusesLayout (makeLayout (leg.mono)),
+                    "layout switch accepted (leg " + juce::String (legsDone) + ")");
+        proc.prepareToPlay (leg.rate, leg.blockSize);
+
+        float legPeak = 0.0f;
+
+        for (int n = 0; n < legBlocks; ++n)
+        {
+            legSrc.fill (legBlock);
+            proc.processBlock (legBlock, noMidi);
+            legPeak = std::max (legPeak, peakOf (legBlock));
+        }
+
+        const bool readoutOk = leg.mono
+            ? proc.getChannelReadout().startsWith ("track: mono")
+            : proc.getChannelReadout() == "track: stereo";
+
+        expectTrue (readoutOk,
+                    "readout truthful after the leg (got '"
+                    + proc.getChannelReadout() + "')");
+        expectTrue (legPeak > 0.3f && legPeak < 1.0f,
+                    "audio stayed alive and bounded through the leg");
+        ++legsDone;
+    }
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == instanceBefore,
+                "the hosted instance was NEVER re-created through the churn");
+    expectTrue (proc.getForwardedLatency() == 222,
+                "latency forwarding survived the churn");
+}
+
+// Hostile session material (idea 1): the DAW (or a corrupted project
+// file) feeds the shell garbage states of every flavour, including a
+// valid-XML session whose huge fake console states name a supported
+// console on a path that is not scanned. Nothing may crash, the hosted
+// console must keep processing throughout, and a final clean roundtrip
+// must bring the shell back to a consistent state.
+void testTortureHostileSessions()
+{
+    beginTest ("torture: hostile session states during playback");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    auto mock = std::make_unique<MockConsole> (false);
+    auto* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (500.0, 48000.0, 0.4f);
+    processBlocks (proc, src, 8, block);
+
+    const auto* instanceBefore = proc.getHostedStrip().getActivePlugin();
+    const int callsBefore = mockPtr->processCallCount.load();
+    expectTrue (instanceBefore != nullptr, "a console is hosted before the abuse");
+
+    // 1) five rapid save/restore roundtrips mid-playback
+    juce::MemoryBlock saved;
+    proc.getStateInformation (saved);
+
+    for (int n = 0; n < 5; ++n)
+    {
+        proc.setStateInformation (saved.getData(), (int) saved.getSize());
+        processBlocks (proc, src, 2, block);
+    }
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == instanceBefore,
+                "the hosted instance survives rapid session roundtrips");
+    expectTrue (mockPtr->processCallCount.load() > callsBefore,
+                "audio kept flowing through the session roundtrips");
+
+    // 2) garbage bytes
+    const char garbage[] = "MUSDKASKELDJFNEFGARBAGE!1234NONSENSE";
+    proc.setStateInformation (garbage, (int) (sizeof (garbage) - 1));
+    processBlocks (proc, src, 2, block);
+
+    // 3) zero-size state
+    proc.setStateInformation (saved.getData(), 0);
+    processBlocks (proc, src, 2, block);
+
+    // 4) a truncated copy of the REAL saved state (cut mid-stream, so
+    //    the XML text inside the magic-number container is corrupt)
+    juce::MemoryBlock truncated (saved.getData(), saved.getSize() / 3);
+    proc.setStateInformation (truncated.getData(), (int) truncated.getSize());
+    processBlocks (proc, src, 2, block);
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == instanceBefore,
+                "the hosted instance survives garbage / empty / truncated states");
+    expectTrue (mockPtr->processCallCount.load() > callsBefore + 6,
+                "audio kept flowing through the hostile states");
+
+    // 5) valid XML, hostile content: a 100 KB fake state per attribute
+    //    (an ~1 MB session), naming a SUPPORTED console on a path that
+    //    is never scanned (the v2.27 fake-ident pattern - the re-hosting
+    //    is attempted and politely refused, never crashes).
+    {
+        const auto bigB64 = juce::String::repeatedString ("A", 100000);
+
+        auto session = std::make_unique<juce::XmlElement> ("TCS");
+        session->setAttribute ("version", "999.999.999");
+        session->setAttribute ("hostedIdent", "VST3|/nowhere/fake|bx_console SSL 4000 E");
+        session->setAttribute ("hostedState", bigB64);
+
+        for (int i = 0; i < 9; ++i)
+        {
+            auto* e = session->createNewChildElement ("consoleState");
+            e->setAttribute ("ident", "VST3|/nowhere/fake" + juce::String (i)
+                                + "|bx_console SSL 4000 G");
+            e->setAttribute ("state", bigB64);
+            e->setAttribute ("presetName", "Hostile Preset " + juce::String (i));
+            e->setAttribute ("presetModified", 1);
+        }
+
+        juce::MemoryBlock hostileBlock;
+        juce::AudioProcessor::copyXmlToBinary (*session, hostileBlock);
+        proc.setStateInformation (hostileBlock.getData(),
+                                  (int) hostileBlock.getSize());
+        processBlocks (proc, src, 2, block);
+    }
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == instanceBefore,
+                "the hosted instance survives the huge hostile session");
+
+    // 6) a final clean roundtrip must restore a consistent shell: the
+    //    mock still hosted, still processing, ident back to clean.
+    proc.setStateInformation (saved.getData(), (int) saved.getSize());
+    processBlocks (proc, src, 4, block);
+
+    expectTrue (proc.getHostedStrip().getActivePlugin() == instanceBefore,
+                "the hosted instance is intact after the final roundtrip");
+    expectTrue (proc.getCurrentPluginIdent().isEmpty(),
+                "the clean session restored a clean hosted ident");
+    expectTrue (mockPtr->processCallCount.load() > callsBefore + 14,
+                "the console kept processing through the entire abuse");
+    expectNear ((double) peakOf (block), 0.4, 0.02,
+                "the output is still the expected signal at the end");
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -2048,7 +2590,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.31.2" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.32.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -2071,6 +2613,10 @@ int main (int argc, char* argv[])
     testMonoNative();
     testMonoBridge();
     testFormatHotSwitch();
+    testRealtimeSafetyAllocations();
+    testTortureConsoleSwapStorm();
+    testTortureFormatAndRateChurn();
+    testTortureHostileSessions();
 
     if (integration)
         testIntegrationRealConsole();
