@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.40.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.41.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -725,6 +725,88 @@ void testMeasurementGating()
     }
 }
 
+// v2.41 (Clement's remarks 2/3): the spectrum analysers answer to a
+// STRICTER gate than the LUFS meters - they stop when the analyser
+// strip is hidden (a hidden strip has nobody to feed), while the LUFS
+// meters stay on the editor-open gate alone (they feed the gain
+// staging readout and the v2.24 silent-console watch). Re-showing the
+// strip must restart the spectra from a clean slate.
+void testAnalyserGating()
+{
+    beginTest ("analyser gating (strip hidden: spectra frozen, LUFS alive)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (1000.0, 48000.0, 0.5f);
+
+    // ~1 s with the strip shown: several 8192-point frames computed
+    processBlocks (proc, src, 100, block);
+
+    float bins[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (bins, SpectrumAnalyzer::numScopeBins);
+
+    float peakShown = bins[0];
+    for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+        peakShown = juce::jmax (peakShown, bins[b]);
+
+    expectTrue (peakShown > -80.0f,
+                "with the strip shown the spectrum fills up (peak "
+                + juce::String (peakShown, 1) + " dB)");
+
+    // hide the strip: the spectra must freeze exactly
+    proc.setAnalyserVisible (false);
+
+    float frozen[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (frozen, SpectrumAnalyzer::numScopeBins);
+
+    processBlocks (proc, src, 150, block);   // ~1.6 s of loud signal
+
+    float after[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (after, SpectrumAnalyzer::numScopeBins);
+
+    bool identical = true;
+    for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        // exact bit equality via </> (no -Wfloat-equal): the values are
+        // never NaN, so !(a<b || a>b) IS a != that compares the stored
+        // floats exactly
+        if (after[b] < frozen[b] || after[b] > frozen[b])
+            identical = false;
+
+    expectTrue (identical, "a hidden strip freezes the spectra");
+
+    // the LUFS meters keep measuring while the strip is hidden
+    expectTrue (proc.getLufsIn().getShortTermLufs() > -70.0f,
+                "the LUFS meters stay on the editor gate alone");
+
+    // re-show: the analyser resets, so the next frame starts from silence
+    proc.setAnalyserVisible (true);
+
+    float cleared[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyScopeData (cleared, SpectrumAnalyzer::numScopeBins);
+
+    bool atFloor = true;
+    for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        if (cleared[b] > -99.9f)
+            atFloor = false;
+
+    expectTrue (atFloor, "re-showing resets the spectra to the floor");
+
+    // and it fills up again
+    processBlocks (proc, src, 100, block);
+    proc.getAnalyzerIn().copyScopeData (after, SpectrumAnalyzer::numScopeBins);
+
+    float peakBack = after[0];
+    for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+        peakBack = juce::jmax (peakBack, after[b]);
+
+    expectTrue (peakBack > -80.0f,
+                "the spectra run again once the strip is shown (peak "
+                + juce::String (peakBack, 1) + " dB)");
+}
+
 void testLufsShortTerm()
 {
     beginTest ("LUFS short-term meter");
@@ -855,6 +937,67 @@ void testSpectrumHighFrequency()
     expectTrue (bins[peakBin] - bins[0] > 12.0f,
                 "the 10 kHz peak stands well above the 20 Hz floor (delta "
                 + juce::String (bins[peakBin] - bins[0], 1) + " dB)");
+}
+
+// v2.41 (Clement's staircase remark): below ~213 Hz at 48 kHz a display
+// band is NARROWER than one FFT bin (5.86 Hz), so the old integer
+// rounding fed several consecutive bands from the SAME bin - the
+// visible stairs in the low end (up to ~10 identical points near
+// 20 Hz). The fractional sampling interpolates between the two
+// neighbouring bin powers at each band's exact frequency, so with
+// broadband noise no two adjacent low bands may read identically
+// anymore. This test FAILS on the pre-v2.41 aggregation.
+void testBassResolution()
+{
+    beginTest ("bass resolution: no FFT-bin stairs below 200 Hz (v2.41)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    // 2 s of deterministic broadband noise: the bass bands all carry
+    // real, different energy (no floor clamp to hide behind). Driven
+    // block by block - processBlocks() takes a SineSource only.
+    NoiseSource src (0.3f);
+
+    for (int n = 0; n < (int) (2.0 * 48000.0 / 512.0); ++n)
+    {
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    float raw[SpectrumAnalyzer::numScopeBins];
+    proc.getAnalyzerIn().copyRawScopeData (raw, SpectrumAnalyzer::numScopeBins);
+
+    // the RAW band energies (pre spatial pass): count the longest run
+    // of IDENTICAL consecutive bands whose low edge sits below 200 Hz
+    // (the region where a band is sub-bin; 200 Hz is around index 85)
+    int longest = 1, run = 1;
+
+    for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+    {
+        if (proc.getAnalyzerIn().getBinFrequency (b) >= 200.0)
+            break;
+
+        // exact equality via </> (no -Wfloat-equal): identical stored
+        // floats are exactly what a stair IS - the point of the test
+        if (raw[b] < raw[b - 1] || raw[b] > raw[b - 1])
+        {
+            run = 1;
+        }
+        else
+        {
+            ++run;
+            longest = juce::jmax (longest, run);
+        }
+    }
+
+    expectTrue (longest <= 2,
+                "no more than 2 identical low bands in a row (longest run "
+                + juce::String (longest) + ", was ~10 pre-v2.41)");
 }
 
 // v2.21: the measured EQ curve in weak-content bands. This is the
@@ -1408,7 +1551,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.40.0");
+        session->setAttribute ("version", "2.41.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1574,7 +1717,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.40.0");
+    session->setAttribute ("version", "2.41.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1797,8 +1940,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.40.0",
-                "saved state carries the current version tag (2.40.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.41.0",
+                "saved state carries the current version tag (2.41.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2136,7 +2279,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.40.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.41.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -2799,16 +2942,18 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.40.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.41.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
     testPassthroughNoPlugin();
     testMeasurementGating();
+    testAnalyserGating();
     testLufsShortTerm();
     testSilence();
     testSpectrumPeak();
     testSpectrumHighFrequency();
+    testBassResolution();
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
     testConsoleSlotStatus();

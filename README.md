@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.40.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.41.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -123,10 +123,12 @@ them in a clean, focused workflow:
   shows the analyzer strip entirely; the window re-fits (smaller without
   the strip), so the space is genuinely freed. The choice is saved with
   the session.
-- **Zero-cost when closed (v2.8)** — all measurements (LUFS meters and
-  both spectrum analyzers) run **only while the plugin window is open**.
-  With the editor closed the audio thread does nothing but the console
-  itself, so a mixer full of instances carries no analysis overhead.
+- **Zero-cost when closed (v2.8 / v2.41)** — all measurements (LUFS meters
+  and both spectrum analyzers) run **only while the plugin window is open**,
+  and since v2.41 the spectrum analyzers additionally stop while the
+  analyser strip is hidden. With the editor closed (or the strip hidden)
+  the audio thread does nothing but the console itself, so a mixer full
+  of instances carries no analysis overhead.
 - **LUFS gain staging (display)** — the sidebar continuously
   shows, in LUFS-derived dB, how much to raise (+) or lower (-) the sound
   so the hosted console's output matches its input loudness (short-term
@@ -292,6 +294,33 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.41.0**
+  - **Bass stairs fixed (Clement's remark).** Below ~213 Hz at 48 kHz a
+    display band is narrower than one FFT bin, so several consecutive
+    bands read the SAME bin and the curves descended in visible stairs
+    (up to ~10 identical points near 20 Hz). Sub-bin bands now sample
+    the spectrum at their exact frequency - the neighbouring bin powers
+    are linearly interpolated - which turns the stairs into a smooth,
+    honest slope at the FFT's true resolution. Applies to the IN / OUT
+    curves and to the measured EQ curve alike (both analysers share the
+    band mapping). Bands a bin or wider keep the v2.20 band-energy
+    aggregation untouched.
+  - **Prettier curve ballistics.** The IN / OUT curves rise 4x faster
+    than they fall: a transient shows immediately, the body of the
+    curve keeps decaying at the calm Fast / Slow pace. Classic
+    fast-attack / slow-release analyser feel, both sides derived from
+    the user-selectable response speed.
+  - **The analyser now fully stops when it is hidden (Clement's
+    remark).** The spectrum analysers and the cross-spectrum transfer
+    measurement run only while the editor is open AND the analyser
+    strip is shown - a hidden strip costs nothing on the audio thread.
+    The LUFS meters stay on the editor-open gate alone, so the gain
+    staging readout and the licence-expired silent-console watch keep
+    working with the analyser hidden. Re-opening the strip (or the
+    editor) resets the analysers and the display, so no pre-hide frame
+    or ghost curve ever leaks into the fresh view; the panel's 30 Hz
+    tick also skips entirely while the strip is hidden. The Doctor
+    report states whether the analyser strip is shown or hidden.
 - **2.40.0**
   - **Contact card rework (Clement's remarks).** The studio lines are
     gone (French and English alike); "Ingénieur Centrale Nantes" now

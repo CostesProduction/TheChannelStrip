@@ -94,6 +94,12 @@ public:
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
+    // v2.41: forget every smoothed trace (curves, EQ diff, max-hold
+    // ring). Called when the analyser strip is hidden so a re-show
+    // starts from a clean display - the 10 s max-hold would otherwise
+    // keep pre-hide peaks alive long after the strip came back.
+    void resetDisplay();
+
 private:
     void timerCallback() override;
     void updateBallistics();

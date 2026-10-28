@@ -233,8 +233,11 @@ public:
     float getEqDbDiv() const { return eqDbDiv.load (std::memory_order_relaxed); }
     void setEqDbDiv (float div) { eqDbDiv.store (div, std::memory_order_relaxed); }
     // Show/hide the analyser strip (the window re-fits when it changes).
+    // v2.41: defined in the .cpp - re-showing the strip resets the
+    // spectrum analysers, so no pre-hide frame leaks into the display
+    // (the fifos hold stale audio across the hidden gap).
     bool getAnalyserVisible() const { return analyserVisible.load (std::memory_order_relaxed); }
-    void setAnalyserVisible (bool visible) { analyserVisible.store (visible, std::memory_order_relaxed); }
+    void setAnalyserVisible (bool visible);
     // v2.11: analyser response speed - the IN/OUT smoothing time
     // constant. v2.12 keeps two speeds: Fast ~0.15 s / Slow ~1 s,
     // persisted with the state.

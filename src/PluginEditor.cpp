@@ -361,7 +361,29 @@ SpectrumPanel::HelpZone SpectrumPanel::helpZoneFor (juce::Point<int> p) const
 
 void SpectrumPanel::timerCallback()
 {
+    // v2.41: a hidden strip has nothing to display - skip the tick
+    // entirely (the analysers are gated off in processBlock, and the
+    // panel keeps the clean state resetDisplay() left it for the next
+    // show; no 30 Hz of EMA work for an invisible component).
+    if (! processor.getAnalyserVisible())
+        return;
+
     updateBallistics();
+    repaint();
+}
+
+// v2.41: the display-side reset that pairs with the processor-side
+// analyzer resets (see setAnalyserVisible / setEditorOpen): every
+// smoothed trace goes back to its constructor state, so a re-shown
+// strip starts from silence instead of ghosting the pre-hide curves.
+void SpectrumPanel::resetDisplay()
+{
+    smoothIn.fill  (-100.0f);
+    smoothOut.fill (-100.0f);
+    smoothDiff.fill (0.0f);
+    eqMeasured.fill (false);
+    maxOut.fill (-100.0f);
+    maxRing.assign ((size_t) maxHoldFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     repaint();
 }
 
@@ -519,16 +541,26 @@ void SpectrumPanel::updateBallistics()
     processor.getAnalyzerIn().copyRawScopeData  (rawIn, SpectrumAnalyzer::numScopeBins);
     processor.getAnalyzerOut().copyRawScopeData (rawOut, SpectrumAnalyzer::numScopeBins);
 
+    // v2.41 (the "bonus joli"): ASYMMETRIC ballistics - the rise is
+    // 4x faster than the fall, so a transient shows immediately while
+    // the curve keeps decaying at the calm Fast/Slow pace. Classic
+    // analyser feel (fast attack, slow release), and it is NOT the
+    // v2.10 mistake: that old mode was INSTANT rise + a fixed ~36 dB/s
+    // fall, which read as nervous. Here both sides derive from the
+    // user tau (alpha = 1 / (1 + 30 * tau), the same one-pole as
+    // since v2.10) - only the rise gets a x4 multiplier, capped at 1.
+    const float specAlpha  = 1.0f / (1.0f + 30.0f * specTau);
+    const float riseAlpha  = juce::jmin (1.0f, 4.0f * specAlpha);
+
     for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
     {
-        // v2.10: symmetric one-pole EMA (was: instant rise, ~36 dB/s
-        // fall, which read as too nervous). One-pole EMA at 30 Hz:
-        // alpha = 1 / (1 + 30 * tau).
         // v2.11/v2.12: tau is selectable in the sidebar (Fast/Slow).
-        const float specAlpha = 1.0f / (1.0f + 30.0f * specTau);
-
-        smoothIn  [(size_t) b] += specAlpha * (in[b]  - smoothIn  [(size_t) b]);
-        smoothOut [(size_t) b] += specAlpha * (out[b] - smoothOut [(size_t) b]);
+        // Fast: rise 0.72 / fall 0.18 per tick; Slow: rise 0.13 /
+        // fall 0.032 - transients pop, the body of the curve stays calm.
+        smoothIn  [(size_t) b] += (in[b]  > smoothIn  [(size_t) b] ? riseAlpha : specAlpha)
+                               * (in[b]  - smoothIn  [(size_t) b]);
+        smoothOut [(size_t) b] += (out[b] > smoothOut [(size_t) b] ? riseAlpha : specAlpha)
+                               * (out[b] - smoothOut [(size_t) b]);
     }
 
     // v2.10/v2.11: sliding maximum of the DISPLAYED (smoothed) OUT curve
@@ -2144,6 +2176,13 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
 void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
 {
     const bool show = proc.getAnalyserVisible();
+
+    // v2.41: hiding the strip wipes the display traces (the processor
+    // stops the spectra at the gate and resets the analysers on the
+    // re-show; the panel must not keep the old curves / max-hold peaks
+    // either). Pure display state - safe at any moment of the tick.
+    if (! show)
+        spectrumPanel.resetDisplay();
 
     spectrumPanel.setVisible (show);
     setResizeLimits (860, show ? 970 : 790, 2560, 1600); // v2.39.0: min width 860

@@ -24,6 +24,13 @@ public:
 
     void prepare (double newSampleRate);
 
+    // v2.41: clear every trace of past audio (band energies back to the
+    // floor, fifo rewound and zeroed). Called when the editor re-opens
+    // or the analyser strip is re-shown, so no pre-close / pre-hide
+    // frame ever leaks into the fresh display (same contract as
+    // LufsMeter::resetMeasurement).
+    void reset();
+
     // Mono mixdown push; computes one frame every fftSize samples.
     void processAudio (const juce::AudioBuffer<float>& buffer);
 

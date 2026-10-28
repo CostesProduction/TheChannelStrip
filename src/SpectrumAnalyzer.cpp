@@ -50,6 +50,20 @@ void SpectrumAnalyzer::prepare (double newSampleRate)
     for (auto& f : fifo) f = 0.0f;
 }
 
+// v2.41: shared by prepare() and the public reset() - everything that
+// makes the analyser forget the audio it has seen.
+void SpectrumAnalyzer::reset()
+{
+    for (auto& s : scopeData)
+        s.store (-100.0f, std::memory_order_relaxed);
+
+    for (auto& s : rawScopeData)
+        s.store (-100.0f, std::memory_order_relaxed);
+
+    fifoPos.store (0, std::memory_order_relaxed);
+    for (auto& f : fifo) f = 0.0f;
+}
+
 void SpectrumAnalyzer::processAudio (const juce::AudioBuffer<float>& buffer)
 {
     const int numChans = buffer.getNumChannels();
@@ -107,32 +121,74 @@ void SpectrumAnalyzer::compute()
     // of ~6 dB under it.
     float raw[(size_t) numScopeBins];
 
+    // v2.41 (Clement's staircase remark): the display bands are spaced
+    // 2.75 % apart in frequency, so below ~213 Hz at 48 kHz a band is
+    // NARROWER than one FFT bin (5.86 Hz) - the old integer rounding
+    // mapped several consecutive bands onto the SAME FFT bin and the
+    // curve descended in visible stairs (up to ~10 identical points in
+    // a row near 20 Hz). Sub-bin bands now sample the spectrum at their
+    // exact frequency: the bin POWERS are linearly interpolated at the
+    // band's low edge (the x position the panel draws this band at -
+    // see SpectrumPanel::xForBin), which turns the stairs into an
+    // honest smooth slope at the FFT's true resolution. Bands a bin or
+    // wider keep the v2.20 band-energy RMS untouched - that aggregation
+    // is a measurement feature, not a stair. The price of interpolating
+    // across the ~4-bin Blackman-Harris main lobe: a tone sitting
+    // exactly between two bins reads up to ~1-2 dB lower than its
+    // peak bin alone - the standard trade every interpolating analyser
+    // makes for a readable low end.
+    const double binHz = sampleRate / (double) fftSize;
+
     for (int b = 0; b < numScopeBins; ++b)
     {
         const double fLow  = binFrequencies[(size_t) b];
         const double fHigh = (b == numScopeBins - 1) ? 0.5 * sampleRate
                                                       : binFrequencies[(size_t) (b + 1)];
 
-        const int kLow = juce::jlimit (1, lastBin,
-            (int) std::round (fLow * fftSize / sampleRate));
-        const int kHigh = juce::jlimit (kLow, lastBin,
-            (int) std::round (fHigh * fftSize / sampleRate));
+        double rms = 0.0;
 
-        double energy = 0.0;
-        int count = 0;
-
-        for (int k = kLow; k <= kHigh; ++k)
+        if (fHigh - fLow < binHz)
         {
-            const double m = fftData[(size_t) k];
-            energy += m * m;
-            ++count;
-        }
+            // narrow path: fractional sampling between the two
+            // neighbouring bin powers at the band's low edge
+            const double p  = juce::jlimit (1.0, (double) lastBin, fLow / binHz);
+            const int    k0 = (int) std::floor (p);
+            const double t  = juce::jlimit (0.0, 1.0, p - (double) k0);
+            const int    k1 = juce::jmin (lastBin, k0 + 1);
 
-        const double rms = count > 0 ? std::sqrt (energy / (double) count) : 0.0;
+            const double m0 = (double) fftData[(size_t) k0];
+            const double m1 = (double) fftData[(size_t) k1];
+            const double power = (1.0 - t) * (m0 * m0) + t * (m1 * m1);
+
+            rms = std::sqrt (power);
+        }
+        else
+        {
+            // wide path (v2.20): band ENERGY - RMS of the covered FFT
+            // bin magnitudes
+            const int kLow = juce::jlimit (1, lastBin,
+                (int) std::round (fLow * fftSize / sampleRate));
+            const int kHigh = juce::jlimit (kLow, lastBin,
+                (int) std::round (fHigh * fftSize / sampleRate));
+
+            double energy = 0.0;
+            int count = 0;
+
+            for (int k = kLow; k <= kHigh; ++k)
+            {
+                const double m = fftData[(size_t) k];
+                energy += m * m;
+                ++count;
+            }
+
+            rms = count > 0 ? std::sqrt (energy / (double) count) : 0.0;
+        }
 
         // v2.21: windowSum-based normalisation (see prepare) - identical
         // readings to the old Hann scale, now valid for the Blackman-
-        // Harris window too
+        // Harris window too. For a flat spectrum both paths normalise
+        // to the same per-bin magnitude, so the narrow/wide handover
+        // at the ~213 Hz threshold is level-continuous.
         const float db = (float) (20.0 * std::log10 (rms / (windowSum * 0.5)
                                                      + 1.0e-10));
 

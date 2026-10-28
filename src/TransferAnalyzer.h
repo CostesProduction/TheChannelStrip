@@ -58,6 +58,12 @@ public:
     // so the audio thread never allocates.
     void prepare (double newSampleRate, int maxBlockSize = 4096);
 
+    // v2.41: forget every trace of past audio (fifos, estimators,
+    // atomics). Called when the editor re-opens or the analyser strip
+    // is re-shown - a frame computed half from pre-hide samples would
+    // be a phantom measurement.
+    void reset();
+
     // Mono mixdown of the buffer as it arrives (call BEFORE the console
     // runs). The two pushes always receive the same block sizes, so the
     // two fifos fill in lockstep and frame k of IN covers exactly the

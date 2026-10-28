@@ -297,7 +297,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.40.0 - Doctor report\n"
+    report << "TheChannelStrip 2.41.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -314,6 +314,9 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
            << "  measurements: "
            << (measuringEnabled.load (std::memory_order_relaxed)
                    ? "running (editor open)" : "paused (editor closed)") << "\n"
+           << "  analyser: "
+           << (analyserVisible.load (std::memory_order_relaxed)
+                   ? "shown (spectra running)" : "hidden (spectra paused)") << "\n"
            << "\n"
            << "hosted console:\n";
 
@@ -477,11 +480,23 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     // When no editor is open they are skipped entirely, so a session full
     // of instances (or a mixer view without open plugin windows) pays
     // nothing for the display path. The audio chain itself is unchanged.
+    // v2.41 (Clement's remark 2/3): the spectrum analysers answer to a
+    // STRICTER gate - they also stop when the analyser strip is hidden,
+    // because a hidden analyser has nobody to feed. The LUFS meters stay
+    // on the editor-open gate alone: they feed the gain-staging readout
+    // (visible whenever the editor is) and the v2.24 silent-console
+    // watch, whose warning must keep firing even with the analyser
+    // strip hidden. pushInput/pushOutput always run under the SAME
+    // analyserOn flag, so the transfer frames stay sample-aligned.
     const bool measure = measuringEnabled.load (std::memory_order_relaxed);
+    const bool analyserOn = measure
+        && analyserVisible.load (std::memory_order_relaxed);
 
     if (measure)
-    {
         lufsIn.process (buffer);
+
+    if (analyserOn)
+    {
         analyzerIn.processAudio (buffer);
         // v2.22: stash the pre-console input for the cross-spectrum
         // transfer measurement (the console overwrites the buffer in
@@ -526,15 +541,21 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     if (measure)
     {
         lufsOut.process (buffer);
+
+        // v2.24 (point 7): the silent-console watch rides the editor-
+        // open gate (the warning is a UI concern; a closed editor has
+        // nowhere to show it) - it must NOT follow the analyser strip
+        // toggle, or hiding the analyser would also hide an expired
+        // licence.
+        watchHostedSilence (numSamples);
+    }
+
+    if (analyserOn)
+    {
         analyzerOut.processAudio (buffer);
         // v2.22: the console's output of the same block - this drain
         // advances the transfer frames (and computes the cross-spectra).
         transferAnalyzer.pushOutput (buffer);
-
-        // v2.24 (point 7): the silent-console watch rides the same
-        // measurement gate (the warning is a UI concern; a closed editor
-        // has nowhere to show it).
-        watchHostedSilence (numSamples);
     }
 
     // ---- forward the hosted plugin's reported latency to the host ----
@@ -549,9 +570,30 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     }
 }
 
+// v2.41: the analyser strip toggle (and the session restore). The
+// spectra answer to a STRICTER gate than the LUFS meters (see
+// processBlock), so hiding the strip must also leave the analysers in
+// a state a re-show can trust: on the false->true edge the fifos,
+// band energies and transfer estimators are reset - a frame computed
+// half from pre-hide samples would be a phantom measurement, and the
+// transfer EMAs would otherwise average across the hidden gap.
+void TheChannelStripAudioProcessor::setAnalyserVisible (bool visible)
+{
+    const bool was = analyserVisible.exchange (visible, std::memory_order_relaxed);
+
+    if (visible && ! was)
+    {
+        analyzerIn.reset();
+        analyzerOut.reset();
+        transferAnalyzer.reset();
+    }
+}
+
 // v2.8: the editor calls this from its constructor/destructor (see
 // PluginEditor). Opening resets the meters so the display never shows
 // values measured before a previous close.
+// v2.41: the spectrum analysers reset too (same staleness contract -
+// the fifos and band energies of a closed session are pre-close audio).
 void TheChannelStripAudioProcessor::setEditorOpen (bool isOpen)
 {
     measuringEnabled.store (isOpen, std::memory_order_relaxed);
@@ -560,6 +602,9 @@ void TheChannelStripAudioProcessor::setEditorOpen (bool isOpen)
     {
         lufsIn.resetMeasurement();
         lufsOut.resetMeasurement();
+        analyzerIn.reset();
+        analyzerOut.reset();
+        transferAnalyzer.reset();
     }
 }
 
@@ -935,7 +980,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.40.0");
+    xml->setAttribute ("version", "2.41.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1252,7 +1297,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.40.0");
+    xml->setAttribute ("version", "2.41.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2051,7 +2096,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.40.0");
+    xml->setAttribute ("version", "2.41.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
