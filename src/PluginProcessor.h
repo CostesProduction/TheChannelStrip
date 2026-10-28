@@ -269,6 +269,30 @@ public:
     // reason when the native mono layout is not used.
     juce::String getChannelReadout() const;
 
+    // ---- v2.33 (roadmap idea 3): shell integrity readout ----
+    // Two compact sidebar lines that answer "is the shell transparent?"
+    // at a glance (the question of the +3 dB investigation): the shell
+    // runs at unity gain (a fact of the architecture - it never applies
+    // gain of its own), whether a console-swap crossfade is in flight,
+    // the latency forwarded to the host, and the silence sentinel's
+    // state (armed = the watch has not fired for the hosted console;
+    // swapping or re-hosting re-arms it). Built from atomics and cached
+    // ints only - no locks - and safe to call from the 30 Hz UI timer.
+    juce::String getShellIntegrityLine() const;
+
+    // ---- v2.33 (roadmap idea 4): the Doctor report ----
+    // A plain-text snapshot of everything worth knowing when something
+    // misbehaves: shell and JUCE versions, host and wrapper, sample
+    // rate and block size, the channel readout, the hosted console and
+    // its forwarded latency, the integrity readout above, the plugin
+    // database summary (per console: found / not found / blacklisted /
+    // file missing), the number of presets on disk, the last status
+    // message and the per-console remembered-state block sizes. Message
+    // thread only (it takes scanLock and consoleStateLock); the editor
+    // builds it when the logo is clicked, shows it in a small window
+    // and writes it to a file next to the plugin database.
+    juce::String buildDoctorReport();
+
     // v2.16.1: the latency currently forwarded to the host (the editor
     // logs it to the Terminal whenever it changes).
     int getForwardedLatency() const { return lastReportedLatency; }

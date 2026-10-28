@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.32.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.33.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1408,7 +1408,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.32.0");
+        session->setAttribute ("version", "2.33.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1574,7 +1574,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.32.0");
+    session->setAttribute ("version", "2.33.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1797,8 +1797,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.32.0",
-                "saved state carries the current version tag (2.32.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.33.0",
+                "saved state carries the current version tag (2.33.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2055,6 +2055,140 @@ void testFormatHotSwitch()
                 "the console kept processing across both switches");
     expectTrue (proc.getForwardedLatency() == 32,
                 "latency survived the format switches");
+}
+
+// ---------------------------------------------------------------------------
+// v2.33 (roadmap ideas 3+4: shell integrity readout + Doctor report)
+// ---------------------------------------------------------------------------
+
+// v2.33 (roadmap idea 3): the shell integrity readout - the two-line
+// bandeau the editor shows under the channel readout. The editor
+// displays these strings verbatim, so the asserts pin the wording, not
+// just keywords: unity, crossfade state, forwarded latency, sentinel.
+void testShellIntegrityReadout()
+{
+    beginTest ("shell integrity readout (v2.33 bandeau)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    auto line = proc.getShellIntegrityLine();
+    expectTrue (line.contains ("shell: unity"),
+                "the readout states the shell is at unity gain");
+    expectTrue (line.contains ("crossfade: idle"),
+                "no console -> the crossfade reads idle");
+    expectTrue (line.contains ("latency: 0"),
+                "nothing hosted -> the forwarded latency reads 0");
+    expectTrue (line.contains ("sentinel: armed"),
+                "the silence sentinel starts armed");
+
+    // a hosted console's latency reaches the readout
+    auto mock = std::make_unique<MockConsole> (true);
+    mock->setLatencySamples (222);
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (1000.0, 48000.0, 0.5f);
+    processBlocks (proc, src, 2, block);
+
+    line = proc.getShellIntegrityLine();
+    expectTrue (line.contains ("latency: 222"),
+                "the hosted console's latency reaches the readout");
+
+    // a swap makes the crossfade read ACTIVE until the fade has run out
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+    expectTrue (proc.getShellIntegrityLine().contains ("crossfade: active"),
+                "mid-swap the readout shows an active crossfade");
+
+    processBlocks (proc, src, 12, block);   // 12 x 512 = 6144 samples > 50 ms fade
+    expectTrue (proc.getShellIntegrityLine().contains ("crossfade: idle"),
+                "the readout settles back to idle once the fade is done");
+
+    // the licence-expired sentinel: a loud-but-silent console flips the
+    // readout to "fired"; hosting a new console re-arms it (the watch
+    // re-arms on the first block the new console sees)
+    proc.setEditorOpen (true);
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+    processBlocks (proc, src, 880, block);   // ~9.3 s of loud input (crossfade eats 50 ms)
+
+    expectTrue (proc.getShellIntegrityLine().contains ("sentinel: fired"),
+                "a silent console under loud input flips the sentinel");
+
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true));
+    processBlocks (proc, src, 2, block);
+    expectTrue (proc.getShellIntegrityLine().contains ("sentinel: armed"),
+                "hosting a fresh console re-arms the sentinel");
+}
+
+// v2.33 (roadmap idea 4): the Doctor report - built entirely on the
+// message thread from state the harness already exercises; it is what
+// the logo click shows (and writes next to the plugin database). The
+// asserts pin its key sections and the facts that must travel with a
+// support request.
+void testDoctorReport()
+{
+    beginTest ("doctor report (v2.33 logo click)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    auto report = proc.buildDoctorReport();
+    expectTrue (report.contains ("TheChannelStrip 2.33.0"),
+                "the report carries the shell version");
+    expectTrue (report.contains ("wrapper: "),
+                "the report names the wrapper");
+    expectTrue (report.contains ("JUCE: "),
+                "the report names the JUCE version");
+    expectTrue (report.contains ("sample rate: 48000 Hz"),
+                "the report states the sample rate");
+    expectTrue (report.contains ("block size: 512 samples"),
+                "the report states the block size");
+    expectTrue (report.contains ("hosted console:")
+                && report.contains ("  none"),
+                "no console hosted -> the report says none");
+    expectTrue (report.contains ("crossfade: idle"),
+                "the report carries the integrity crossfade state");
+    expectTrue (report.contains ("sentinel: armed"),
+                "the report carries the sentinel armed");
+    expectTrue (report.contains ("plugin database:")
+                && report.contains ("consoles:"),
+                "the report has a plugin database section");
+    expectTrue (report.contains ("bx_console SSL 4000 E"),
+                "every supported console appears in the scan summary");
+    expectTrue (report.contains ("presets: "),
+                "the report counts the presets on disk");
+    expectTrue (report.contains ("console memory (per-console remembered states)"),
+                "the report has a console memory section");
+    expectTrue (report.contains ("last status message:"),
+                "the report ends with the last status message");
+
+    // with a hosted console the report picks up its name and latency
+    auto mock = std::make_unique<MockConsole> (true);
+    mock->setLatencySamples (222);
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::AudioBuffer<float> block (2, 512);
+    SineSource src (1000.0, 48000.0, 0.5f);
+    processBlocks (proc, src, 2, block);
+
+    report = proc.buildDoctorReport();
+    expectTrue (report.contains ("name: MockConsole"),
+                "the hosted console's name reaches the report");
+    expectTrue (report.contains ("latency: 222"),
+                "the hosted console's forwarded latency reaches the report");
+
+    // a fired sentinel and the warning it posted both show up
+    proc.setEditorOpen (true);
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+    processBlocks (proc, src, 880, block);
+
+    report = proc.buildDoctorReport();
+    expectTrue (report.contains ("sentinel: fired"),
+                "the fired sentinel shows in the report");
+    expectTrue (report.contains ("WARNING:") && report.contains ("produces no output"),
+                "the report carries the silence warning itself");
+    expectTrue (report.contains ("name: MockSilenceConsole"),
+                "the report names the currently hosted console");
 }
 
 // ---------------------------------------------------------------------------
@@ -2590,7 +2724,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.32.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.33.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -2613,6 +2747,8 @@ int main (int argc, char* argv[])
     testMonoNative();
     testMonoBridge();
     testFormatHotSwitch();
+    testShellIntegrityReadout();
+    testDoctorReport();
     testRealtimeSafetyAllocations();
     testTortureConsoleSwapStorm();
     testTortureFormatAndRateChurn();

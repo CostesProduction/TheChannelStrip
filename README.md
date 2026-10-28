@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.32.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.33.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -282,6 +282,33 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.33.0**
+  - **Shell integrity bandeau (roadmap idea 3).** A compact two-line
+    readout under the channel format in the sidebar answers « is the
+    shell transparent? » at a glance: `shell: unity · crossfade:
+    idle` / `latency: N · sentinel: armed`. The shell processes at
+    unity gain (a fact of the architecture — it never applies gain
+    of its own), the **crossfade** line flickers to *active* for the
+    ~50 ms of a console swap so you can see the shell doing its one
+    transient job, the **latency** is the delay forwarded to the
+    host, and the **sentinel** is the licence-expired silence watch
+    (*fired* if the hosted console stopped producing audio under a
+    loud input; hosting a new console re-arms it). Display-only,
+    built from atomics on the UI timer — zero audio-thread cost.
+  - **Doctor report (roadmap idea 4).** **Click the logo** for a full
+    diagnostic snapshot of the shell: versions (shell, JUCE), host
+    and wrapper, sample rate and block size, channel readout, the
+    hosted console (name, ident, current preset), the integrity
+    readout, the plugin database summary (per console: found / not
+    found / blacklisted / file missing, with paths), the preset
+    count, the per-console remembered-state sizes and the last
+    status message. The report pops up in a small window with a
+    **Copy to clipboard** button, is written to
+    `doctor-report.txt` next to the plugin database and echoed to
+    the Terminal. Message thread only, nothing touches the audio
+    path — and any state the sidebar already shows, the Doctor can
+    explain.
 
 - **2.32.0**
   - **Realtime-safety audit, enforced by the test harness.** The

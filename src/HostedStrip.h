@@ -46,6 +46,20 @@ public:
         return reportedLatency.load (std::memory_order_relaxed);
     }
 
+    // v2.33 (roadmap idea 3): true while a console-swap crossfade is in
+    // flight - the outgoing slot is still fading out, or the incoming
+    // one has not reached full level yet. Read by the UI timer for the
+    // shell integrity readout and the Doctor report: a couple of atomic
+    // loads, nothing more (no audio-thread involvement).
+    bool isCrossfading() const
+    {
+        if (outgoingSlot.load (std::memory_order_acquire) != nullptr)
+            return true;
+
+        auto* slot = activeSlot.load (std::memory_order_acquire);
+        return slot != nullptr && slot->fade.load (std::memory_order_relaxed) < 1.0f;
+    }
+
     // v2.16.1: the hosted plugin can change its own latency at runtime
     // (e.g. toggling oversampling inside the Lindell consoles). The
     // processor calls this from its processBlock so the cached value above

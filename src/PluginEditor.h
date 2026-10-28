@@ -299,6 +299,22 @@ private:
     // v2.31: the bubble window's own click leaves the mode too, so it
     // needs exitHelpMode as well (it touches nothing else private).
     friend class HelpBubbleWindow;
+    // ---- v2.33 (roadmap idea 4): the Doctor ----
+    // Clicking the logo builds the processor's diagnostic report, shows
+    // it in a small non-blocking window, writes it to a file next to the
+    // plugin database and echoes it to the Terminal. Message thread
+    // only; the audio path is never touched.
+    void showDoctorReport();
+    // Routes the logo's click to the Doctor. juce::ImageComponent has
+    // no mouseDown override, and keeping the logo's drawing untouched
+    // is preferable to a subclass: a MouseListener attached to it in
+    // the constructor (and detached in the destructor) does exactly
+    // that, without a friend declaration or layout change.
+    struct LogoMouseListener : public juce::MouseListener
+    {
+        TheChannelStripAudioProcessorEditor* owner = nullptr;
+        void mouseDown (const juce::MouseEvent&) override;
+    } logoMouseListener;
     // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
     // (re)populate the preset combo box from the files on disk
     void refreshPresetList();
@@ -336,6 +352,13 @@ private:
     // v2.14.1: channel-format diagnostic under the hosted console's name
     // ("track: stereo" / "track: mono (native)" / "track: mono (bridge)").
     juce::Label channelLabel;
+
+    // v2.33 (roadmap idea 3): the shell integrity bandeau - two compact
+    // lines right under the channel readout ("shell: unity · crossfade:
+    // idle" / "latency: N · sentinel: armed"), refreshed by the timer
+    // from proc.getShellIntegrityLine(). Pure display, quiet style, the
+    // answer to "is the shell transparent?" at a glance.
+    juce::Label integrityLabel;
 
     // ---- v2.26 (roadmap point 4): the presets sidebar section ----
     // One combo box listing every preset in the preset folder - the

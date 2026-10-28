@@ -1307,9 +1307,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
     // v2.26.1: presets section now one icon row -> 973 / 793.
-    setSize (1180, 973);
+    // v2.33: the shell integrity bandeau under the channel readout
+    // -> 1003 / 823.
+    setSize (1180, 1003);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 973 : 793, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 1003 : 823, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1359,6 +1361,23 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         "Channel format the host gives this instance and the console's audio path.";
     addAndMakeVisible (channelLabel);
 
+    // v2.33 (roadmap idea 3): the shell integrity bandeau - the answer to
+    // "is the shell transparent?" in two compact lines (the question of
+    // the +3 dB investigation): the shell runs at unity gain, whether a
+    // console-swap crossfade is in flight, the latency forwarded to the
+    // host and the silence sentinel's state. Same quiet style as the
+    // channel readout above it; the timer refreshes it.
+    integrityLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
+    integrityLabel.setJustificationType (juce::Justification::centred);
+    integrityLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+    helpTexts[&integrityLabel] =
+        "Shell integrity: the shell processes at unity gain (it never "
+        "adds gain of its own), the crossfade shows whether a console "
+        "swap is still blending, the latency is the delay forwarded to "
+        "the host, and the sentinel watches for a hosted console that "
+        "stopped producing audio (a lapsed licence does exactly that).";
+    addAndMakeVisible (integrityLabel);
+
     // v2.1: the correction is the main readout: bigger and smoothed.
     // v2.4: slightly smaller so the condensed sidebar fits at min height.
     // v2.13: back to the correction reading (v2.12's measured-deviation
@@ -1384,6 +1403,21 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
                          juce::RectanglePlacement (juce::RectanglePlacement::centred
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
+
+    // v2.33 (roadmap idea 4): clicking the logo opens the Doctor - a
+    // full diagnostic snapshot of the shell (versions, plugin database,
+    // latency, integrity states), also written to a text file next to
+    // the plugin database and echoed to the Terminal. A MouseListener
+    // instead of a subclass keeps the logo's drawing and layout exactly
+    // as they were; the pointing-hand cursor says "clickable". The
+    // listener is detached in the destructor.
+    logoMouseListener.owner = this;
+    studioLogo.addMouseListener (&logoMouseListener, false);
+    studioLogo.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    helpTexts[&studioLogo] =
+        "Click the logo for the Doctor - a full diagnostic report of "
+        "the shell (versions, plugin database, latency, integrity "
+        "states), also saved as a text file next to the plugin database.";
 
     // v2.30: the "?" button no longer rides the logo band - it moved
     // to the presets button row (see the presets section below) and
@@ -1788,6 +1822,11 @@ void TheChannelStripAudioProcessorEditor::resized()
     channelLabel.setBounds (sideX, y, sw, 14);
     y += 18;
 
+    // v2.33 (roadmap idea 3): the shell integrity bandeau, two lines
+    // tall, closes the diagnostic cluster under the console name.
+    integrityLabel.setBounds (sideX, y, sw, 26);
+    y += 30;
+
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
     for (size_t j = 0; j < speedButtons.size(); ++j)
         speedButtons[j].setBounds (sideX + (int) j * 68, y, 64, 22);
@@ -1913,7 +1952,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.17: the studio logo block -> 960 / 780.
     // v2.17.1: logo halved -> 900 / 720.
     // v2.26.1: presets section now one icon row -> 973 / 793.
-    const int newH = juce::jlimit (showStrip ? 973 : 793, 1600, targetH);
+    // v2.33: the shell integrity bandeau -> 1003 / 823.
+    const int newH = juce::jlimit (showStrip ? 1003 : 823, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1928,7 +1968,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 973 : 793, 2560, 1600); // v2.26.1: presets section
+    setResizeLimits (1024, show ? 1003 : 823, 2560, 1600); // v2.33: integrity bandeau
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -1979,6 +2019,13 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     // v2.14.2: live channel-format readout (see the ctor comment for what
     // each state and suffix tells us).
     channelLabel.setText (proc.getChannelReadout(), juce::dontSendNotification);
+
+    // v2.33 (roadmap idea 3): the integrity bandeau - one cheap string
+    // built from atomics on the processor; the label itself no-ops when
+    // the text has not changed. The crossfade visibly flickers to
+    // "active" for the ~50 ms of a console swap, which is exactly the
+    // point: the user SEES the shell doing its one transient job.
+    integrityLabel.setText (proc.getShellIntegrityLine(), juce::dontSendNotification);
 
     // v2.3: the hosted plugin's name lives in the sidebar; the status
     // area only carries scan progress and error messages.
@@ -2173,6 +2220,8 @@ TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
         helpBubble->removeFromDesktop();
         helpBubble.reset();
     }
+    // v2.33: the Doctor listener must go before the members fall apart.
+    studioLogo.removeMouseListener (&logoMouseListener);
     embeddedHostedEditor.reset(); // detach the hosted editor before anything else
     hostedViewport.setViewedComponent (nullptr, false);
 }
@@ -2512,4 +2561,112 @@ void TheChannelStripAudioProcessorEditor::importPresetFile()
                                         if (proc.importPreset (source))
                                             refreshPresetList();
                                     });
+}
+
+// ---------------------------------------------------------------------------
+// v2.33 (roadmap idea 4): the Doctor window's content. A read-only,
+// monospaced, scrollable text area with the report plus Copy / Close
+// buttons. It holds NO editor reference (the report text is passed in
+// and copied to the clipboard from the copy it keeps), so it needs no
+// friend declaration and can never dangle. The DialogWindow owns and
+// destroys it.
+// ---------------------------------------------------------------------------
+namespace
+{
+class DoctorPanel final : public juce::Component
+{
+public:
+    explicit DoctorPanel (const juce::String& reportText)
+        : report (reportText)
+    {
+        text.setReadOnly (true);
+        text.setCaretVisible (false);
+        text.setMultiLine (true, true);
+        text.setScrollbarsShown (true);
+        text.setText (report, false);
+        // v2.30 lesson: Font(FontOptions) is the JUCE 8 spelling;
+        // getDefaultMonospacedFontName keeps the report aligned.
+        text.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(),
+                                                     12.0f, juce::Font::plain)));
+        text.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff0e1522));
+        text.setColour (juce::TextEditor::textColourId,      juce::Colour (0xffdfe6f2));
+        addAndMakeVisible (text);
+
+        copyButton.setButtonText ("Copy to clipboard");
+        copyButton.onClick = [this]
+        {
+            juce::SystemClipboard::copyTextToClipboard (report);
+            copyButton.setButtonText ("Copied!");
+        };
+        addAndMakeVisible (copyButton);
+
+        closeButton.setButtonText ("Close");
+        closeButton.onClick = [this]
+        {
+            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+                dw->exitModalState (0);
+        };
+        addAndMakeVisible (closeButton);
+
+        setSize (620, 540);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (8);
+        auto buttons = area.removeFromBottom (28);
+
+        text.setBounds (area);
+        copyButton.setBounds (buttons.removeFromLeft (160));
+        closeButton.setBounds (buttons.removeFromRight (90));
+    }
+
+private:
+    juce::String report;
+    juce::TextEditor text;
+    juce::TextButton copyButton, closeButton;
+};
+} // namespace
+
+// v2.33 (roadmap idea 4): the logo click handler. The report is built on
+// the message thread (it takes the console-state and scan locks, which the
+// audio thread never holds), echoed to the Terminal, saved as a text file
+// next to the plugin database, and shown in a small NON-BLOCKING window
+// (modal loops are off in a plugin - JUCE_MODAL_LOOPS_PERMITTED=0). Every
+// failure posts an explicit status message instead of failing silently.
+void TheChannelStripAudioProcessorEditor::showDoctorReport()
+{
+    const juce::String report = proc.buildDoctorReport();
+
+    juce::Logger::writeToLog ("[TheChannelStrip] Doctor report:\n" + report);
+
+    const auto dest = proc.getAppDataDir().getChildFile ("doctor-report.txt");
+
+    if (! dest.getParentDirectory().createDirectory())
+        proc.logHostStatus ("ERROR: Doctor report folder could not be created: "
+                            + dest.getParentDirectory().getFullPathName());
+    else if (! dest.replaceWithText (report))
+        proc.logHostStatus ("ERROR: Doctor report could not be written: "
+                            + dest.getFullPathName());
+    else
+        proc.logHostStatus ("Doctor report saved: " + dest.getFullPathName());
+
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = "TheChannelStrip Doctor";
+    options.content.setOwned (new DoctorPanel (report));
+    options.componentToCentreAround = this;
+    options.dialogBackgroundColour = juce::Colour (0xff141a26);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
+}
+
+// v2.33: the logo's MouseListener - one click on the studio logo opens
+// the Doctor (see showDoctorReport).
+void TheChannelStripAudioProcessorEditor::LogoMouseListener::mouseDown (
+    const juce::MouseEvent&)
+{
+    if (owner != nullptr)
+        owner->showDoctorReport();
 }

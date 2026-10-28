@@ -227,6 +227,158 @@ juce::String TheChannelStripAudioProcessor::getChannelReadout() const
     }
 }
 
+// ---- v2.33 (roadmap idea 3): shell integrity readout ------------------------
+// Two compact sidebar lines for the editor's integrity bandeau. Everything
+// here is a fact of the fixed architecture or a cached atomic - the shell
+// never applies gain of its own (its audio path is exactly the hosted
+// console's output at unity), the crossfade state is a couple of atomic
+// loads in HostedStrip, the latency is the value already forwarded to the
+// host, and the sentinel is the licence-expired silence watch. Display-only:
+// no locks, no audio-thread involvement, one String allocation per call on
+// the UI timer.
+juce::String TheChannelStripAudioProcessor::getShellIntegrityLine() const
+{
+    const bool crossfadeActive = hostedStrip.isCrossfading();
+
+    const int latencySamples = juce::jmax (lastReportedLatency,
+                                           hostedStrip.getReportedLatency());
+
+    const bool sentinelFired = silenceWarned.load (std::memory_order_relaxed);
+
+    // NOTE: juce::String + juce::CharPointer_UTF8 is an ambiguous overload
+    // (AppleClang rejects it), so the literals stay plain "const char*" —
+    // the juce::String constructor from "const char*" already reads them
+    // as UTF-8, so the \xc2\xb7 escapes still render as middle dots.
+    return juce::String ("shell: unity \xc2\xb7 crossfade: ")
+         + (crossfadeActive ? "active" : "idle")
+         + "\nlatency: "
+         + juce::String (latencySamples)
+         + " \xc2\xb7 sentinel: "
+         + (sentinelFired ? "fired" : "armed");
+}
+
+// ---- v2.33 (roadmap idea 4): the Doctor report ------------------------------
+// Built on the message thread when the logo is clicked (the editor shows it
+// in a small window and writes it next to the plugin database). It gathers
+// everything a bug report or a support email would need, without touching
+// the audio thread: versions, host, wrapper, audio setup, the hosted
+// console, the integrity readout, the per-console scan summary, the preset
+// count, the last status message and the per-console remembered-state
+// sizes. The scan and console-state locks are taken only around what
+// needs them (getConsoleSlots takes scanLock internally and releases it).
+juce::String TheChannelStripAudioProcessor::buildDoctorReport()
+{
+    juce::String report;
+
+    report << "TheChannelStrip 2.33.0 - Doctor report\n"
+              "=====================================\n"
+           << "generated: "
+           << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
+           << "host: " << juce::PluginHostType().getHostDescription() << "\n"
+           << "wrapper: "
+           << juce::AudioProcessor::getWrapperTypeDescription (wrapperType) << "\n"
+           << "JUCE: " << juce::SystemStats::getJUCEVersion() << "\n"
+           << "\n"
+           << "audio:\n"
+           << "  sample rate: " << juce::String (juce::roundToInt (currentSampleRate))
+           << " Hz\n"
+           << "  block size: " << juce::String (currentBlockSize) << " samples\n"
+           << "  " << getChannelReadout() << "\n"
+           << "  measurements: "
+           << (measuringEnabled.load (std::memory_order_relaxed)
+                   ? "running (editor open)" : "paused (editor closed)") << "\n"
+           << "\n"
+           << "hosted console:\n";
+
+    if (auto* hosted = hostedStrip.getActivePlugin())
+    {
+        report << "  name: " << hosted->getName() << "\n"
+               << "  ident: "
+               << (currentPluginIdent.isEmpty() ? juce::String ("(not identified)")
+                                                : currentPluginIdent) << "\n"
+               << "  current preset: "
+               << (getCurrentPresetName().isEmpty() ? juce::String ("(none)")
+                                                     : getCurrentPresetName()) << "\n";
+    }
+    else
+    {
+        report << "  none\n";
+    }
+
+    report << "\n"
+           << "shell integrity:\n"
+           << "  " << getShellIntegrityLine().replace ("\n", "\n  ") << "\n"
+           << "  silence warnings total: "
+           << juce::String (silenceWarningCount.load (std::memory_order_relaxed))
+           << " (each hosted instance can fire at most once)\n"
+           << "\n"
+           << "plugin database:\n";
+
+    {
+        const juce::ScopedLock lock (scanLock);
+        report << "  " << juce::String (hostedStrip.getKnownPluginList().getTypes().size())
+               << " plugins known\n";
+    }
+
+    report << "  consoles:\n";
+
+    const auto slots = getConsoleSlots();
+
+    for (const auto& slot : slots)
+    {
+        if (slot.found && ! slot.fileMissing)
+            report << "  [found] " << slot.name << " - "
+                   << slot.desc.fileOrIdentifier << "\n";
+        else if (slot.fileMissing)
+            report << "  [file missing] " << slot.name << " - scanned at "
+                   << slot.desc.fileOrIdentifier
+                   << ", but that file no longer exists\n";
+        else if (slot.blacklisted)
+            report << "  [blacklisted] " << slot.name
+                   << " - crashed the plugin scanner (update or reinstall it)\n";
+        else
+            report << "  [not found] " << slot.name << "\n";
+    }
+
+    report << "\n"
+           << "presets: " << juce::String (getAvailablePresets().size())
+           << " on disk\n"
+           << "\n"
+           << "console memory (per-console remembered states):\n";
+
+    {
+        const juce::ScopedLock lock (consoleStateLock);
+
+        if (consoleStates.empty())
+        {
+            report << "  (empty - no console state remembered yet)\n";
+        }
+        else
+        {
+            juce::uint64 totalBytes = 0;
+
+            for (const auto& entry : consoleStates)
+                totalBytes += (juce::uint64) entry.second.getSize();
+
+            report << "  " << juce::String (consoleStates.size()) << " entries, "
+                   << juce::String (totalBytes) << " bytes total\n";
+
+            for (const auto& entry : consoleStates)
+                report << "  " << entry.first << ": "
+                       << juce::String ((juce::uint64) entry.second.getSize())
+                       << " bytes\n";
+        }
+    }
+
+    const auto status = getHostStatus();
+
+    report << "\n"
+           << "last status message:\n"
+           << "  " << (status.isEmpty() ? juce::String ("(none)") : status) << "\n";
+
+    return report;
+}
+
 void TheChannelStripAudioProcessor::restoreStereoLayout (juce::AudioProcessor& plugin)
 {
     plugin.releaseResources();
@@ -750,7 +902,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.32.0");
+    xml->setAttribute ("version", "2.33.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1067,7 +1219,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.32.0");
+    xml->setAttribute ("version", "2.33.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1866,7 +2018,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.32.0");
+    xml->setAttribute ("version", "2.33.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
