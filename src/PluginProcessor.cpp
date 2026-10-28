@@ -297,7 +297,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.35.0 - Doctor report\n"
+    report << "TheChannelStrip 2.36.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -607,12 +607,11 @@ void TheChannelStripAudioProcessor::watchHostedSilence (int numSamples)
             silenceWarned.store (true, std::memory_order_relaxed);
             silenceWarningCount.fetch_add (1, std::memory_order_relaxed);
 
-            // v2.35.0: compact on purpose - the sidebar status zone is
-            // four lines wide, and the hosted console's name is already
-            // displayed right above it (zero redundancy).
+            // v2.35.0/v2.36.0: compact on purpose - the sidebar alarm
+            // zone is three lines wide, and the hosted console's name
+            // is displayed right above it (zero redundancy).
             logHostStatus ("WARNING: the console produces no output"
-                           " - licence expired or unauthorised?"
-                           " Open its interface to check.");
+                           " - licence expired? Open it.");
         }
     }
     else
@@ -710,7 +709,7 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     // silent no-op. Three distinct situations, three distinct messages.
     if (slot.blacklisted)
     {
-        // v2.35.0: short label + action first - the zone is four lines.
+        // v2.35.0/v2.36.0: short label + action first - three lines.
         logHostStatus ("'" + consoleLabel (consoleIndex)
                        + "' crashed the scanner - blacklisted."
                          " Press Rescan after updating it.");
@@ -732,7 +731,7 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     if (! slot.found)
     {
         logHostStatus ("'" + consoleLabel (consoleIndex)
-                       + "' was not found in the scanned VST3 folders."
+                       + "' was not found in VST3 folders."
                          " Press Rescan after installing it.");
         return;
     }
@@ -936,7 +935,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.35.0");
+    xml->setAttribute ("version", "2.36.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1253,7 +1252,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.35.0");
+    xml->setAttribute ("version", "2.36.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2052,7 +2051,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.35.0");
+    xml->setAttribute ("version", "2.36.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

@@ -354,6 +354,7 @@ private:
     // v2.3: right settings column heading and the hosted-plugin name
     // shown in the left sidebar (under the console buttons).
     juce::Label gainLabel;
+    juce::Label analyserLabel;
     juce::Label hostedNameLabel;
     // v2.34: the merged status block under the hosted console's name -
     // one label, two lines ("track: stereo · crossfade: idle" /

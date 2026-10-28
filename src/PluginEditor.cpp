@@ -1388,6 +1388,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     gainLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
     addAndMakeVisible (gainLabel);
 
+    // v2.36.0: the ANALYSER heading labels the display block (spectrum
+    // toggle, response speed, tilt) under the masthead - same style as
+    // the GAIN STAGING / PRESETS headings.
+    analyserLabel.setText ("ANALYSER", juce::dontSendNotification);
+    analyserLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    analyserLabel.setJustificationType (juce::Justification::centred);
+    analyserLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+    addAndMakeVisible (analyserLabel);
+
     hostedNameLabel.setText ("--", juce::dontSendNotification);
     hostedNameLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     hostedNameLabel.setJustificationType (juce::Justification::centred);
@@ -1405,13 +1414,16 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // (what the host feeds this instance, and why a mono track is
     // bridged: "refused", a next-best layout like "2/2", or "multi-bus")
     // plus the crossfade on line one, the forwarded latency plus the
-    // silence sentinel on line two. v2.35.0: the zone is four lines
+    // silence sentinel on line two. v2.35.0/v2.36.0: the zone is three
     // tall now - an actionable alert (missing/blacklisted console,
     // ERROR:, WARNING:) takes it over, coloured, until resolved; the
     // bottom status area is gone ("shell: unity" never changes and
     // lives in the Doctor report only).
     integrityLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
-    integrityLabel.setJustificationType (juce::Justification::centred);
+    // v2.36.0 (Clement): top-anchored - the two integrity lines hug the
+    // console name right above; the spare line stays below, out of
+    // sight, as headroom for a longer alert.
+    integrityLabel.setJustificationType (juce::Justification::centredTop);
     integrityLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
     helpTexts[&integrityLabel] =
         "Status: the channel format the host gives this instance and the "
@@ -1860,45 +1872,19 @@ void TheChannelStripAudioProcessorEditor::resized()
     titleLabel.setBounds (sideX, y, sw, 32);
     y += 38;
 
-    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
-    //      global preset list, then one row of three icon buttons).
-    //      v2.29: it moved to the TOP, right under the shell's title -
-    //      presets are the most-used controls, and the section reads
-    //      best above the console buttons. ----
-    presetLabel.setBounds (sideX, y, sw, 15);
+    // ---- v2.36.0 (Clement's design): the sidebar reads as one column
+    //      of modules, top to bottom - masthead, monitoring, console,
+    //      maintenance. The frame-free monochrome logo sits right under
+    //      the shell's title: the signature anchors the column, and a
+    //      click still opens the contact card. ----
+    studioLogo.setBounds (sideX, y + 2, sw, 58);
+    y += 58 + 6;
+
+    // ---- v2.36.0: the ANALYSER heading labels the display block
+    //      (spectrum toggle, response speed, tilt), same style as the
+    //      GAIN STAGING / PRESETS headings. ----
+    analyserLabel.setBounds (sideX, y, sw, 15);
     y += 17;
-
-    presetCombo.setBounds (sideX, y, sw, 22);
-    y += 26;
-
-    // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
-    // save, bin = delete, tray with the incoming arrow = load).
-    // v2.30: the "?" help button takes the 4th slot and enters the
-    // interactive help mode.
-    savePresetButton.setBounds   (sideX,       y, 30, 22);
-    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
-    importPresetButton.setBounds (sideX + 66,  y, 30, 22);
-    helpButton.setBounds         (sideX + 99,  y, 30, 22);
-    y += 22 + 8;
-
-    for (size_t i = 0; i < consoleButtons.size(); ++i)
-    {
-        consoleButtons[i].setBounds (sideX, y, sw, 28);
-        y += 28 + 5;
-    }
-
-    y += 2;
-    hostedNameLabel.setBounds (sideX, y, sw, 24);
-    y += 26;
-
-    // v2.35.0: ONE merged status zone, four lines tall, right under the
-    // console name - the two-line integrity readout normally, an
-    // actionable alert (missing/blacklisted console, ERROR:, WARNING:)
-    // taking it over until resolved. The v2.34 bottom status area is
-    // gone: console name and latency live here exactly once, and
-    // hosting chatter lives in the Doctor report.
-    integrityLabel.setBounds (sideX, y, sw, 53);
-    y += 57;
 
     // ---- v2.34.1 (Clement's suggestion): the display toggle rides at
     //      the top of the section, above Fast/Slow - a wide icon button
@@ -1937,12 +1923,49 @@ void TheChannelStripAudioProcessorEditor::resized()
     correctionLabel.setBounds (sideX, y, sw, 26);
     y += 30;
 
-    // ---- v2.35.0 (Clement's design, decided together): the frame-free
-    //      monochrome logo (pure white design on transparency - the
-    //      v2.34.1 baked frame is gone, it cut into the drawing) rides
-    //      ALONE in its own band pinned at the bottom of the sidebar,
-    //      just above the Rescan row, slightly taller than before. ----
-    studioLogo.setBounds (sideX, h - m - 26 - 12 - 58, sw, 58);
+    // ---- v2.26 (roadmap point 4): the presets section (a heading, the
+    //      global preset list, then one row of icon buttons).
+    //      v2.36.0 (Clement's design): it moved under the monitoring
+    //      block, grouped with the consoles a preset belongs to. ----
+    presetLabel.setBounds (sideX, y, sw, 15);
+    y += 17;
+
+    presetCombo.setBounds (sideX, y, sw, 22);
+    y += 26;
+
+    // v2.29: one row of three 30 px icon buttons, 3 px apart (floppy =
+    // save, bin = delete, tray with the incoming arrow = load).
+    // v2.30: the "?" help button takes the 4th slot and enters the
+    // interactive help mode.
+    savePresetButton.setBounds   (sideX,       y, 30, 22);
+    deletePresetButton.setBounds (sideX + 33,  y, 30, 22);
+    importPresetButton.setBounds (sideX + 66,  y, 30, 22);
+    helpButton.setBounds         (sideX + 99,  y, 30, 22);
+    y += 22 + 8;
+
+    for (size_t i = 0; i < consoleButtons.size(); ++i)
+    {
+        consoleButtons[i].setBounds (sideX, y, sw, 28);
+        y += 28 + 5;
+    }
+
+    // ---- v2.36.0 (Clement's design): the console name and its alarm
+    //      zone close the working stack right above the Rescan row - a
+    //      "Press Rescan" alert lands next to the button that answers
+    //      it. The block is condensed: name 20 px, alarm zone three
+    //      lines, text anchored top so the integrity readout hugs the
+    //      console name. ----
+    y += 2;
+    hostedNameLabel.setBounds (sideX, y, sw, 20);
+    y += 22;
+
+    // v2.35.0: ONE merged status zone - the two-line integrity readout
+    // normally, an actionable alert (missing/blacklisted console,
+    // ERROR:, WARNING:) taking it over until resolved; console name and
+    // latency live here exactly once, hosting chatter lives in the
+    // Doctor report. v2.36.0: condensed from four lines to three.
+    integrityLabel.setBounds (sideX, y, sw, 40);
+    y += 44;
 
     // v2.6: Rescan is the only control pinned at the bottom (the bypass
     // button is gone). v2.34: the Doctor's heartbeat icon rides the same
@@ -2021,6 +2044,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.33: the shell integrity bandeau -> 1003 / 823.
     // v2.34: zone A rework -> 890 / 710.
     // v2.35.0: merged status zone + bottom logo band -> 1000 / 810.
+    // v2.36.0: sidebar module re-order, same vertical budget (logo
+    // moved under the title; bottom band gone) -> 1000 / 810.
     const int newH = juce::jlimit (showStrip ? 1000 : 810, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
@@ -2036,7 +2061,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 1000 : 810, 2560, 1600); // v2.35.0: taller zone + bottom logo
+    setResizeLimits (1024, show ? 1000 : 810, 2560, 1600); // v2.35/v2.36: taller zone + logo row
     resized();
 
     if (embeddedHostedEditor != nullptr)
