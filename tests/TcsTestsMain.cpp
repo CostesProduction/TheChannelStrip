@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.34.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.34.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1408,7 +1408,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.34.0");
+        session->setAttribute ("version", "2.34.1");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1574,7 +1574,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.34.0");
+    session->setAttribute ("version", "2.34.1");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -1797,8 +1797,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.34.0",
-                "saved state carries the current version tag (2.34.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.34.1",
+                "saved state carries the current version tag (2.34.1)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2136,7 +2136,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.34.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.34.1"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -2217,6 +2217,17 @@ void testSidebarStatusLines()
                 "the silence sentinel starts armed");
     expectTrue (! lines.contains ("shell: unity"),
                 "the constant unity fact moved to the Doctor report only");
+
+    // v2.34.1 (mojibake fix): the separator must be a real UTF-8 middle
+    // dot. juce::String (const char*) reads ASCII (one codepoint per
+    // byte above 127), which garbled every accent and made the dots read
+    // as two glyphs since v2.33 - the fix routes the literals through
+    // the direct String (CharPointer_UTF8 (...)) constructor, and these
+    // asserts pin that.
+    expectTrue (lines.contains (juce::String (juce::CharPointer_UTF8 ("\xc2\xb7"))),
+                "the separator is a real UTF-8 middle dot");
+    expectTrue (! lines.contains (juce::String (juce::CharPointer_UTF8 ("\xc3\x82"))),
+                "no Latin-1 mojibake glyph in the status lines");
 
     // a hosted console's latency reaches the merged block
     auto mock = std::make_unique<MockConsole> (true);
@@ -2788,7 +2799,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.34.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.34.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

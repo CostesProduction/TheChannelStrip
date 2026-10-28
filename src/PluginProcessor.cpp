@@ -245,15 +245,22 @@ juce::String TheChannelStripAudioProcessor::getShellIntegrityLine() const
 
     const bool sentinelFired = silenceWarned.load (std::memory_order_relaxed);
 
-    // NOTE: juce::String + juce::CharPointer_UTF8 is an ambiguous overload
-    // (AppleClang rejects it), so the literals stay plain "const char*" —
-    // the juce::String constructor from "const char*" already reads them
-    // as UTF-8, so the \xc2\xb7 escapes still render as middle dots.
-    return juce::String ("shell: unity \xc2\xb7 crossfade: ")
+    // NOTE (v2.34.1, fixes the mojibake seen in the contact card):
+    // juce::String (const char*) does NOT read UTF-8 in JUCE 8 - it goes
+    // through CharPointer_ASCII, which turns every byte above 127 into
+    // its own codepoint, so the \xc2\xb7 escapes showed as two glyphs
+    // (that is also why the sidebar separators read mojibake since v2.33).
+    // juce::CharPointer_UTF8 itself cannot be used with operator+ either
+    // (ambiguous overload under AppleClang, the v2.33.0 build error).
+    // The one clean path for literals holding non-ASCII bytes is the
+    // direct String (CharPointer_UTF8 (...)) constructor: it decodes
+    // UTF-8 explicitly and returns a real String, safe to concatenate
+    // (this is the form the JUCE docs themselves recommend).
+    return juce::String (juce::CharPointer_UTF8 ("shell: unity \xc2\xb7 crossfade: "))
          + (crossfadeActive ? "active" : "idle")
          + "\nlatency: "
          + juce::String (latencySamples)
-         + " \xc2\xb7 sentinel: "
+         + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 sentinel: "))
          + (sentinelFired ? "fired" : "armed");
 }
 
@@ -262,17 +269,18 @@ juce::String TheChannelStripAudioProcessor::getShellIntegrityLine() const
 // integrity bandeau: same atomics, zero redundancy between the sidebar
 // areas. The "shell: unity" fact never changes (the shell's audio path
 // IS the console's output at unity) so it moved to the Doctor report
-// alone. Same plain-"const char*" lesson as above: no
-// juce::CharPointer_UTF8 concatenation.
+// alone. Non-ASCII separators go through the String (CharPointer_UTF8)
+// constructor - see the NOTE in getShellIntegrityLine above (the
+// v2.34.1 mojibake fix).
 juce::String TheChannelStripAudioProcessor::getSidebarStatusLines() const
 {
     return getChannelReadout()
-         + " \xc2\xb7 crossfade: "
+         + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 crossfade: "))
          + (hostedStrip.isCrossfading() ? "active" : "idle")
          + "\nlatency: "
          + juce::String (juce::jmax (lastReportedLatency,
                                      hostedStrip.getReportedLatency()))
-         + " \xc2\xb7 sentinel: "
+         + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 sentinel: "))
          + (silenceWarned.load (std::memory_order_relaxed) ? "fired" : "armed");
 }
 
@@ -289,7 +297,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.34.0 - Doctor report\n"
+    report << "TheChannelStrip 2.34.1 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -921,7 +929,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.34.0");
+    xml->setAttribute ("version", "2.34.1");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1238,7 +1246,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.34.0");
+    xml->setAttribute ("version", "2.34.1");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2037,7 +2045,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.34.0");
+    xml->setAttribute ("version", "2.34.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

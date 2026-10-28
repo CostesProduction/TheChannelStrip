@@ -379,7 +379,7 @@ private:
     // v2.26.1: the icon look-and-feels MUST be declared before the
     // buttons they are attached to, so they are destroyed after them.
     // v2.34: a 4th slot draws the Doctor's heartbeat trace.
-    std::array<std::unique_ptr<juce::LookAndFeel>, 4> presetButtonLaFs;
+    std::array<std::unique_ptr<juce::LookAndFeel>, 5> presetButtonLaFs;
     juce::Label presetLabel;
     juce::ComboBox presetCombo;
     juce::TextButton savePresetButton;
@@ -447,7 +447,10 @@ private:
     // v2.8: the "Display" toggle that hides or shows the analyser strip.
     // (v2.12: the SCALE dB/DIV and EQ dB/DIV button rows are gone - the
     // scales are toggled by clicking the analyser's own scale labels.)
-    juce::ToggleButton analyserToggle { "Display" };         // show/hide the analyser strip
+    // v2.34.1 (Clement's suggestion): the "Display" text toggle became a
+    // wide icon button (a small spectrum glyph, tilt-button height) that
+    // sits at the top of the section, above Fast/Slow.
+    juce::TextButton analyserToggle;          // show/hide the analyser strip
 
     SpectrumPanel spectrumPanel;
 

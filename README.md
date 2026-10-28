@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.34.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.34.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -142,8 +142,8 @@ them in a clean, focused workflow:
   and the hosted plugin itself. The **window auto-fits the hosted editor**
   once it is embedded (and re-fits when you switch consoles, since their
   GUI sizes differ): the analyzer strip gets the plugin's full width and
-  nothing needs to scroll. The window stays resizable (1024×890 minimum
-  with the analyzer shown, 1024×710 with it hidden;
+  nothing needs to scroll. The window stays resizable (1024×970 minimum
+  with the analyzer shown, 1024×790 with it hidden;
   below the auto-fit size the viewport simply scrolls again).
 - **Latency forwarding** — the hosted plugin's reported latency is passed
   on to the DAW, and re-forwarded whenever the plugin changes it at
@@ -283,6 +283,40 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.34.1**
+  - **Text encoding fixed everywhere (mojibake).** The accents of the
+    contact card ("Clément", "Ingénieur") came out garbled, and the
+    investigation revealed a wider, older flaw: `juce::String (const
+    char*)` does **not** read UTF-8 in JUCE 8 — it decodes one codepoint
+    per byte, so the middle-dot separators of the status lines had
+    actually been rendering as two glyphs since v2.33. Every literal
+    holding non-ASCII bytes now goes through `juce::String::fromUTF8`
+    (the one clean path: `CharPointer_UTF8` cannot be concatenated with
+    `operator+` under AppleClang), and the test harness pins the real
+    UTF-8 separator and the absence of mojibake glyphs.
+  - **Studio logo redesigned for the dark shell (Clement's design).**
+    The sidebar shows a **monochrome variant** of the Costes logo: only
+    the black design of the original (the waveform and the COSTES
+    lettering) kept, turned white — the same colour as the shell's text —
+    with the beige background made transparent and a rounded outer frame
+    baked in, so the badge integrates with the dark palette instead of
+    sitting on it as a beige patch. The logo sits in its own band below
+    the gain-staging section as before v2.34, rendered at 75% of the
+    old size (50 px instead of 66). Clicking it still opens the contact
+    card.
+  - **"Add +X dB" readout restored.** The v2.34 squeeze into the logo
+    column clipped the main gain-staging readout out of sight; it is
+    back exactly as it was — full sidebar width, one big cyan line
+    under the IN/OUT readouts.
+  - **"Display" became an icon button (Clement's suggestion).** The
+    analyser show/hide control is now a wide button with a small
+    spectrum-analyser glyph (four bars), the height of the tilt buttons
+    and styled like the other console buttons — blue when the strip is
+    shown — sitting at the top of the section, just above Fast/Slow.
+  - Window heights follow the restored logo band: the auto-fit drops
+    in at 970 (analyzer shown) / 790 (hidden), minimum 1024×970 /
+    1024×790.
 
 - **2.34.0**
   - **Sidebar zone A rework: preset marquee.** Long preset names

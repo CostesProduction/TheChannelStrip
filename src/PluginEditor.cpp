@@ -29,7 +29,7 @@ namespace
     class PresetButtonLookAndFeel : public juce::LookAndFeel_V4
     {
     public:
-        enum class Icon { floppy, trash, importIn, pulse };
+        enum class Icon { floppy, trash, importIn, pulse, spectrum };
 
         explicit PresetButtonLookAndFeel (Icon iconToDraw) : icon (iconToDraw) {}
 
@@ -116,11 +116,31 @@ namespace
                     path.lineTo (p (10.5f, 6.5f));
                     path.lineTo (p (14, 6.5f));
                     break;
+
+                case Icon::spectrum:
+                {
+                    // v2.34.1 (Clement's suggestion): the analyser display
+                    // toggle - four filled bars reading as a spectrum
+                    // analyser, no text needed
+                    const float barX[4]   = { 1.5f, 4.7f, 7.9f, 11.1f };
+                    const float barTop[4] = { 9.0f, 5.0f, 2.0f, 6.0f };
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        const auto topLeft = p (barX[i], barTop[i]);
+                        path.addRectangle (topLeft.x, topLeft.y,
+                                           2.0f * scale,
+                                           (13.0f - barTop[i]) * scale);
+                    }
+                    break;
+                }
             }
 
-            g.strokePath (path, juce::PathStrokeType (1.6f,
-                                                      juce::PathStrokeType::curved,
-                                                      juce::PathStrokeType::rounded));
+            if (icon == Icon::spectrum)
+                g.fillPath (path);   // bars, not strokes
+            else
+                g.strokePath (path, juce::PathStrokeType (1.6f,
+                                                          juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
         }
 
     private:
@@ -1322,9 +1342,12 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // -> 1003 / 823.
     // v2.34: zone A rework (channel readout merged into the status
     // block, logo halved into the gain zone's right column) -> 890 / 710.
-    setSize (1180, 890);
+    // v2.34.1: back by request - full-width gain rows with the big
+    // correction readout, and the logo in its own band again (now the
+    // monochrome variant at 50 px) -> 970 / 790.
+    setSize (1180, 970);
     setResizable (true, false);
-    setResizeLimits (1024, proc.getAnalyserVisible() ? 890 : 710, 2560, 1600);
+    setResizeLimits (1024, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -1334,14 +1357,12 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
     addAndMakeVisible (titleLabel);
 
-    // v2.34: the gain-staging readouts live in the LEFT part of the
-    // gain zone (the logo took the right side), so IN/OUT dropped from
-    // the old 12 pt row to 10 pt to keep "-14.2 LUFS" readable in the
-    // narrower column. The correction readout keeps its own style
-    // below.
-    for (auto* label : { &lufsInLabel, &lufsOutLabel })
+    // v2.34.1: the readouts are back to full sidebar width (the logo
+    // moved back to its own band below the section, see below), so the
+    // original 12 pt row returns.
+    for (auto* label : { &lufsInLabel, &lufsOutLabel, &correctionLabel })
     {
-        label->setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+        label->setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
         label->setJustificationType (juce::Justification::centred);
         label->setColour (juce::Label::textColourId, juce::Colour (0xffdfe6f2));
         addAndMakeVisible (*label);
@@ -1392,11 +1413,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // display went back to an action at Clement's request), now with an
     // explicit "Add" prefix: "Add +0.7 dB" = raise the output by 0.7 dB
     // to match the input loudness; "Add -0.4 dB" = lower it by 0.4 dB.
-    // v2.34: the readout moved UNDER the halved logo (zone A rework),
-    // so it shrinks to 11 pt and splits on two lines ("Add" /
-    // "+0.7 dB") to fit the narrow right column.
+    // v2.34.1: back to the full-width single-line readout under the
+    // IN/OUT rows - the v2.34 squeeze into the logo column clipped it
+    // out of sight, and Clement wants his main readout back as it was.
     correctionLabel.setColour (juce::Label::textColourId, juce::Colour (0xff54c8e8));
-    correctionLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    correctionLabel.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
     correctionLabel.setJustificationType (juce::Justification::centred);
     // v2.31 (remark 1): the correction's explanation moved into the
     // help-mode texts too - no standing tooltip any more.
@@ -1407,10 +1428,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         "means lower it by 0.4 dB.";
 
     // v2.17: Clement's studio logo, embedded as a binary resource so the
-    // plugin is fully self-contained. ImageComponent scales it to the
-    // sidebar width, preserving the aspect ratio (never upscaling).
-    studioLogo.setImage (juce::ImageCache::getFromMemory (BinaryData::CostesLogo_png,
-                                                           BinaryData::CostesLogo_pngSize),
+    // plugin is fully self-contained. v2.34.1 (Clement's design): the
+    // sidebar now shows a MONOCHROME variant - only the black design of
+    // the original kept and turned white, the beige background made
+    // transparent, and a rounded outer frame baked in, so the logo sits
+    // in the shell's palette instead of a beige patch. Same ImageComponent
+    // placement as always: centred, aspect ratio preserved, never
+    // upscaled.
+    studioLogo.setImage (juce::ImageCache::getFromMemory (BinaryData::CostesLogoMono_png,
+                                                           BinaryData::CostesLogoMono_pngSize),
                          juce::RectanglePlacement (juce::RectanglePlacement::centred
                                                    | juce::RectanglePlacement::onlyReduceInSize));
     addAndMakeVisible (studioLogo);
@@ -1496,6 +1522,8 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     presetButtonLaFs[2] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::importIn);
     // v2.34: the 4th icon look-and-feel draws the Doctor's heartbeat.
     presetButtonLaFs[3] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::pulse);
+    // v2.34.1: the 5th draws the analyser display toggle's spectrum bars.
+    presetButtonLaFs[4] = std::make_unique<PresetButtonLookAndFeel> (PresetButtonLookAndFeel::Icon::spectrum);
 
     savePresetButton.setLookAndFeel    (presetButtonLaFs[0].get());
     deletePresetButton.setLookAndFeel  (presetButtonLaFs[1].get());
@@ -1727,6 +1755,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     spectrumPanel.setEqDbPerDiv (proc.getEqDbDiv() > 3.0f ? 4.0f : 2.0f);
 
     // ---- v2.8: show/hide the analyser strip ----
+    // v2.34.1 (Clement's suggestion): the old "Display" text toggle
+    // became a wide icon button - a small spectrum glyph, the height of
+    // the tilt buttons - styled like the other console buttons. Same
+    // toggle behaviour: blue when the analyser strip is shown.
+    analyserToggle.setLookAndFeel (presetButtonLaFs[4].get());
+    styleConsoleButton (analyserToggle);
+    analyserToggle.setClickingTogglesState (true);
     // v2.31 (remark 1): help text in the help-mode map, not a tooltip.
     helpTexts[&analyserToggle] =
         "Show or hide the analyser strip (the window re-fits).";
@@ -1851,6 +1886,12 @@ void TheChannelStripAudioProcessorEditor::resized()
     integrityLabel.setBounds (sideX, y, sw, 26);
     y += 30;
 
+    // ---- v2.34.1 (Clement's suggestion): the display toggle rides at
+    //      the top of the section, above Fast/Slow - a wide icon button
+    //      with a small spectrum glyph, no text. ----
+    analyserToggle.setBounds (sideX, y, sw, 22);
+    y += 22 + 8;
+
     // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
     for (size_t j = 0; j < speedButtons.size(); ++j)
         speedButtons[j].setBounds (sideX + (int) j * 68, y, 64, 22);
@@ -1868,25 +1909,30 @@ void TheChannelStripAudioProcessorEditor::resized()
     // (v2.12: the SCALE dB/DIV and EQ dB/DIV rows are gone - those
     // scales are toggled by clicking the analyser's own scale labels.)
 
-    // ---- v2.8: analyser display toggle ----
-    analyserToggle.setBounds (sideX, y, sw, 22);
-    y += 22 + 10;
+    // ---- v2.34.1 (zone A, back by request): the gain-staging block is
+    //      full-width again - IN/OUT rows, then the big single-line
+    //      correction readout under them. ----
+    gainLabel.setBounds (sideX, y, sw, 15);
+    y += 17;
 
-    // ---- v2.34 (zone A rework): the gain-staging block shares its rows
-    // with the studio logo, as Clement mocked up: the IN/OUT readouts on
-    // the left, the logo (half its old square size) in the top-right
-    // corner, and the correction readout UNDER the logo. The logo no
-    // longer owns a full-width row between the gain section and the
-    // status area, which is what made the old sidebar so tall. ----
-    gainLabel.setBounds (sideX, y, sw - 46, 15);
-    studioLogo.setBounds (sideX + sw - 36, y - 2, 34, 34);
+    lufsInLabel.setBounds  (sideX, y, sw, 19);
+    y += 19;
+    lufsOutLabel.setBounds (sideX, y, sw, 19);
+    y += 21;
 
-    lufsInLabel.setBounds  (sideX, y + 17, sw - 46, 19);
-    lufsOutLabel.setBounds (sideX, y + 36, sw - 46, 19);
+    correctionLabel.setBounds (sideX, y, sw, 26);
+    y += 30;
 
-    correctionLabel.setBounds (sideX + sw - 46, y + 34, 46, 30);
-
-    y += 68;
+    // ---- v2.34.1 (Clement's design): the studio logo sits in its own
+    //      band below the gain section, as before v2.34 - now the
+    //      monochrome variant (white design, transparent background,
+    //      rounded frame) at 75% of the old 66 px render, so it
+    //      integrates with the shell's dark palette. ----
+    {
+        const int logoH = 50;
+        studioLogo.setBounds (sideX, y + 4, sw, logoH);
+        y += logoH + 10;
+    }
 
     statusLabel.setBounds (sideX, y, sw, juce::jmax (16, h - m - y - 32));
 
@@ -1966,7 +2012,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.26.1: presets section now one icon row -> 973 / 793.
     // v2.33: the shell integrity bandeau -> 1003 / 823.
     // v2.34: zone A rework -> 890 / 710.
-    const int newH = juce::jlimit (showStrip ? 890 : 710, 1600, targetH);
+    // v2.34.1: logo band back + full-width gain rows -> 970 / 790.
+    const int newH = juce::jlimit (showStrip ? 970 : 790, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -1981,7 +2028,7 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
     const bool show = proc.getAnalyserVisible();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (1024, show ? 890 : 710, 2560, 1600); // v2.34: zone A rework
+    setResizeLimits (1024, show ? 970 : 790, 2560, 1600); // v2.34.1: logo band back
     resized();
 
     if (embeddedHostedEditor != nullptr)
@@ -2175,7 +2222,7 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     // column, so it breaks after "Add" - two short lines instead of
     // one clipped one.
     correctionLabel.setText (correctionEverValid
-                                 ? juce::String ("Add\n") + (smoothedCorrectionDb >= 0.0f ? "+" : "")
+                                 ? juce::String ("Add ") + (smoothedCorrectionDb >= 0.0f ? "+" : "")
                                        + juce::String (smoothedCorrectionDb, 1) + " dB"
                                  : "-- dB",
                              juce::dontSendNotification);
@@ -2772,17 +2819,21 @@ class ContactPanel final : public juce::Component
 public:
     ContactPanel()
     {
-        titleLabel.setText ("Clément Costes - Costes Production",
+        // v2.34.1: juce::String (const char*) reads ASCII, not UTF-8,
+        // which is what garbled the accents in the first build - the
+        // literals holding non-ASCII bytes must go through the direct
+        // String (CharPointer_UTF8 (...)) constructor.
+        titleLabel.setText (juce::String (juce::CharPointer_UTF8 ("Clément Costes - Costes Production")),
                             juce::dontSendNotification);
         titleLabel.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
         titleLabel.setJustificationType (juce::Justification::centred);
         titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
         addAndMakeVisible (titleLabel);
 
-        frLabel.setText ("Ingénieur son : prise de son, mixage & mastering.\n"
-                         "Studio acoustiquement traité à Nantes + studio mobile"
-                         " partout en France.\n"
-                         "Certifié DJ Network 2022 - Ingénieur Centrale Nantes.",
+        frLabel.setText (juce::String (juce::CharPointer_UTF8 ("Ingénieur son : prise de son, mixage & mastering.\n"
+                                                "Studio acoustiquement traité à Nantes + studio mobile"
+                                                " partout en France.\n"
+                                                "Certifié DJ Network 2022 - Ingénieur Centrale Nantes.")),
                          juce::dontSendNotification);
         frLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
         frLabel.setJustificationType (juce::Justification::centred);
