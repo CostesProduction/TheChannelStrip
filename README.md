@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.42.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.42.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -138,7 +138,7 @@ them in a clean, focused workflow:
   its small low bias), gated to ignore silence: it needs ~1 s of signal to
   appear, holds through short gaps, and falls back to "--" after 3 s of
   silence. You apply it by hand on the hosted plugin's own output knob.
-  The label itself repaints at a calm 2 Hz with a 0.2 dB deadband, so a
+  The label itself repaints at a calm 1 Hz with a 0.2 dB deadband, so a
   settled value never flutters between two adjacent digits - it only
   moves when the correction genuinely drifts.
 - **Embedded hosted UI** — the hosted plugin's own editor is embedded in a
@@ -300,6 +300,14 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.42.2**
+  - **1 Hz readout (Clement's call).** The calm-correction cadence of
+    2.42.1 settles at **1 Hz** instead of 2 Hz: sound is dynamic and the
+    delta does move, so let those real changes come slowly - at most one
+    visible change per second, still under the 0.2 dB deadband (which
+    stays the part that kills the rounding flutter). A genuine drift now
+    shows within a second instead of half a second. One-constant change,
+    display-only.
 - **2.42.1**
   - **A calm correction readout.** The "Add x dB" label flutters between
     two adjacent values ("3.2" / "3.1" / ...) when the 30 Hz editor timer

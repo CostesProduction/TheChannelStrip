@@ -1480,7 +1480,7 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     }
 
     // v2.42.1: the correction label starts at "-- dB"; from then on it is
-    // the only writer of that text (refreshLufs), under the 2 Hz / 0.2 dB
+    // the only writer of that text (refreshLufs), under the 1 Hz / 0.2 dB
     // cadence+deadband gate.
     correctionLabel.setText ("-- dB", juce::dontSendNotification);
 
@@ -2377,15 +2377,17 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     // two adjacent display values when the 30 Hz timer reformats the
     // label every tick ("Add 3.2" / "Add 3.1" / ...). Lowering the frame
     // rate alone would only slow the flutter down; the fix is a CADENCE
-    // plus a DEADBAND. The label reconsiders its text at 2 Hz and only
-    // repaints when the value moved at least 0.2 dB from what it shows -
-    // a band the +/-0.05 dB rounding flutter can never cross. On steady
-    // material the readout is frozen; a genuine drift (the console's
-    // compression riding the song) shows within half a second. A
+    // plus a DEADBAND. The label reconsiders its text at 1 Hz (v2.42.2,
+    // Clement's preference: sound is dynamic, the delta does move - so
+    // let those real changes come slowly, at most once a second) and
+    // only repaints when the value moved at least 0.2 dB from what it
+    // shows - a band the +/-0.05 dB rounding flutter can never cross.
+    // On steady material the readout is frozen; a genuine drift (the
+    // console's compression riding the song) shows within a second. A
     // validity flip always bypasses the gate, so a console going silent
     // never lingers on a stale number. The meter itself still updates
     // at the 10 Hz hop rate - invisible, free, and it feeds the average.
-    constexpr int correctionDisplayTicks = 15;      // the 30 Hz timer -> 2 Hz
+    constexpr int correctionDisplayTicks = 30;      // the 30 Hz timer -> 1 Hz
     constexpr float correctionDeadbandDb = 0.2f;
 
     if (valid)

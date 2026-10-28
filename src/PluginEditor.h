@@ -416,8 +416,9 @@ private:
 
     // v2.42.1 (Clement's remark): a settled average still flutters between
     // two adjacent display values when the 30 Hz timer reformats the label
-    // every tick. The readout now updates at a calm 2 Hz cadence and only
-    // when the value actually moved (0.2 dB deadband) - see refreshLufs.
+    // every tick. The readout now updates at a calm 1 Hz cadence (v2.42.2,
+    // his preference) and only when the value actually moved (0.2 dB
+    // deadband) - see refreshLufs.
     // (v2.1-v2.41 kept an editor-side 1.5 s dB EMA here; v2.42 moved the
     // smoothing into the meters - see LufsMeter - so the editor only
     // formats the value.)
