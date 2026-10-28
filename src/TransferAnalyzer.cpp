@@ -247,49 +247,42 @@ void TransferAnalyzer::compute()
         emaSxyIm[bi] += crossEmaAlpha * (sim - emaSxyIm[bi]);
     }
 
-    // v2.43 pass 2: the outputs are computed from the FREQUENCY-
-    // SMOOTHED accumulators (see smoothTapWeights in the header).
-    // Because ALL the EMAs were just updated by the same frame, every
+    // v2.44.0 pass 2: the outputs are computed from the FREQUENCY-
+    // SMOOTHED accumulators (see smoothCoeffs in the header). Because
+    // ALL the EMAs were just updated by the same frame, every
     // neighbour is at the same temporal state: the kernel averages
     // estimates of the SAME instant, so no temporal lag is added. The
-    // clamped index replicates the edge bands and the weight sum stays
-    // a constant 16 per pass, and H = Sxy/Sxx + g2 are ratios: the
-    // pass scale cancels in both (it is kept so the smoothed spectra
-    // stay on the physical scale of the accumulators).
+    // clamped index replicates the edge bands, and H = Sxy/Sxx + g2
+    // are ratios of quantities filtered by the SAME kernel, so any
+    // kernel scale cancels and the identity stays exactly 0 dB.
     //
-    // v2.43.1: the smoothing runs as smoothPasses CASCADES of the
-    // same 5-tap kernel (3 passes = the 13-tap binomial(12), ~half an
-    // octave span - see the header for the simulation numbers that
-    // settled it). Ping-pong between the two scratch buffers: pass 0
-    // reads the EMAs, each next pass reads what the previous one
-    // wrote. ~15k flops per frame, zero allocations.
-    const double* sm[4] = { emaSxx.data(), emaSyy.data(),
-                           emaSxyRe.data(), emaSxyIm.data() };
+    // The single Savitzky-Golay pass: every band takes the fixed
+    // polynomial-fit FIR over its +/- smoothHalfWidth neighbourhood of
+    // each accumulated spectrum. ~32k flops per frame, zero
+    // allocations.
+    const double* const emaPtrs[4] = { emaSxx.data(), emaSyy.data(),
+                                       emaSxyRe.data(), emaSxyIm.data() };
+    double* const sm[4] = { smoothScratch.data(),
+                            smoothScratch.data() + numScopeBins,
+                            smoothScratch.data() + 2 * numScopeBins,
+                            smoothScratch.data() + 3 * numScopeBins };
 
-    for (int pass = 0; pass < smoothPasses; ++pass)
+    for (int q = 0; q < 4; ++q)
     {
-        double* const buf = smoothScratch[pass & 1].data();
+        const double* const src = emaPtrs[q];
+        double* const dst = sm[q];
 
-        for (int q = 0; q < 4; ++q)
+        for (int b = 0; b < numScopeBins; ++b)
         {
-            const double* const src = sm[q];
-            double* const dst = buf + (size_t) (q * numScopeBins);
+            double acc = 0.0;
 
-            for (int b = 0; b < numScopeBins; ++b)
+            for (int k = -smoothHalfWidth; k <= smoothHalfWidth; ++k)
             {
-                double acc = 0.0;
-
-                for (int t = 0; t < 5; ++t)
-                {
-                    const int nb = juce::jlimit (0, numScopeBins - 1,
-                                                 b + t - 2);
-                    acc += smoothTapWeights[t] * src[nb];
-                }
-
-                dst[b] = acc * (1.0 / 16.0);
+                const int nb = juce::jlimit (0, numScopeBins - 1, b + k);
+                acc += smoothCoeffs[k + smoothHalfWidth] * src[nb];
             }
 
-            sm[q] = dst;
+            dst[b] = acc;
         }
     }
 

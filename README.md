@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.43.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.44.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,40 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.44.0**
+  - **The "lissage malin" (Clement's framing: display the smart
+    smoothing of the measured points, not the raw points).** The 256
+    display bands are 256 independent (log f, dB) measurements, and
+    the v2.43.x binomial kernels - tuned against band-scale jitter -
+    still let slow half-octave waves through: a 13-tap binomial
+    cascade passes 76% of a half-octave-period wave, and the eye
+    tracks those as the "vaguelettes" Clement kept seeing on real
+    material. The smoothing is now a Savitzky-Golay cubic fit over a
+    31-band window (~1.2 octave), applied - like before - to the four
+    accumulated cross-spectra (Sxx, Syy, SxyRe, SxyIm) before H and
+    the coherence are computed: each band's EMAs are replaced by the
+    cubic least-squares fit of its neighbourhood, so flat curves,
+    slopes and smooth curvatures pass through exactly (the kernel
+    sums to 1 and preserves polynomials up to degree 3), while the
+    half-octave wave drops to a 27% residual - 2.8x calmer than the
+    cascade. Reference simulation on the exact regression scenario:
+    band-to-band jaggedness 0.086 -> 0.053 dB max, 0.028 -> 0.022 dB
+    rms (raw: 1.35 / 0.58). Honesty preserved: a Q1 EQ peak loses
+    0.04 dB, a Q2 peak 0.30 dB, a Q4 peak 0.93 dB (narrow features
+    are averaged over ~1.2 octave - that is the price of a wave-free
+    curve and it is documented), a steep lowpass flank max error is
+    1.17 dB, a narrow single-band uncorrelated artifact now reads as
+    0.93 coherence instead of 0.50 (the window dilutes its dip with
+    coherent neighbours; the EQ itself still ignores it, and
+    broadband junk such as a console noise floor - the gate's real
+    job - is unaffected), the HP shape and convergence speed are
+    unchanged, and a
+    +6 dB knob turn still settles in the same ~3.2 s (the kernel is
+    time-invariant; no lag is added). ~32k flops per analysis frame
+    (one FIR pass over 4x256 doubles), zero allocations. Coherence
+    is still recomputed from the same smoothed spectra, and smoothed
+    Sxx stays strictly positive (min ratio 0.25 in the worst notch
+    scenario, no blow-up).
 - **2.43.1**
   - **Goodbye, "vaguelettes" (Clement's remark on the real Lindell 80
     session).** The v2.43.0 smoothing had killed the fine band-to-band

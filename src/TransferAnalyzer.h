@@ -82,6 +82,74 @@ public:
         return binFrequencies[(size_t) juce::jlimit (0, numScopeBins - 1, bin)];
     }
 
+    // -----------------------------------------------------------------
+    // v2.44.0 - Clement's framing of the smoothing, which is the right
+    // one: the 256 band estimates are POINTS in a bi-logarithmic plot
+    // (the bands are log-spaced, so the band index IS the log-frequency
+    // axis), and the display should show "le lissage malin" of those
+    // points, not the points themselves. The v2.43/v2.43.1 binomial
+    // kernels killed the fine band-scale jitter but let slow waves
+    // through (a half-octave-period wave passes at 76% amplitude) -
+    // exactly the "vaguelettes" still visible on Clement's real
+    // sessions. The smart smoothing of scattered (x, y) points is the
+    // SAVITZKY-GOLAY estimator: around each band, the 31-point
+    // neighbourhood is fitted with a 3rd-order polynomial by least
+    // squares, and the fitted value AT the band is kept. That is a
+    // fixed FIR kernel (smoothCoeffs below, precomputed), so it costs
+    // the same as any tap kernel, but it PRESERVES everything a cubic
+    // can express - slopes (shelves, filter flanks), curvature (EQ
+    // peaks) - while removing the band-scale jitter AND the slow
+    // waves: a half-octave wave leaves 27% amplitude (vs 76% with the
+    // v2.43.1 cascade), the display jitter is unchanged (rms 0.022 dB
+    // on the regression mock, raw estimates 0.58), and the kernel is
+    // time-invariant, so a knob turn settles exactly as fast (the
+    // v2.43 measurement stays: ~3.2 s to +/- 0.5 dB, display pole
+    // 0.5 s).
+    //
+    // The kernel is applied to the four ACCUMULATED spectra (Sxx, Syy,
+    // SxyRe, SxyIm), not to the dB curve: H = Sxy/Sxx stays the exact
+    // H1 estimator of the neighbourhood's energy-weighted average
+    // transfer (a junk band carries little energy, so it barely votes
+    // - smoothing the dB would give it a full vote), and the coherence
+    // is recomputed from the same smoothed quantities, so curve and
+    // validity gate stay consistent. All four arrays go through the
+    // SAME kernel, so the identity transfer stays exactly 0 dB.
+    //
+    // Documented cost (reference simulation, stationary white
+    // program, feature measured against its analytic response): a Q1
+    // EQ peak reads 0.04 dB low, a Q2 peak 0.30 dB, a surgical Q4
+    // peak 0.93 dB, a Q6 peak 1.31 dB, the knee of a steep (24
+    // dB/oct) lowpass moves by 1.17 dB, a 12 dB/oct highpass flank is
+    // untouched, and the smoothed input spectrum stays strictly
+    // positive (no division blowups). A NARROW uncorrelated artifact
+    // (a 1-band console tone) reads more coherent than it is: g2
+    // 0.50 raw -> 0.93 smoothed, because the window dilutes its dip
+    // with ~30 coherent neighbours - broadband junk (a console noise
+    // floor), the coherence gate's real job, is unaffected. ~32k flops per ~170 ms frame,
+    // zero allocations. Edges replicate the first/last band (clamped
+    // index), as with every kernel since v2.43.
+    // -----------------------------------------------------------------
+    static constexpr int smoothHalfWidth = 15;
+    static constexpr double smoothCoeffs[2 * smoothHalfWidth + 1] =
+    {
+       -4.10557184750718895e-02, -2.63929618768319676e-02,
+       -1.27414298715740771e-02, -1.01122459298234603e-04,
+        1.15279603599955163e-02,  2.21458185863072088e-02,
+        3.17524522196368369e-02,  4.03478612599843939e-02,
+        4.79320457073498865e-02,  5.45050055617333218e-02,
+        6.00667408231346789e-02,  6.46172514915539786e-02,
+        6.81565375669912071e-02,  7.06845990494463644e-02,
+        7.22014359389194782e-02,  7.27070482354104930e-02,
+        7.22014359389194782e-02,  7.06845990494463644e-02,
+        6.81565375669912210e-02,  6.46172514915539786e-02,
+        6.00667408231346928e-02,  5.45050055617333218e-02,
+        4.79320457073499004e-02,  4.03478612599844078e-02,
+        3.17524522196368439e-02,  2.21458185863072192e-02,
+        1.15279603599955250e-02, -1.01122459298227664e-04,
+       -1.27414298715740632e-02, -2.63929618768319468e-02,
+       -4.10557184750719104e-02
+    };
+
 private:
     void compute();
 
@@ -105,46 +173,13 @@ private:
     std::array<double, (size_t) numScopeBins> emaSxx {}, emaSyy {};
     std::array<double, (size_t) numScopeBins> emaSxyRe {}, emaSxyIm {};
 
-    // v2.43 (Clement's "the raw EQ curve looks a bit noisy" remark):
-    // every display band is an INDEPENDENT H1 measurement, so on real
-    // material the curve jitters along the frequency axis - the
-    // estimators' residual variance, not the console's response (a
-    // real console response is smooth in frequency). The fix smooths
-    // the four accumulated spectra over the neighbouring bands.
-    // Smoothing the ACCUMULATORS (not the dB curve) is what keeps the
-    // physics honest: H = Sxy/Sxx stays the exact H1 estimator of the
-    // energy-weighted average transfer over the neighbourhood, and the
-    // coherence is recomputed from the same smoothed quantities.
-    // Because the neighbours' EMAs are at the SAME temporal state, NO
-    // temporal lag is added - knob turns settle exactly as fast as
-    // before. Edges replicate the first/last band (clamped index), so
-    // each pass's weight sum stays a constant 16.
-    //
-    // v2.43.1 (Clement's "vaguelettes" remark): the v2.43 single pass
-    // (5-tap, ~1/6 octave) killed the fine band-scale jitter, but on
-    // real material small waves remained (the per-frame estimates
-    // wobble with the program). The kernel now runs smoothPasses
-    // CASCADES of the same 5-tap binomial [1 4 6 4 1]/16: cascading
-    // convolutions convolve, so 3 passes = the 13-tap binomial(12)
-    // [1 12 66 ... 12 1]/4096, sigma ~1.7 bands, span 12 bands ~ half
-    // an octave. The v2.43.1 reference simulation (an exact offline
-    // twin of this analyzer, mock scenario of the regression test):
-    // band-to-band jaggedness max 1.35 dB raw / 0.27 (1 pass) /
-    // 0.08 dB (3 passes) - 3.3x calmer than v2.43.0. Feature cost on
-    // real console EQs: a Q1 peak loses 0.02 dB, a tight Q2 peak
-    // 0.06 dB, a steep lowpass flank is untouched; only a pathological
-    // Q8/-18 dB notch fills ~3 dB more (documented, no console EQ is
-    // that narrow). Convergence after a +6 dB step: unchanged (3.16 s
-    // measured, same as v2.43.0). Cost: ~15k flops per ~170 ms frame,
-    // zero allocations.
-    static constexpr double smoothTapWeights[5] { 1.0, 4.0, 6.0, 4.0, 1.0 };
-    static constexpr int smoothPasses = 3;
+    // (the smoothing coefficients themselves are the public
+    // smoothCoeffs above - see their comment for the full story)
 
-    // v2.43.1: ping-pong scratch for the smoothing cascade (two
-    // buffers are enough: pass N reads the EMAs, then each pass reads
-    // the buffer the previous pass wrote). Fixed-size members, so the
-    // audio thread never allocates.
-    std::array<double, (size_t) (4 * numScopeBins)> smoothScratch[2] {};
+    // v2.44.0: scratch for the single Savitzky-Golay pass (the EMAs
+    // are the untouched source, the smoothed spectra land here).
+    // Fixed-size member, so the audio thread never allocates.
+    std::array<double, (size_t) (4 * numScopeBins)> smoothScratch {};
 
     std::array<std::atomic<float>, (size_t) numScopeBins> transferDb {};
     std::array<std::atomic<float>, (size_t) numScopeBins> coherence {};

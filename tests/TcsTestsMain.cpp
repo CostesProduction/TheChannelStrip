@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.43.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.44.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1327,13 +1327,23 @@ void testEqUncorrelatedConsoleNoise()
                 "the clean band's coherence is ~1 (got "
                 + juce::String (eqCoherence[bin500], 3) + ")");
 
-    // the tone band's coherence dips below 1 but stays above the 0.25
-    // gate: the tone is present (uncorrelated with the input) yet the
-    // band is still measured - and the EQ must IGNORE the tone.
-    // Reference simulation: g2 ~ 0.5 at the tone band.
-    expectTrue (eqCoherence[bin12k] < 0.9f,
-                "the tone band's coherence dips below 1 (the tone is there; got "
-                + juce::String (eqCoherence[bin12k], 3) + ")");
+    // the tone band's coherence dips below the CLEAN band's but stays
+    // above the 0.25 gate: the tone is present (uncorrelated with the
+    // input) yet the band is still measured - and the EQ must IGNORE
+    // the tone. v2.44.0: the dip is asserted RELATIVE to the clean
+    // band, because the wide Savitzky-Golay window (~1.2 octave)
+    // dilutes a narrow artifact's dip with ~30 coherent neighbours:
+    // the reference simulation on this exact scenario measures
+    // g2 = 0.50 raw, 0.81 with the v2.43.1 13-tap cascade, 0.93 with
+    // the SG-31 kernel (clean band 1.00). The dip shrinks with the
+    // window but never disappears, and a band with no tone shows no
+    // dip at all, so a 0.05 margin discriminates presence from
+    // absence regardless of the kernel width (the EQ assertions below
+    // carry the "the tone is rejected" part of the contract).
+    expectTrue (eqCoherence[bin12k] < eqCoherence[bin500] - 0.05f,
+                "the tone band's coherence dips below the clean band (the "
+                "tone is there; got " + juce::String (eqCoherence[bin12k], 3)
+                + " vs " + juce::String (eqCoherence[bin500], 3) + ")");
     expectTrue (eqCoherence[bin12k] >= 0.25f,
                 "the tone band's coherence stays above the validity gate");
     expectTrue (panel.isEqBinMeasured (bin12k),
@@ -1361,14 +1371,14 @@ void testEqUncorrelatedConsoleNoise()
 // bring that jaggedness down while the curve stays flat 0 dB (the
 // console is a passthrough): smooth, but still an honest measurement.
 //
-// v2.43.1 (Clement's "vaguelettes" remark): the single 5-tap pass
-// still left small waves on real material, so the kernel now runs 3
-// cascaded passes (13-tap binomial, ~half an octave). The reference
-// simulation on this exact mock scenario: jaggedness max 1.35 dB raw
-// / 0.27 (1 pass, v2.43.0) / 0.08 dB (3 passes), rms 0.58 / 0.12 /
-// 0.04 - the rms assertion below (0.1 dB) sits between the v2.43.0
-// single pass and the 3-pass cascade with margin on both sides, so a
-// revert to the narrower kernel FAILS it.
+// v2.44.0 (Clement's "lissage malin" framing): the display shows the
+// SMOOTHING of the 256 (log f, dB) points, not the points - a
+// Savitzky-Golay cubic fit over a 31-band (~1.2 octave) window, which
+// preserves slopes and EQ peaks while killing the band-scale jitter
+// AND the slow half-octave waves the earlier binomial kernels let
+// through. The reference simulation on this exact mock scenario:
+// jaggedness max 1.35 dB raw / 0.086 (13-tap cascade, v2.43.1) /
+// 0.053 dB (SG-31), rms 0.58 / 0.028 / 0.022.
 void testEqCurveSmoothing()
 {
     beginTest ("EQ curve frequency smoothing (v2.43)");
@@ -1446,12 +1456,11 @@ void testEqCurveSmoothing()
                 + juce::String (meanDb, 3) + " dB)");
 
     // 3. THE metrics: band-to-band jaggedness - the deviation from
-    // the 3-band local mean across the region, max (regression guard
-    // against no smoothing at all) and rms (v2.43.1: discriminates the
-    // 3-pass cascade from the old single 5-tap pass). Reference
+    // the 3-band local mean across the region, max and rms (regression
+    // guards against the smoothing disappearing entirely). Reference
     // simulation on this exact scenario: raw 1.35 max / 0.58 rms,
-    // single pass (v2.43.0) 0.27 / 0.12, 3 passes (v2.43.1) 0.08 /
-    // 0.04 dB.
+    // 13-tap cascade (v2.43.1) 0.086 / 0.028, Savitzky-Golay (v2.44.0)
+    // 0.053 / 0.022 dB.
     float jaggedness = 0.0f;
     double jagSq = 0.0;
 
@@ -1472,11 +1481,47 @@ void testEqCurveSmoothing()
                 "reference simulation)");
 
     expectTrue (jagRms < 0.1,
-                "the smoothing cascade is the wide v2.43.1 kernel (rms "
-                "band-to-band deviation " + juce::String (jagRms, 3)
-                + " dB < 0.1; the single 5-tap pass of v2.43.0 measured "
-                  "~0.12, the 3-pass cascade ~0.04 in the reference "
-                  "simulation)");
+                "the smoothing pipeline is intact (rms band-to-band "
+                "deviation " + juce::String (jagRms, 3)
+                + " dB < 0.1; raw estimates measure ~0.58 in the "
+                  "reference simulation)");
+
+    // 4. v2.44.0: the kernel itself, analytically (deterministic, no
+    // audio needed). The Savitzky-Golay cubic over 31 bands must
+    // (a) sum to 1 - a flat neighbourhood passes through exactly -
+    // and (b) attenuate a half-octave-period wave (period 15 bands,
+    // the "vaguelettes" Clement kept seeing): the reference
+    // simulation measures 0.27 residual amplitude for the SG kernel,
+    // while the v2.43.1 13-tap cascade leaves 0.76 - the 0.45
+    // threshold discriminates them with margin on both sides.
+    double coeffSum = 0.0;
+    double waveRe = 0.0, waveIm = 0.0;
+
+    for (int k = -TransferAnalyzer::smoothHalfWidth;
+         k <= TransferAnalyzer::smoothHalfWidth; ++k)
+    {
+        const double c = TransferAnalyzer::smoothCoeffs[k
+            + TransferAnalyzer::smoothHalfWidth];
+        const double ph = juce::MathConstants<double>::twoPi
+                              * (double) k / 15.0;
+        coeffSum += c;
+        waveRe += c * std::cos (ph);
+        waveIm += c * std::sin (ph);
+    }
+
+    expectNear (coeffSum, 1.0, 1.0e-9,
+                "the smoothing kernel preserves a flat curve exactly "
+                "(sum of coefficients = 1, got "
+                + juce::String (coeffSum, 12) + ")");
+
+    const double waveResidue = std::sqrt (waveRe * waveRe + waveIm * waveIm);
+
+    expectTrue (waveResidue < 0.45,
+                "the kernel is the wide Savitzky-Golay fit, which "
+                "kills the slow half-octave waves (residual amplitude "
+                + juce::String (waveResidue, 3)
+                + " < 0.45; the v2.43.1 cascade left 0.76, the raw "
+                  "estimate is 1.0)");
 }
 
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
@@ -1809,7 +1854,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.43.1");
+        session->setAttribute ("version", "2.44.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1975,7 +2020,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.43.1");
+    session->setAttribute ("version", "2.44.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2198,8 +2243,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.43.1",
-                "saved state carries the current version tag (2.43.1)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.44.0",
+                "saved state carries the current version tag (2.44.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2537,7 +2582,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.43.1"),
+    expectTrue (report.contains ("TheChannelStrip 2.44.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3200,7 +3245,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.43.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.44.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
