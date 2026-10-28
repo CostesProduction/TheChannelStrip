@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.42.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.43.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,23 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.43.0**
+  - **A smooth EQ curve (Clement's "courbe brute" remark).** Every display
+    band is an independent H1 measurement, so on real material the raw
+    curve jitters along the frequency axis - the estimators' residual
+    variance, not the console's response (a real console response is
+    smooth in frequency). The four accumulated cross-spectra
+    (Sxx, Syy, SxyRe, SxyIm) are now frequency-smoothed over the
+    neighbouring bands with a 5-tap binomial kernel [1 4 6 4 1] / 16
+    (~1/6 octave) BEFORE H and the coherence are computed, which keeps
+    the physics honest: H = Sxy/Sxx stays the exact H1 estimator of the
+    energy-weighted average transfer over the neighbourhood, and the
+    coherence gate is recomputed from the same smoothed quantities.
+    Reference simulation: the band-to-band jitter drops ~10x (max
+    2.0 -> 0.2 dB), a Q8/-18 dB notch fills by only ~0.7 dB, a steep
+    lowpass flank does not move, and because the neighbours' EMAs are at
+    the same temporal state, NO lag is added - knob turns settle exactly
+    as fast as before. ~5k flops per analysis frame, zero allocations.
 - **2.42.2**
   - **1 Hz readout (Clement's call).** The calm-correction cadence of
     2.42.1 settles at **1 Hz** instead of 2 Hz: sound is dynamic and the

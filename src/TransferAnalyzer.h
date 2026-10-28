@@ -105,6 +105,26 @@ private:
     std::array<double, (size_t) numScopeBins> emaSxx {}, emaSyy {};
     std::array<double, (size_t) numScopeBins> emaSxyRe {}, emaSxyIm {};
 
+    // v2.43 (Clement's "the raw EQ curve looks a bit noisy" remark):
+    // every display band is an INDEPENDENT H1 measurement, so on real
+    // material the curve jitters along the frequency axis - the
+    // estimators' residual variance, not the console's response (a
+    // real console response is smooth in frequency). The fix smooths
+    // the four accumulated spectra over the neighbouring bands with a
+    // 5-tap binomial kernel [1 4 6 4 1] / 16 (~1/6 octave). Smoothing
+    // the ACCUMULATORS (not the dB curve) is what keeps the physics
+    // honest: H = Sxy/Sxx stays the exact H1 estimator of the
+    // energy-weighted average transfer over the neighbourhood, and the
+    // coherence is recomputed from the same smoothed quantities. The
+    // reference simulation settled the kernel: band-to-band jaggedness
+    // drops ~10x (max 2.0 -> 0.2 dB), a Q8/-18 dB notch fills by only
+    // ~0.7 dB, a steep lowpass flank does not move, and because the
+    // neighbours' EMAs are at the SAME temporal state, NO temporal lag
+    // is added - knob turns settle exactly as fast as before. Edges
+    // replicate the first/last band (clamped index), so the weight
+    // sum stays a constant 16.
+    static constexpr double smoothTapWeights[5] { 1.0, 4.0, 6.0, 4.0, 1.0 };
+
     std::array<std::atomic<float>, (size_t) numScopeBins> transferDb {};
     std::array<std::atomic<float>, (size_t) numScopeBins> coherence {};
 

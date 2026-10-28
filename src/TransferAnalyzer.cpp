@@ -245,15 +245,50 @@ void TransferAnalyzer::compute()
         emaSyy  [bi] += crossEmaAlpha * (syy - emaSyy  [bi]);
         emaSxyRe[bi] += crossEmaAlpha * (sre - emaSxyRe[bi]);
         emaSxyIm[bi] += crossEmaAlpha * (sim - emaSxyIm[bi]);
+    }
+
+    // v2.43 pass 2: the outputs are computed from the FREQUENCY-
+    // SMOOTHED accumulators (see smoothTapWeights in the header).
+    // Because ALL the EMAs were just updated by the same frame, every
+    // neighbour is at the same temporal state: the kernel averages
+    // estimates of the SAME instant, so no temporal lag is added. The
+    // clamped index replicates the edge bands, the weight sum stays a
+    // constant 16, and H = Sxy/Sxx + g2 are ratios: the 1/16 scale
+    // cancels in both (it is kept so the smoothed spectra stay on the
+    // physical scale of the accumulators). ~5k flops per frame, zero
+    // allocations.
+    for (int b = 0; b < numScopeBins; ++b)
+    {
+        double smSxx = 0.0, smSyy = 0.0, smSre = 0.0, smSim = 0.0;
+
+        for (int t = 0; t < 5; ++t)
+        {
+            const size_t nb = (size_t) juce::jlimit (0, numScopeBins - 1,
+                                                     b + t - 2);
+            const double w = smoothTapWeights[t];
+
+            smSxx += w * emaSxx  [nb];
+            smSyy += w * emaSyy  [nb];
+            smSre += w * emaSxyRe[nb];
+            smSim += w * emaSxyIm[nb];
+        }
+
+        const double inv16 = 1.0 / 16.0;
+        smSxx *= inv16;
+        smSyy *= inv16;
+        smSre *= inv16;
+        smSim *= inv16;
+
+        const size_t bi = (size_t) b;
 
         // H1 transfer estimate: H = Sxy / Sxx. The dB form uses
         // 20*log10|H| (== 10*log10|H|^2), the same scale the old power
         // ratio produced for a pure gain, so the display keeps its
-        // meaning.
-        const double magH = std::sqrt (emaSxyRe[bi] * emaSxyRe[bi]
-                                    + emaSxyIm[bi] * emaSxyIm[bi]);
-        const double db = emaSxx[bi] > 1.0e-30
-            ? 20.0 * std::log10 (juce::jmax (magH / emaSxx[bi], 1.0e-30))
+        // meaning. Both are computed from the smoothed quantities, so
+        // the curve is the honest neighbourhood average transfer.
+        const double magH = std::sqrt (smSre * smSre + smSim * smSim);
+        const double db = smSxx > 1.0e-30
+            ? 20.0 * std::log10 (juce::jmax (magH / smSxx, 1.0e-30))
             : 0.0;
 
         transferDb[bi].store ((float) juce::jlimit (-60.0, 60.0, db),
@@ -263,7 +298,10 @@ void TransferAnalyzer::compute()
         // is entirely explained by the input, towards 0 when it is
         // dominated by uncorrelated junk (the console's floor above
         // its lowpass). This is Smaart's coherence-blanking quantity.
-        const double den = emaSxx[bi] * emaSyy[bi];
+        // Recomputed from the SAME smoothed spectra as H, so curve and
+        // gate stay consistent (the smoothing even raises it a little:
+        // the neighbourhood agrees more than the single noisy band).
+        const double den = smSxx * smSyy;
         const double g2 = den > 1.0e-60
             ? juce::jlimit (0.0, 1.0, (magH * magH) / den)
             : 0.0;

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.42.2 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.43.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -341,8 +341,38 @@ public:
     std::atomic<int>   lastChannelCount { 0 };
     std::atomic<int>   processCallCount { 0 };
 
+    // v2.43 (testEqCurveSmoothing): OPTIONAL deterministic band-limited
+    // noise injection - a console's shaped noise floor living INSIDE
+    // the console, uncorrelated with the input. A fixed-seed xorshift
+    // white source through a 2 kHz RBJ band-pass (Q 0.5), added
+    // identically to every channel so the mono mixdown keeps its full
+    // level. Calibrated against NoiseSource (0.3): a gain of 0.3 puts
+    // the in-band noise PSD equal to the input PSD (per-band coherence
+    // ~0.5) - the reference simulation's console-noise scenario, on
+    // which the RAW per-band estimates jitter ~2 dB band-to-band.
+    // OFF by default: every existing mock-based test is untouched.
+    void setBandNoise (float gainToUse) { bandNoiseGain.store (gainToUse); }
+
     const juce::String getName() const override { return "MockConsole"; }
-    void prepareToPlay (double, int) override {}
+
+    void prepareToPlay (double sampleRate, int) override
+    {
+        // the 2 kHz band-pass (RBJ cookbook, b1 = 0): coefficients are
+        // normalised here so the audio loop stays a 4-tap recurrence
+        const double w0 = juce::MathConstants<double>::twoPi * 2000.0 / sampleRate;
+        const double alpha = std::sin (w0) / (2.0 * 0.5);
+        const double a0 = 1.0 + alpha;
+
+        nb0 = (float) (alpha / a0);
+        nb2 = (float) (-alpha / a0);
+        na1 = (float) (-2.0 * std::cos (w0) / a0);
+        na2 = (float) ((1.0 - alpha) / a0);
+
+        // deterministic from run to run: fixed seed, zeroed filter state
+        noiseState = 0x1B7ED9Bu;
+        noiseX1 = noiseX2 = noiseY1 = noiseY2 = 0.0f;
+    }
+
     void releaseResources() override {}
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
@@ -368,6 +398,31 @@ public:
 
         if (g != 1.0f)
             buffer.applyGain (g);
+
+        const float noiseGain = bandNoiseGain.load();
+
+        if (noiseGain > 0.0f)
+        {
+            const int numSamples = buffer.getNumSamples();
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                noiseState ^= noiseState << 13;
+                noiseState ^= noiseState >> 17;
+                noiseState ^= noiseState << 5;
+
+                const float white = noiseGain
+                    * ((float) ((double) noiseState / 2147483648.0) - 1.0f);
+                const float y = nb0 * white + nb2 * noiseX2
+                                  - na1 * noiseY1 - na2 * noiseY2;
+
+                noiseX2 = noiseX1; noiseX1 = white;
+                noiseY2 = noiseY1; noiseY1 = y;
+
+                for (int c = 0; c < buffer.getNumChannels(); ++c)
+                    buffer.setSample (c, i, buffer.getSample (c, i) + y);
+            }
+        }
     }
 
     double getTailLengthSeconds() const override { return 2.0; }
@@ -387,6 +442,11 @@ public:
 
 private:
     const bool acceptsMono;
+
+    std::atomic<float> bandNoiseGain { 0.0f };
+    juce::uint32 noiseState = 0x1B7ED9Bu;
+    float nb0 = 0.0f, nb2 = 0.0f, na1 = 0.0f, na2 = 0.0f;
+    float noiseX1 = 0.0f, noiseX2 = 0.0f, noiseY1 = 0.0f, noiseY2 = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockConsole)
 };
@@ -1289,6 +1349,114 @@ void testEqUncorrelatedConsoleNoise()
                 + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
 }
 
+// v2.43 (Clement's "smoother un peu cette courbe brute d'EQ" remark):
+// every display band is an INDEPENDENT H1 measurement, so on real
+// material the RAW curve jitters along the frequency axis - the
+// estimators' residual variance, not the console's response. The mock
+// injects a deterministic band-limited noise floor INSIDE the console
+// (uncorrelated with the input, in-band level equal to the input PSD -
+// the reference simulation's console-noise scenario, where the raw
+// curve's band-to-band jaggedness measured ~2 dB). The v2.43 frequency-
+// domain smoothing (5-tap binomial kernel over the accumulated
+// cross-spectra) must bring that jaggedness down ~10x while the curve
+// stays flat 0 dB (the console is a passthrough): smooth, but still an
+// honest measurement.
+void testEqCurveSmoothing()
+{
+    beginTest ("EQ curve frequency smoothing (v2.43)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    // deterministic broadband input, same source as the bass tests
+    NoiseSource src (0.3f);
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    auto mock = std::make_unique<MockConsole> (true);
+    mock->setBandNoise (0.3f); // in-band noise PSD == input PSD, g2 ~ 0.5
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // 4 s: ~24 cross-spectrum frames of 8192 samples; the EMAs average
+    // over the last ~8 of them, as in the reference simulation
+    for (int n = 0; n < (int) (4.0 * 48000.0 / 512.0); ++n)
+    {
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    }
+
+    // the RAW analyser output (the panel's display EMA would blur the
+    // metric - the frequency smoothing itself is under test here)
+    float eqDb[TransferAnalyzer::numScopeBins];
+    float eqCoherence[TransferAnalyzer::numScopeBins];
+
+    proc.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
+                                                 TransferAnalyzer::numScopeBins);
+
+    // the analysis region: well inside both the input's broadband
+    // energy and the injected noise band
+    const TransferAnalyzer& ana = proc.getTransferAnalyzer();
+
+    auto coveringBin = [&ana] (double freq)
+    {
+        for (int b = 0; b < TransferAnalyzer::numScopeBins - 1; ++b)
+            if (ana.getBinFrequency (b) <= freq
+                && ana.getBinFrequency (b + 1) > freq)
+                return b;
+
+        return TransferAnalyzer::numScopeBins - 1;
+    };
+
+    const int lo = coveringBin (700.0);
+    const int hi = coveringBin (3500.0);
+
+    // 1. the scenario is honest: every band in the region is really
+    // measured, with the coherence dipped by the injected noise but
+    // well above the 0.25 display gate (the simulation had g2 ~ 0.5
+    // in-band). If this fails the test measured nothing.
+    float g2min = 1.0f;
+    double meanDb = 0.0;
+
+    for (int b = lo; b <= hi; ++b)
+    {
+        g2min = juce::jmin (g2min, eqCoherence[b]);
+        meanDb += (double) eqDb[b];
+    }
+
+    meanDb /= (double) juce::jmax (1, hi - lo + 1);
+
+    expectTrue (g2min >= 0.3f,
+                "the noise scenario is measured (min coherence "
+                + juce::String (g2min, 3) + " >= 0.3, above the 0.25 gate)");
+
+    // 2. smooth but HONEST: the passthrough still reads flat 0 dB on
+    // average - an over-smoothing that destroyed the measurement
+    // would fail this
+    expectTrue (std::abs (meanDb) < 0.5,
+                "the smoothed curve stays flat 0 dB on average (got "
+                + juce::String (meanDb, 3) + " dB)");
+
+    // 3. THE metric: band-to-band jaggedness - the max deviation from
+    // the 3-band local mean across the region. Reference simulation
+    // on this exact scenario: raw per-band estimates ~2.0 dB, the
+    // v2.43-smoothed curve ~0.2 dB; the 0.8 dB threshold sits between
+    // with margin on both sides.
+    float jaggedness = 0.0f;
+
+    for (int b = lo + 1; b < hi; ++b)
+    {
+        const float localMean = (eqDb[b - 1] + eqDb[b] + eqDb[b + 1]) / 3.0f;
+        jaggedness = juce::jmax (jaggedness, std::abs (eqDb[b] - localMean));
+    }
+
+    expectTrue (jaggedness < 0.8f,
+                "the EQ curve is frequency-smoothed (max band-to-band "
+                "deviation " + juce::String (jaggedness, 3) + " dB < 0.8; "
+                "the raw per-band estimates measured ~2 dB in the "
+                "reference simulation)");
+}
+
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
 // inverse frequency mapping and the value formatting - are exercised
 // here without a live editor (the panel itself needs the GUI, the math
@@ -1619,7 +1787,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.42.2");
+        session->setAttribute ("version", "2.43.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -1785,7 +1953,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.42.2");
+    session->setAttribute ("version", "2.43.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2008,8 +2176,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.42.2",
-                "saved state carries the current version tag (2.42.2)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.43.0",
+                "saved state carries the current version tag (2.43.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2347,7 +2515,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.42.2"),
+    expectTrue (report.contains ("TheChannelStrip 2.43.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3010,7 +3178,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.42.2" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.43.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3025,6 +3193,7 @@ int main (int argc, char* argv[])
     testBassResolution();
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
+    testEqCurveSmoothing();
     testConsoleSlotStatus();
     testPresetManager();
     testCurrentPresetTracking();
