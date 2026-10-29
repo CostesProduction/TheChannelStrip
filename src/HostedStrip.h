@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 // Hosts one third-party plugin instance at a time with click-free swapping:
@@ -74,12 +76,66 @@ public:
             reportedLatency.store (plugin->getLatencySamples(), std::memory_order_relaxed);
     }
 
+    // -----------------------------------------------------------------
+    // v2.47.0 (the EQ-Verite curve): the shell must KNOW when the
+    // hosted console's response changed, so the transfer estimators
+    // can restart (TransferAnalyzer::requestFlush - the long 5 s
+    // averaging window is what makes the EQ curve read the truth, and
+    // the flush is what keeps it reactive). Two events feed this
+    // callback, installed once by the processor at construction (a
+    // std::function written once, then only read - safe to invoke from
+    // any thread):
+    //   - a HOSTED PARAMETER moved (an AudioProcessorParameter::Listener
+    //     attached to every parameter of the active plugin; the
+    //     listener is detached before the plugin retires, so a dying
+    //     plugin can never call back into a half-dead shell);
+    //   - the plugin itself was swapped or cleared (setPlugin /
+    //     clearPlugin - a different console IS a different response).
+    // The callback only ever does an atomic store
+    // (TransferAnalyzer::requestFlush), so the listener thread context
+    // (JUCE: message thread or the parameter's own thread) is fine.
+    // -----------------------------------------------------------------
+    std::function<void()> onConsoleResponseChanged;
+
+    // Test/support hook: how many hosted parameters currently carry
+    // the change relay (the flush test asserts the listener wiring
+    // without touching the console's audio).
+    int getRelayedParameterCount() const { return (int) relayedParameters.size(); }
+
 private:
     struct HostedSlot
     {
         std::unique_ptr<juce::AudioProcessor> plugin;
         std::atomic<float> fade { 0.0f }; // 0 = silent, 1 = at full level
     };
+
+    // v2.47.0: the parameter-change relay (see onConsoleResponseChanged).
+    // One listener object attached to every parameter of the ACTIVE
+    // plugin; parameterValueChanged only invokes the callback (an
+    // atomic store in the processor's wiring) - no locks, no audio
+    // work, whatever thread the parameter notifies on.
+    struct ParamRelay : public juce::AudioProcessorParameter::Listener
+    {
+        HostedStrip* owner = nullptr;
+
+        void parameterValueChanged (int, float) override
+        {
+            if (owner != nullptr && owner->onConsoleResponseChanged)
+                owner->onConsoleResponseChanged();
+        }
+
+        void parameterGestureChanged (int, bool) override {}
+    };
+
+    void attachRelayTo (juce::AudioProcessor& plugin);
+    void detachRelayFromAll();
+
+    ParamRelay paramRelay;
+    // message thread only (setPlugin / clearPlugin / destructor); the
+    // audio thread never touches it, retireOutgoingNow included (it
+    // hands destruction to a background thread, and the relay is
+    // always detached BEFORE a plugin retires).
+    std::vector<juce::AudioProcessorParameter*> relayedParameters;
 
     void retireOutgoingNow();
     void retireActiveIntoOutgoing (HostedSlot* oldActive);

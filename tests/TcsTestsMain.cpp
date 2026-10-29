@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.46.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.47.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -17,6 +17,12 @@
 //     that adds an independent 12 kHz tone; the cross-spectrum transfer
 //     reads flat 0 dB there while the coherence dips below 1 - the old
 //     power ratio would have read the tone as a +3 dB phantom boost)
+//   - EQ-Verite curve (v2.47.0, Clement's design call: ONE curve, the
+//     best estimate of the truth): the single blend of 2/3 long-window
+//     H1 transfer + 1/3 max anchor reads flat in passthrough, reacts
+//     within ~1 s to a knob turned through the REAL hosted parameter
+//     (the parameter relay flushes the long window), and persists
+//     after the signal stops (v2.12 gate, unchanged)
 //   - console slot status reporting (v2.24, roadmap point 7: missing /
 //     blacklisted / moved-file slots each carry their own explanation,
 //     and clicking an unavailable console posts an explicit message
@@ -588,6 +594,68 @@ private:
     double tonePhase = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockToneConsole)
+};
+
+// ---------------------------------------------------------------------------
+// MockParamConsole (v2.47.0): a passthrough console whose gain knob is a
+// REAL AudioProcessorParameter - the thing the v2.46 mocks' plain atomics
+// cannot express. The shell's parameter relay (HostedStrip) attaches to
+// every hosted parameter, so setValueNotifyingHost must travel the full
+// production path: parameter -> relay -> TransferAnalyzer::requestFlush.
+// That flush is the reactivity half of the long 5 s averaging window -
+// without it the EQ-Verite curve would take ~9 s to read a knob turn.
+// ---------------------------------------------------------------------------
+class MockParamConsole : public juce::AudioProcessor
+{
+public:
+    MockParamConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {
+        gainParam = new juce::AudioParameterFloat (
+            juce::ParameterID { "gain", 1 }, "Gain",
+            juce::NormalisableRange<float> (0.0f, 4.0f), 1.0f);
+        addParameter (gainParam);
+    }
+
+    // the knob the test turns - a hosted parameter like a real
+    // console's output knob, not a test back door
+    juce::AudioParameterFloat* gainParam = nullptr;
+
+    const juce::String getName() const override { return "MockParamConsole"; }
+
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        return layouts.getMainInputChannelSet() == layouts.getMainOutputChannelSet()
+                && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.applyGain (gainParam->get());
+    }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockParamConsole)
 };
 
 // ---------------------------------------------------------------------------
@@ -1288,11 +1356,11 @@ void testEqUncorrelatedConsoleNoise()
     auto mock = std::make_unique<MockToneConsole>();
     proc.getHostedStrip().setPlugin (std::move (mock));
 
-    // 6 s (the cross-spectrum EMAs average over the last ~8 frames of
-    // ~170 ms, restored in v2.46 after the v2.45 experiment; the
-    // stationary mock needs no settling margin - the ratio estimates
-    // are self-normalising - and the random-phase tone only cancels
-    // across frames)
+    // 6 s (since v2.47 the cross-spectrum EMAs average over the last
+    // ~30 frames of ~170 ms - tau ~5 s, the energy-weighted window;
+    // the stationary mock needs no settling margin - the ratio
+    // estimates are self-normalising - and the random-phase tone only
+    // cancels across frames, all the more over the longer window)
     for (int n = 0; n < (int) (6.0 * 48000.0 / 512.0); ++n)
     {
         src.fill (block);
@@ -1527,12 +1595,14 @@ void testEqCurveSmoothing()
                   "estimate is 1.0)");
 }
 
-// v2.46.0 (Clement's idea): the "EQ @ max" trace - dB MaxOut minus
-// dB MaxIn over 5-second sliding maxima of the SMOOTHED IN/OUT
-// curves. For a linear console the max is homogeneous
-// (max (H*x) = H * max (x)) and the IN/OUT one-poles are identical,
-// so the difference is the EXACT transfer at the programme's peak
-// drive. Ballistics contract under test: flat 0 dB in passthrough,
+// v2.46.0 (Clement's idea) -> v2.47.0 (the ANCHOR): the "EQ @ max"
+// machinery - dB MaxOut minus dB MaxIn over 5-second sliding maxima
+// of the SMOOTHED IN/OUT curves. For a linear console the max is
+// homogeneous (max (H*x) = H * max (x)) and the IN/OUT one-poles are
+// identical, so the difference is the EXACT transfer at the programme's
+// peak drive. Since v2.47 this value anchors the single EQ-Verite
+// curve at 1/3 weight; the ballistics contract it must keep is
+// unchanged and still under test here: flat 0 dB in passthrough,
 // IMMEDIATE on a knob up (the max only moves up), and HOLDING on a
 // knob down (the old peak stays in the 5 s sliding window).
 void testEqMaxHoldTrace()
@@ -1625,6 +1695,128 @@ void testEqMaxHoldTrace()
                 "down (got "
                 + juce::String (panel.getEqMaxDbAtBin (bin500), 2)
                 + " dB > +3)");
+}
+
+// v2.47.0 (Clement's design call - "one curve, the best estimate of the
+// truth"): the panel now draws a SINGLE EQ curve, the Verite blend
+// (2/3 cross-spectrum H1 transfer with the long tau ~5 s window +
+// 1/3 max anchor). Three contracts are exercised end to end with the
+// REAL production path, at the real 30 Hz panel cadence (the build 2
+// lesson of v2.46: one tick per ~3 audio blocks, never feed-then-tick):
+//
+//   1. flat 0 dB in passthrough (the blend of two members that each
+//      read 0 dB reads 0 dB);
+//   2. a knob turned through the REAL hosted parameter (not a test
+//      back door) flushes the long-window estimators, so the curve
+//      reads the new response within ~1 s of audio - without the flush
+//      the tau ~5 s window would still sit near +1 dB after 1 s, and
+//      even with the anchor helping it cannot pass the +3 dB gate;
+//   3. the v2.12 persistence: the signal stops, the curve stays.
+void testEqVeriteCurve()
+{
+    beginTest ("EQ-Verite curve: single blend, flush on knob, persistence (v2.47)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    NoiseSource src (0.3f);
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    auto mock = std::make_unique<MockParamConsole>();
+    MockParamConsole* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // the parameter relay is attached to the hosted knob - the flush
+    // plumbing is alive before anything else is asserted
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 1,
+                "the hosted parameter carries the change relay");
+
+    SpectrumPanel panel (proc);
+
+    // the real cadence: one panel tick per ~3 audio blocks
+    auto drive = [&] (double seconds)
+    {
+        const int blocks = (int) (seconds * 48000.0 / 512.0);
+
+        for (int n = 0; n < blocks; ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (n % 3 == 0)
+                panel.runAnalysisTick();
+        }
+    };
+
+    const TransferAnalyzer& ana = proc.getTransferAnalyzer();
+    auto coveringBin = [&ana] (double freq)
+    {
+        for (int b = 0; b < TransferAnalyzer::numScopeBins - 1; ++b)
+            if (ana.getBinFrequency (b) <= freq
+                && ana.getBinFrequency (b + 1) > freq)
+                return b;
+
+        return TransferAnalyzer::numScopeBins - 1;
+    };
+
+    const int bin500 = coveringBin (500.0);
+
+    // 1. ~3 s of broadband passthrough: the single curve reads flat
+    drive (3.0);
+
+    expectTrue (panel.isEqBinMeasured (bin500),
+                "the 500 Hz band is measured by the EQ-Verite curve");
+
+    expectNear (panel.getEqDbAtBin (bin500), 0.0, 1.5,
+                "the EQ-Verite curve reads flat 0 dB in passthrough (got "
+                + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
+
+    // 2. the knob turn: +6 dB through the REAL hosted parameter, so
+    // the relay fires the flush and the long window restarts fast.
+    // ~1 s of audio later the curve must read the new response -
+    // the +3 dB gate is chosen to fail without the flush (a tau ~5 s
+    // window alone reaches ~+1 dB in 1 s, and even with the anchor's
+    // help the blend stays near +2.3 dB).
+    // setValueNotifyingHost expects a NORMALIZED 0-1 value, not the raw
+    // gain - convert the linear gain 2.0 (i.e. +6 dB) first.
+    mockPtr->gainParam->setValueNotifyingHost (
+        mockPtr->gainParam->convertTo0to1 (2.0f));
+    drive (1.0);
+
+    expectTrue (panel.getEqDbAtBin (bin500) > 3.0f,
+                "the flush makes the EQ-Verite curve react within ~1 s "
+                "of a hosted knob turn (got "
+                + juce::String (panel.getEqDbAtBin (bin500), 2)
+                + " dB > +3; without the flush the 5 s window would "
+                  "still read near +2)");
+
+    // 3. converged blend: the flush's fast frames are done, the long
+    // window and the anchor agree - the curve settles on the true +6
+    drive (4.0);
+
+    expectNear (panel.getEqDbAtBin (bin500), 6.0, 1.5,
+                "the EQ-Verite curve settles on the true +6 dB response "
+                "(got " + juce::String (panel.getEqDbAtBin (bin500), 2)
+                + " dB)");
+
+    // 4. the v2.12 persistence, unchanged by the blend: the signal
+    // stops, both members' gates close, the sticky flags and held
+    // values keep the curve on screen
+    for (int n = 0; n < (int) (1.0 * 48000.0 / 512.0); ++n)
+    {
+        fillSilence (block);
+        proc.processBlock (block, noMidi);
+
+        if (n % 3 == 0)
+            panel.runAnalysisTick();
+    }
+
+    expectNear (panel.getEqDbAtBin (bin500), 6.0, 1.5,
+                "the EQ-Verite curve persists after the signal stops "
+                "(v2.12 gate, got "
+                + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
 }
 
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
@@ -1957,7 +2149,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.46.0");
+        session->setAttribute ("version", "2.47.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -2123,7 +2315,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.46.0");
+    session->setAttribute ("version", "2.47.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2346,8 +2538,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.46.0",
-                "saved state carries the current version tag (2.46.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.47.0",
+                "saved state carries the current version tag (2.47.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2685,7 +2877,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.46.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.47.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3348,7 +3540,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.46.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.47.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3365,6 +3557,7 @@ int main (int argc, char* argv[])
     testEqUncorrelatedConsoleNoise();
     testEqCurveSmoothing();
     testEqMaxHoldTrace();
+    testEqVeriteCurve();
     testConsoleSlotStatus();
     testPresetManager();
     testCurrentPresetTracking();

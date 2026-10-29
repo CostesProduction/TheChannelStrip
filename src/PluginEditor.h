@@ -91,12 +91,16 @@ public:
     // analysis directly (no visible editor, no running timer) and
     // inspects the measured EQ curve bin by bin.
     void runAnalysisTick();
+    // v2.47.0: the EQ curve the panel draws is now ONE curve - the
+    // EQ-Verite blend (2/3 cross-spectrum transfer + 1/3 max-anchor,
+    // see smoothEqVerite below). These hooks return that single curve;
+    // the v2.46 trace pair is gone from the display.
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
-    // v2.46: same pair for the "EQ @ max" trace (dB maxOut - dB maxIn
-    // over 5-second sliding maxima), so the harness can drive and
-    // assert it exactly like the transfer curve.
+    // v2.46 -> v2.47: the "EQ @ max" machinery SURVIVES as the anchor
+    // third of the single EQ curve (and the harness still drives it
+    // directly through these hooks to test the max logic itself).
     float getEqMaxDbAtBin (int bin) const;
     bool isEqMaxBinMeasured (int bin) const;
 
@@ -165,6 +169,40 @@ private:
     // (like smoothDiff) and resets with the panel, on editor reopen.
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMeasured;
 
+    // -----------------------------------------------------------------
+    // v2.47.0 (Clement's design call): ONE EQ curve. No engineer wants
+    // to cross-read several traces to know what the console does - the
+    // panel now draws a single line, the best ESTIMATE OF THE TRUTH:
+    //
+    //   EQ = 2/3 * (H1 cross-spectrum transfer, tau ~5 s, flushed)
+    //     + 1/3 * (the v2.46 max anchor)
+    //
+    // The reference simulation (soft-saturation mock, bursty
+    // programme, ground truth at two drive levels) picked these exact
+    // weights: of every blend tested, 2/3 slow + 1/3 max had the best
+    // median wander (2.2 dB p-p vs 4.3 dB for the production tau of
+    // v2.46), ZERO staircase steps, and a fidelity to the exact
+    // energy-weighted response within ~0.5 dB. The long-window H1
+    // member measures the energy-weighted truth (what the programme
+    // actually experienced); the max member anchors the curve at the
+    // console's peak-drive response, which stabilises the residual
+    // wander and bridges the flush restart. Both members are already
+    // smoothed (H1 display EMA; the max difference runs the same
+    // Savitzky-Golay pass as the transfer curve), so the blend itself
+    // only needs a light final one-pole for continuity.
+    //
+    // Measured flags combine as a UNION: a bin is drawn once EITHER
+    // member has measured it, and the value is the weight-renormalised
+    // blend of whichever members are valid there (a band the max
+    // never gated in but the H1 measures reads the H1 alone, and vice
+    // versa). Persistence (v2.12) is preserved as-is: the flags are
+    // sticky and both member arrays hold their last value while the
+    // gates are closed, so the curve stays on screen when the signal
+    // stops.
+    // -----------------------------------------------------------------
+    std::array<float, SpectrumAnalyzer::numScopeBins> smoothEqVerite {};
+    std::array<bool, SpectrumAnalyzer::numScopeBins> eqVeriteMeasured {};
+
     // v2.22: the EQ value itself (20*log10|H|, the H1 cross-spectrum
     // estimate) and its coherence now come from the TransferAnalyzer
     // on the audio thread, which accumulates the cross-spectrum Sxy
@@ -188,43 +226,40 @@ private:
     int maxRingIndex = 0;
 
     // -----------------------------------------------------------------
-    // v2.46.0 (Clement's idea): the "EQ @ max" trace - a SECOND EQ
-    // curve, dB MaxOut - dB MaxIn, computed from 5-second sliding
+    // v2.46.0 (Clement's idea) -> v2.47.0 (the ANCHOR): the "EQ @ max"
+    // machinery - dB MaxOut - dB MaxIn, computed from 5-second sliding
     // maxima of the smoothed IN and OUT curves (150 frames at 30 Hz -
     // a shorter window than the 10 s max-hold overlay above, because
-    // this trace must also react when a knob goes DOWN: the old peak
+    // the anchor must also react when a knob goes DOWN: the old peak
     // leaves the window after at most 5 s).
     //
-    // Why it is exactly right for a linear console: the max is
+    // Why the max is exactly right for a linear console: it is
     // HOMOGENEOUS - max (H*x) = H * max (x) - and the IN/OUT display
     // smoothing is affine-equivariant (the same one-pole on both
     // curves, so smoothOut = H + smoothIn bin by bin), so the max
     // difference is the exact transfer, measured at the programme's
-    // PEAK DRIVE of each band. That is the answer to the wave
-    // problem the v2.45 averaging could not solve: Clement's bypass
-    // test proved the waves are the console's own programme-
-    // dependent response (asymmetric L/R summed to mono + level
-    // dependent saturation) - an honest measurement, not noise. The
-    // max fixes the operating point instead of averaging over it: it
-    // always reports the response AT the loudest moment of the
-    // window, a repeatable, stable curve even on a saturating
-    // console, and transients count properly (the attack IS the max).
+    // PEAK DRIVE of each band. That is what makes it a good ANCHOR
+    // for the single EQ curve: it always reports the response AT the
+    // loudest moment of the window, a repeatable, stable operating
+    // point even on a saturating console, and transients count
+    // properly (the attack IS the max).
     //
-    // Ballistics: UP is immediate (a louder passage lifts the max on
-    // the very next tick); DOWN follows the 5 s sliding window (the
-    // trace keeps a knob's old value until the loud passage that
-    // carries it exits the window) - Clement's accepted trade.
-    //
-    // Documented cost, honestly: no cross-spectrum junk rejection -
-    // where a console lowpass sinks the signal under the console's
-    // own floor, the held max Out eventually reads the floor (the
-    // v2.21.1 artifact); this trace is display-side (UI thread, 30
-    // Hz, zero audio-thread cost) and the coherence-gated transfer
-    // curve remains the reference measurement. A relative input gate
-    // (maxIn within 45 dB of the strongest max band, floor -75 dB)
-    // keeps the trace to bands that really carried programme energy,
-    // and the same Savitzky-Golay pass as the transfer curve smooths
-    // the difference for visual consistency.
+    // v2.47.0: the trace is no longer drawn as a second curve - it is
+    // the anchor THIRD of the EQ-Verite blend (see smoothEqVerite
+    // above), which is what tames its one honest cost: on a knob DOWN
+    // the max HOLDS the old value until the loud passage that carries
+    // it exits the 5 s window, and at 1/3 weight that hold reads as
+    // the curve gliding down instead of a dashed line squatting high.
+    // The other documented cost is unchanged: no cross-spectrum junk
+    // rejection - where a console lowpass sinks the signal under the
+    // console's own floor, the held max Out eventually reads the
+    // floor (the v2.21.1 artifact) - which is exactly why the H1
+    // member carries 2/3 of the blend. A relative input gate (maxIn
+    // within 45 dB of the strongest max band, floor -75 dB) keeps the
+    // anchor to bands that really carried programme energy, and the
+    // same Savitzky-Golay pass as the transfer curve smooths the
+    // difference for visual consistency. Display-side (UI thread,
+    // 30 Hz, zero audio-thread cost).
     // -----------------------------------------------------------------
     static constexpr int maxEqFrames = 150;
     std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn {};

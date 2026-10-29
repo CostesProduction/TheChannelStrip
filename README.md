@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.46.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.47.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,67 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.47.0**
+  - **ONE EQ curve - the "EQ-Vérité" (Clement's design call: "no
+    engineer accepts cross-reading several curves; one curve that
+    estimates the truth is enough").** The two traces of v2.46 are
+    gone from the display; the panel now draws a single line:
+    2/3 cross-spectrum H1 transfer (averaging window lengthened to
+    tau ~5 s) + 1/3 max anchor (the v2.46 "EQ @ max" machinery,
+    demoted from a second curve to the anchor third). The weights
+    are not a guess: the v2.47 reference simulation (soft-saturation
+    mock, bursty programme, ground truth measured at two drive
+    levels) tested every candidate - the production 1/8 window, the
+    fast/slow H1s, the max alone, the 4-curve average, the 2-curve
+    averages - and 2/3 slow + 1/3 max had the best median wander of
+    all the blends that keep a sub-second knob response (2.2 dB
+    peak-to-peak vs 4.3 dB for the v2.46 production settings), zero
+    staircase steps, and fidelity to the exact energy-weighted
+    response of the whole programme within ~0.5 dB. A bin is drawn
+    once EITHER member has measured it, the weights renormalise
+    over the valid members, and the v2.12 persistence is untouched:
+    the curve stays on screen when the signal stops.
+  - **The long window without the long wait: the deterministic
+    flush.** A tau ~5 s window alone would take ~9 s to read a knob
+    turn. The shell now KNOWS when the console's response changed:
+    an AudioProcessorParameter listener attached to every parameter
+    of the hosted plugin (and the console swap/clear paths) calls
+    TransferAnalyzer::requestFlush, and the estimators restart with
+    a fast alpha (1/2 for the first 8 frames, ~1.4 s) before the
+    long window takes over again. No detection, no thresholds - the
+    v2.45 double-EMA dead end (a knob step is indistinguishable from
+    the wave noise) is exactly what this avoids: the knob event is
+    observable, the signal is not parsed. Thread-safe by design (one
+    atomic store), the relay detaches before any plugin retires, and
+    the audio-thread cost is unchanged to the flops - the flush
+    itself is four array fills consumed once per event.
+  - **Why the window had to grow.** The v2.46 1/8 window (~1.4 s)
+    only ever sees one operating point of a saturating console, so
+    the honest programme-driven waves (the bypass test: flat and
+    immobile in bypass on the same dynamic music) moved the curve
+    band by band. The 5 s window spans the bursts AND the quiet
+    bed and settles on the energy-weighted mixture the ear actually
+    hears: median band wander 0.9 dB in the simulation (vs 4.3 dB
+    at 1/8) and the best fidelity of every estimator tested.
+  - **Readout, help and anchor all speak the single curve.** The
+    hover readout's EQ value, the harness hooks (getEqDbAtBin /
+    isEqBinMeasured) and the drawn line are the same blend; the max
+    machinery keeps its own hooks (getEqMaxDbAtBin) so the anchor
+    logic stays directly testable, and the v2.46 trace test is
+    unchanged - it still passes (the anchor's ballistics contract
+    is the same). New harness test: EQ-Verite flat in passthrough,
+    knob turned through the REAL hosted parameter (the full relay ->
+    flush path) reacting within ~1 s, and persistence after the
+    signal stops.
+  - **Honest costs, kept in the code comments.** The max anchor has
+    no coherence rejection (a console lowpass sinking the signal
+    under the console floor reads the floor - the v2.21.1 artifact,
+    at 1/3 weight and outvoted by the H1 member); on a knob down
+    the anchor holds its old value until the carrying passage exits
+    the 5 s window, which the blend reads as the curve gliding down
+    instead of a dashed line squatting high. The 4-curve and plain
+    2-curve averages were rejected on the simulation's numbers:
+    a blend of correlated members dilutes, it does not filter.
 - **2.46.0**
   - **The "EQ @ max" trace (Clement's idea: dB MaxOut - dB MaxIn).**
     A second EQ curve, drawn dashed next to the solid transfer

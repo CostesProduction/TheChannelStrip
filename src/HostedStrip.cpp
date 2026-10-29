@@ -11,10 +11,16 @@ namespace
 HostedStrip::HostedStrip()
 {
     formatManager.addDefaultFormats();
+    paramRelay.owner = this;
 }
 
 HostedStrip::~HostedStrip()
 {
+    // v2.47.0: detach the parameter relay BEFORE anything dies, so a
+    // hosted plugin can never call parameterValueChanged on a
+    // half-destroyed shell. Message thread (processor teardown).
+    detachRelayFromAll();
+
     retireOutgoingNow();
 
     if (auto* active = activeSlot.exchange (nullptr, std::memory_order_acq_rel))
@@ -23,6 +29,33 @@ HostedStrip::~HostedStrip()
             active->plugin->releaseResources();
         delete active;
     }
+}
+
+// v2.47.0: attach the change relay to every parameter of one plugin.
+// Called on the message thread (setPlugin paths); the parameter list
+// of a live plugin is stable there.
+void HostedStrip::attachRelayTo (juce::AudioProcessor& plugin)
+{
+    for (auto* param : plugin.getParameters())
+    {
+        if (param == nullptr)
+            continue;
+
+        param->addListener (&paramRelay);
+        relayedParameters.push_back (param);
+    }
+}
+
+// v2.47.0: detach everywhere we attached. Idempotent and order-safe
+// (a plugin that already died with its listeners registered cannot
+// happen: this runs before every retirement path).
+void HostedStrip::detachRelayFromAll()
+{
+    for (auto* param : relayedParameters)
+        if (param != nullptr)
+            param->removeListener (&paramRelay);
+
+    relayedParameters.clear();
 }
 
 void HostedStrip::prepareToPlay (double newSampleRate, int newSamplesPerBlock, int maxChannels)
@@ -66,16 +99,32 @@ void HostedStrip::setPlugin (std::unique_ptr<juce::AudioProcessor> newPlugin)
     slot->plugin = std::move (newPlugin);
     slot->fade.store (0.0f, std::memory_order_relaxed);
 
+    // v2.47.0: the outgoing console's relay goes first (its
+    // parameters must not notify once it starts fading), then the
+    // new one is attached, then the response-change callback fires -
+    // a different console IS a different response, and the transfer
+    // estimators restart on it (message thread, like the swap itself).
+    detachRelayFromAll();
+    attachRelayTo (*slot->plugin);
+
     auto* raw = slot.release();
     auto* oldActive = activeSlot.exchange (raw, std::memory_order_acq_rel);
 
     if (oldActive != nullptr)
         retireActiveIntoOutgoing (oldActive);
+
+    if (onConsoleResponseChanged)
+        onConsoleResponseChanged();
 }
 
 void HostedStrip::clearPlugin()
 {
     reportedLatency.store (0, std::memory_order_relaxed);
+
+    // v2.47.0: the relay detaches before the plugin retires; the
+    // callback fires so the estimators restart (no console = back to
+    // the dry identity response).
+    detachRelayFromAll();
 
     auto* oldActive = activeSlot.exchange (nullptr, std::memory_order_acq_rel);
 
@@ -83,6 +132,9 @@ void HostedStrip::clearPlugin()
         retireActiveIntoOutgoing (oldActive);
     else
         retireOutgoingNow();
+
+    if (onConsoleResponseChanged)
+        onConsoleResponseChanged();
 }
 
 void HostedStrip::retireActiveIntoOutgoing (HostedSlot* oldActive)

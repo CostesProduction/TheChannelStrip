@@ -263,6 +263,9 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     eqMaxMeasured.fill (false);
+    // v2.47.0: the single EQ-Verite curve starts empty like its members.
+    smoothEqVerite.fill (0.0f);
+    eqVeriteMeasured.fill (false);
 
     startTimerHz (30);
 }
@@ -397,6 +400,8 @@ void SpectrumPanel::resetDisplay()
     maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     eqMaxMeasured.fill (false);
+    smoothEqVerite.fill (0.0f);
+    eqVeriteMeasured.fill (false);
     repaint();
 }
 
@@ -511,8 +516,10 @@ void SpectrumPanel::drawHoverReadout (juce::Graphics& g) const
     segments.add (Segment { "IN "  + formatReadoutDb (dbIn),  juce::Colour (0xffe2a14f) });
     segments.add (Segment { "OUT " + formatReadoutDb (dbOut), juce::Colour (0xff54c8e8) });
 
-    if (eqMeasured[(size_t) bin])
-        segments.add (Segment { "EQ " + formatReadoutDb (smoothDiff[(size_t) bin]),
+    // v2.47.0: the readout's EQ value is the SAME single curve the
+    // panel draws (the EQ-Verite blend), not the bare H1 member.
+    if (eqVeriteMeasured[(size_t) bin])
+        segments.add (Segment { "EQ " + formatReadoutDb (smoothEqVerite[(size_t) bin]),
                                 juce::Colour (0xff7ee08a) });
 
     // right-aligned at the top, clear of the centred legend and of the
@@ -700,8 +707,9 @@ void SpectrumPanel::updateBallistics()
     // measured once stays drawn, holding its last value).
     //
     // The measurement is already time-averaged in the analyzer's EMAs
-    // (~1.4 s effective - the v2.46 revert of the v2.45 experiment;
-    // the calm curve is the new max trace above); the frequency-dependent settling and
+    // (tau ~5 s since v2.47 - the long energy-weighted window; the
+    // knob reactivity is restored by the analyzer's deterministic
+    // flush, not by a short window); the frequency-dependent settling and
     // confidence weights of v2.13/v2.21 tuned per-frame dB ratios that
     // no longer exist, so the display EMA here is a single light
     // one-pole for continuity only.
@@ -740,6 +748,56 @@ void SpectrumPanel::updateBallistics()
             eqMeasured[(size_t) b] = true;
 
             smoothDiff[(size_t) b] += eqAlpha * (eqDb[b] - smoothDiff[(size_t) b]);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // v2.47.0 (Clement's design call): ONE curve - the EQ-Verite blend.
+    // Every member above is computed and gated exactly as before (the
+    // H1 transfer with its coherence + relative gates, the v2.46 max
+    // anchor with its own gate); here they merge into the single line
+    // the panel draws:
+    //
+    //   EQ = (2 * smoothDiff + maxEqDiff) / 3   (2/3 H1 + 1/3 anchor)
+    //
+    // The measured flags combine as a UNION and the weights
+    // renormalise over whichever members are valid in the bin, so a
+    // band only one member ever gated in still reads (and the sticky
+    // flags keep the whole curve on screen when the signal stops -
+    // the v2.12 persistence, unchanged). A light final one-pole
+    // (tau ~0.3 s) keeps the blend continuous when a member wakes up
+    // or a flush restarts the H1 mid-window.
+    //
+    // Why these weights: the v2.47 reference simulation (soft-
+    // saturation mock, bursty programme, ground truth at two drive
+    // levels) tested every candidate - the production 1/8 window,
+    // fast/slow H1, the max alone, and the 4-curve and 2-curve
+    // averages. 2/3 slow H1 + 1/3 max had the best median wander of
+    // all the blends that keep a sub-second knob response (2.2 dB p-p
+    // vs 4.3 dB for the v2.46 production settings), zero staircase
+    // steps, and fidelity to the exact energy-weighted response within
+    // ~0.5 dB. Clement's own summary of what the display owes the
+    // engineer: ONE curve, the best estimate of the truth.
+    // -----------------------------------------------------------------
+    {
+        constexpr float veriteAlpha = 1.0f / (1.0f + 30.0f * 0.3f);
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            const size_t bi = (size_t) b;
+
+            const float wH = eqMeasured[bi] ? 2.0f : 0.0f; // the H1 truth: 2/3
+            const float wM = eqMaxMeasured[bi] ? 1.0f : 0.0f; // the anchor: 1/3
+            const float wSum = wH + wM;
+
+            if (wSum <= 0.0f)
+                continue; // neither member ever measured here: hold
+
+            eqVeriteMeasured[bi] = true;
+
+            const float target = (wH * smoothDiff[bi] + wM * maxEqDiff[bi]) / wSum;
+
+            smoothEqVerite[bi] += veriteAlpha * (target - smoothEqVerite[bi]);
         }
     }
 
@@ -836,16 +894,18 @@ void SpectrumPanel::runAnalysisTick()
 
 float SpectrumPanel::getEqDbAtBin (int bin) const
 {
-    return smoothDiff[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+    // v2.47.0: the harness reads the SINGLE curve the panel draws -
+    // the EQ-Verite blend (2/3 H1 transfer + 1/3 max anchor).
+    return smoothEqVerite[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
 }
 
 bool SpectrumPanel::isEqBinMeasured (int bin) const
 {
-    return eqMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+    return eqVeriteMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
 }
 
-// v2.46: same pair for the "EQ @ max" trace (see updateBallistics -
-// the values are maintained alongside the transfer curve).
+// v2.46 -> v2.47: the max machinery is now the ANCHOR third of the
+// single EQ curve (kept directly testable through these hooks).
 float SpectrumPanel::getEqMaxDbAtBin (int bin) const
 {
     return maxEqDiff[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
@@ -1153,7 +1213,9 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
 // labelled on the right edge (v2.12: clicking those labels toggles the
 // scale).
 // v2.12: the path covers every bin that has EVER been measured
-// (eqMeasured), not just the bins where the input currently has energy
+// (since v2.47.0 that flag is the UNION eqVeriteMeasured - either the
+// H1 member or the max anchor gated the bin in), not just the bins
+// where the input currently has energy
 // - previously the path broke wherever smoothIn fell below -80 dB, so
 // whole pieces of the curve vanished and came back with the program's
 // spectrum. Measured bins keep their last value; the path only breaks
@@ -1166,16 +1228,21 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
 
     const float range = eqRangeDb();
 
+    // v2.47.0: ONE curve - the EQ-Verite blend (2/3 cross-spectrum
+    // truth + 1/3 max anchor), drawn for exactly the bins either
+    // member ever measured (sticky flags, v2.12 persistence). The
+    // v2.46 dashed max trace is gone from the display: its job is now
+    // the anchor third of this line.
     for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
     {
-        if (! eqMeasured[(size_t) bin])
+        if (! eqVeriteMeasured[(size_t) bin])
         {
             started = false; // skip bins that were never measured
             continue;
         }
 
         const float x = xForBin (bin);
-        const float y = yForEqDb (juce::jlimit (-range, range, smoothDiff[(size_t) bin]));
+        const float y = yForEqDb (juce::jlimit (-range, range, smoothEqVerite[(size_t) bin]));
 
         if (! started)
         {
@@ -1219,48 +1286,6 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     g.strokePath (path, juce::PathStrokeType (1.8f,
                                               juce::PathStrokeType::curved,
                                               juce::PathStrokeType::rounded));
-
-    // v2.46.0 (Clement's idea): the "EQ @ max" trace - dB MaxOut minus
-    // dB MaxIn over the 5-second sliding maxima. Dashed and softer
-    // than the transfer curve so the coherence-gated cross-spectrum
-    // (solid) stays the reference reading and this one reads as the
-    // peak-drive view: stable by construction, immediate on knob-up,
-    // holding for up to 5 s on knob-down.
-    {
-        juce::Path maxPath;
-        bool maxStarted = false;
-
-        for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
-        {
-            if (! eqMaxMeasured[(size_t) bin])
-            {
-                maxStarted = false;
-                continue;
-            }
-
-            const float x = xForBin (bin);
-            const float y = yForEqDb (juce::jlimit (-range, range,
-                                                    maxEqDiff[(size_t) bin]));
-
-            if (! maxStarted)
-            {
-                maxPath.startNewSubPath (x, y);
-                maxStarted = true;
-            }
-            else
-            {
-                maxPath.lineTo (x, y);
-            }
-        }
-
-        const juce::PathStrokeType maxStroke (1.4f);
-        const float maxDash[] = { 3.0f, 3.0f };
-        juce::Path dashedMax;
-        maxStroke.createDashedStroke (dashedMax, maxPath, maxDash, 2);
-
-        g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.55f));
-        g.strokePath (dashedMax, maxStroke);
-    }
 
     // the EQ scale labels, match the curve's range (v2.8: dynamic,
     // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).

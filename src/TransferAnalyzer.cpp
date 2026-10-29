@@ -1,25 +1,31 @@
 #include "TransferAnalyzer.h"
 #include <cmath>
 
-// v2.46: the EMA factor per completed frame. One frame every 8192
-// samples (~170 ms at 48 kHz); 1/8 gives an effective average over
-// the last ~8 frames (~1.4 s).
+// v2.47.0 (the EQ-Verite curve): TWO alphas now. The LONG one (1/30 per
+// ~170 ms frame, tau ~5 s) makes the H1 estimate the energy-weighted
+// truth of the whole programme - the reference simulation measured a
+// median band wander of 0.9 dB (vs 4.3 dB at the v2.46 1/8) and the
+// best fidelity to the exact energy-weighted response of every
+// estimator tested. The FAST one (1/2, for the 8 frames (~1.4 s)
+// following a flush) restores the knob reactivity a 5 s window alone
+// cannot have: the shell calls requestFlush() when it KNOWS the
+// console's response changed (hosted parameter moved, console
+// swapped), and the estimators restart on fast averaging before the
+// long window takes over again. No detection, no thresholds - the
+// v2.45 double-EMA dead end below is exactly what this avoids.
 //
-// v2.45 tried 1/32 (~5.4 s) to kill the "waves" on dynamic music
-// (programme-driven estimator variance) - the full story is kept
-// below. Clement's bypass test settled it: in BYPASS the EQ curve
-// is a flat, immobile line on the same dynamic music, so the waves
-// are NOT estimator variance - they are the console's own programme-
-// dependent response (asymmetric L/R channels summed to mono, level
-// dependent saturation), an HONEST measurement no averaging can or
-// should remove. The x4 slower average bought nothing perceptible
-// and cost the knob reactivity Clement wants, so it is reverted.
-// The calm curve he asked for is now served by the v2.46 "EQ @ max"
-// display trace (see SpectrumPanel): the 5-second sliding maxima of
-// the IN and OUT curves hold the response at the programme's peak
-// drive - a fixed, repeatable operating point - and their dB
-// difference is an exact transfer for a linear console (the max is
-// homogeneous: max (H*x) = H * max (x)).
+// v2.46 kept 1/8 (~1.4 s). Clement's bypass test had settled WHY the
+// waves remain at any window: in BYPASS the EQ curve is flat and
+// immobile on the same dynamic music, so the waves are NOT estimator
+// variance - they are the console's own programme-dependent response
+// (asymmetric L/R channels summed to mono, level dependent
+// saturation), an HONEST measurement. A short window chases whichever
+// operating point the last second sat in; the long window averages
+// over the bursts AND the quiet bed and settles on the mixture the ear
+// hears. What the short window bought - knob reactivity - is now paid
+// by the deterministic flush instead, and the v2.46 "EQ @ max" trace
+// survives as the UI-side ANCHOR of the single displayed curve (one
+// third of it, see SpectrumPanel).
 //
 // v2.45's documented dead end, kept for the record: a per-band
 // deviation detector (fast EMA vs slow EMA) cannot work - on a
@@ -28,7 +34,9 @@
 // frequency-domain kernel family was already exhausted: a 1-2 octave
 // wave is locally cubic, so any kernel that removes it eats a genuine
 // Q1 EQ peak.
-static constexpr double crossEmaAlpha = 1.0 / 8.0;
+static constexpr double longCrossEmaAlpha  = 1.0 / 30.0;
+static constexpr double fastCrossEmaAlpha = 1.0 / 2.0;
+static constexpr int    fastFramesAfterFlush = 8;
 
 void TransferAnalyzer::prepare (double newSampleRate, int maxBlockSize)
 {
@@ -94,6 +102,18 @@ void TransferAnalyzer::reset()
     fifoOut.fill (0.0f);
     pendingIn.clear();
     pendingOut.clear();
+
+    // v2.47.0: a reset IS a restart - no stale flush may fire against
+    // the freshly zeroed estimators.
+    flushRequested.store (false, std::memory_order_relaxed);
+    fastFramesRemaining = 0;
+}
+
+// v2.47.0: the flush handshake (see the header). One atomic store;
+// consumed by the next completed frame on the audio thread.
+void TransferAnalyzer::requestFlush()
+{
+    flushRequested.store (true, std::memory_order_release);
 }
 
 // The input half: a mono mixdown of the block as it ARRIVES, before
@@ -169,6 +189,26 @@ void TransferAnalyzer::pushOutput (const juce::AudioBuffer<float>& buffer)
 
 void TransferAnalyzer::compute()
 {
+    // v2.47.0: consume a pending flush BEFORE this frame votes. The
+    // estimators restart from zero, and the next fastFramesAfterFlush
+    // frames average fast (1/2) so a knob turn reads within ~1.4 s;
+    // afterwards the long window (1/30) takes over again and
+    // re-converges undisturbed. Zero allocations, four fills.
+    if (flushRequested.exchange (false, std::memory_order_acq_rel))
+    {
+        emaSxx.fill (0.0);
+        emaSyy.fill (0.0);
+        emaSxyRe.fill (0.0);
+        emaSxyIm.fill (0.0);
+        fastFramesRemaining = fastFramesAfterFlush;
+    }
+
+    const double alpha = (fastFramesRemaining > 0)
+        ? fastCrossEmaAlpha : longCrossEmaAlpha;
+
+    if (fastFramesRemaining > 0)
+        --fastFramesRemaining;
+
     // performRealOnlyForwardTransform: real samples in the first half
     // of a 2*fftSize array, interleaved complex bins [re, im] on return
     // (the JUCE FFT contract; see juce_FFT.h). Windowed identically on
@@ -263,10 +303,10 @@ void TransferAnalyzer::compute()
 
         const size_t bi = (size_t) b;
 
-        emaSxx  [bi] += crossEmaAlpha * (sxx - emaSxx  [bi]);
-        emaSyy  [bi] += crossEmaAlpha * (syy - emaSyy  [bi]);
-        emaSxyRe[bi] += crossEmaAlpha * (sre - emaSxyRe[bi]);
-        emaSxyIm[bi] += crossEmaAlpha * (sim - emaSxyIm[bi]);
+        emaSxx  [bi] += alpha * (sxx - emaSxx  [bi]);
+        emaSyy  [bi] += alpha * (syy - emaSyy  [bi]);
+        emaSxyRe[bi] += alpha * (sre - emaSxyRe[bi]);
+        emaSxyIm[bi] += alpha * (sim - emaSxyIm[bi]);
     }
 
     // v2.44.0 pass 2: the outputs are computed from the FREQUENCY-

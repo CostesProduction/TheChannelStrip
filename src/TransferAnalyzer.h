@@ -64,6 +64,22 @@ public:
     // be a phantom measurement.
     void reset();
 
+    // v2.47.0 (the EQ-Verite curve): ask the estimators to RESTART on
+    // the next completed frame. Thread-safe from any thread (one atomic
+    // store) because the callers are UI/message-thread events, not
+    // audio. The v2.47 averaging window is LONG (tau ~5 s - the
+    // energy-weighted truth of what the programme actually experienced,
+    // which the v2.45/v2.46 bypass test proved is the console's own
+    // programme-dependent response, not noise); a long window alone
+    // would take several seconds to reflect a knob turn. The flush is
+    // the deterministic half of that contract: the shell KNOWS when the
+    // console's response changed (a hosted parameter moved, a console
+    // was swapped - observable events, not signal detection, which the
+    // v2.45 double-EMA dead end already proved cannot be tuned), so it
+    // asks for a restart here and compute() re-runs the first frames
+    // with a FAST alpha before handing back to the long window.
+    void requestFlush();
+
     // Mono mixdown of the buffer as it arrives (call BEFORE the console
     // runs). The two pushes always receive the same block sizes, so the
     // two fifos fill in lockstep and frame k of IN covers exactly the
@@ -166,16 +182,44 @@ private:
 
     // per-display-band EMAs of the band-aggregated spectra. The complex
     // pair (SxyRe, SxyIm) is accumulated complex - that is what cancels
-    // the uncorrelated output junk over time. alpha = 1/8 per ~170 ms
-    // frame: an effective average over the last ~8 frames (~1.4 s),
-    // enough for the random-phase junk to average down, and a settle
-    // time of ~2 s on a knob turn. (v2.45 briefly tried 1/32 to calm
-    // programme-driven waves; Clement's bypass test proved those waves
-    // are the console's own programme-dependent response, not noise,
-    // so the slow average was reverted in v2.46 - see crossEmaAlpha in
-    // the .cpp for the full history.)
+    // the uncorrelated output junk over time.
+    //
+    // v2.47.0: alpha 1/30 per ~170 ms frame - tau ~5 s, an effective
+    // average over the last ~30 frames. The v2.46 revert had 1/8
+    // (~1.4 s): enough for random-phase junk to average down, but the
+    // programme-driven waves Clement measured honestly (his bypass
+    // test: flat and immobile in bypass, wavy on the same dynamic
+    // music - the console's own response, not estimator variance)
+    // still moved the curve band by band because a 1.4 s window only
+    // ever sees ONE operating point of a saturating console. The v2.47
+    // reference simulation (soft-saturation mock + bursty programme,
+    // ground truth measured at two drive levels) quantified the whole
+    // family: with a 5 s window the curve reads the ENERGY-WEIGHTED
+    // truth of the whole programme (median band wander 0.9 dB vs
+    // 4.3 dB at 1/8, and the fidelity to the exact energy-weighted
+    // response is the best of every estimator tested - the averaging
+    // window now spans the bursts AND the quiet bed, so it settles on
+    // the mixture the ear actually hears instead of chasing whichever
+    // operating point the last second happened to sit in). The cost,
+    // a ~9 s settle on a knob turn, is paid by the deterministic
+    // flush (requestFlush): the shell restarts the estimators with a
+    // fast alpha (1/2 for the first 8 frames, ~1.4 s) whenever it
+    // KNOWS the console's response changed, and the long window then
+    // re-converges undisturbed.
+    //
+    // (v2.45 briefly tried 1/32 with NO flush and no anchor - read the
+    // full dead-end history in the .cpp; the difference with v2.47 is
+    // that the reactivity now comes from the flush, not from a short
+    // window.)
     std::array<double, (size_t) numScopeBins> emaSxx {}, emaSyy {};
     std::array<double, (size_t) numScopeBins> emaSxyRe {}, emaSxyIm {};
+
+    // v2.47.0: the flush handshake (see requestFlush). The flag is set
+    // from any thread and consumed on the audio thread by the next
+    // completed frame; the counter then runs the fast restart alpha
+    // down. Plain int is fine: only compute() touches it.
+    std::atomic<bool> flushRequested { false };
+    int fastFramesRemaining = 0;
 
     // (the smoothing coefficients themselves are the public
     // smoothCoeffs above - see their comment for the full story)
