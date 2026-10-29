@@ -256,6 +256,13 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     // v2.10: the 10-second max hold starts empty (silent).
     maxOut.fill (-100.0f);
     maxRing.assign ((size_t) maxHoldFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    // v2.46: the EQ @ max trace starts with nothing measured (silent).
+    maxEqIn.fill (-100.0f);
+    maxEqOut.fill (-100.0f);
+    maxEqDiff.fill (0.0f);
+    maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    eqMaxMeasured.fill (false);
 
     startTimerHz (30);
 }
@@ -384,6 +391,12 @@ void SpectrumPanel::resetDisplay()
     eqMeasured.fill (false);
     maxOut.fill (-100.0f);
     maxRing.assign ((size_t) maxHoldFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    maxEqIn.fill (-100.0f);
+    maxEqOut.fill (-100.0f);
+    maxEqDiff.fill (0.0f);
+    maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
+    eqMaxMeasured.fill (false);
     repaint();
 }
 
@@ -587,6 +600,74 @@ void SpectrumPanel::updateBallistics()
         }
     }
 
+    // v2.46.0 (Clement's idea): the "EQ @ max" trace - dB MaxOut minus
+    // dB MaxIn over 5-second sliding maxima of the SMOOTHED curves
+    // (what the eye sees, exactly like the v2.10 max hold above). The
+    // max is homogeneous and the IN/OUT one-poles are identical, so
+    // for a linear console the difference is the EXACT transfer at
+    // the programme's peak drive - the fixed operating point that
+    // keeps the trace stable on a saturating console. See the member
+    // comment in the header for the full story and the honest costs.
+    {
+        std::copy (smoothIn.begin(), smoothIn.end(),
+                   maxEqInRing.begin() + maxEqRingIndex * SpectrumAnalyzer::numScopeBins);
+        std::copy (smoothOut.begin(), smoothOut.end(),
+                   maxEqOutRing.begin() + maxEqRingIndex * SpectrumAnalyzer::numScopeBins);
+        maxEqRingIndex = (maxEqRingIndex + 1) % maxEqFrames;
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            float mi = -100.0f;
+            float mo = -100.0f;
+
+            for (int f = 0; f < maxEqFrames; ++f)
+            {
+                mi = juce::jmax (mi, maxEqInRing[(size_t) f * SpectrumAnalyzer::numScopeBins
+                                                + (size_t) b]);
+                mo = juce::jmax (mo, maxEqOutRing[(size_t) f * SpectrumAnalyzer::numScopeBins
+                                                 + (size_t) b]);
+            }
+
+            maxEqIn [(size_t) b] = mi;
+            maxEqOut[(size_t) b] = mo;
+        }
+
+        // the same relative input gate as the transfer curve, applied
+        // to the maxima: a bin is drawn once its 5 s max input came
+        // within 45 dB of the programme's strongest max band (floor
+        // -75 dB) - only bands that really carried energy vote.
+        float peakMaxIn = -100.0f;
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+            peakMaxIn = juce::jmax (peakMaxIn, maxEqIn[(size_t) b]);
+
+        const float maxGateDb = juce::jmax (-75.0f, peakMaxIn - 45.0f);
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+            if (maxEqIn[(size_t) b] > maxGateDb)
+                eqMaxMeasured[(size_t) b] = true;
+
+        // the raw dB difference, then the same Savitzky-Golay pass as
+        // the transfer curve for visual consistency (clamped edges,
+        // exactly like the analyzer's own smoothing). Empty bins read
+        // 0 dB (both maxima silent) and never pass the gate, so they
+        // do not contaminate the drawn region.
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            double acc = 0.0;
+
+            for (int k = -TransferAnalyzer::smoothHalfWidth;
+                 k <= TransferAnalyzer::smoothHalfWidth; ++k)
+            {
+                const int bb = juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, b + k);
+                acc += TransferAnalyzer::smoothCoeffs[k + TransferAnalyzer::smoothHalfWidth]
+                     * (double) (maxEqOut[(size_t) bb] - maxEqIn[(size_t) bb]);
+            }
+
+            maxEqDiff[(size_t) b] = (float) acc;
+        }
+    }
+
     // v2.22: the EQ curve is the CROSS-SPECTRUM transfer estimate - the
     // full dual-FFT measurement that Smaart-class systems perform. The
     // TransferAnalyzer on the audio thread accumulates, per display
@@ -619,7 +700,8 @@ void SpectrumPanel::updateBallistics()
     // measured once stays drawn, holding its last value).
     //
     // The measurement is already time-averaged in the analyzer's EMAs
-    // (~5.4 s effective since v2.45); the frequency-dependent settling and
+    // (~1.4 s effective - the v2.46 revert of the v2.45 experiment;
+    // the calm curve is the new max trace above); the frequency-dependent settling and
     // confidence weights of v2.13/v2.21 tuned per-frame dB ratios that
     // no longer exist, so the display EMA here is a single light
     // one-pole for continuity only.
@@ -760,6 +842,18 @@ float SpectrumPanel::getEqDbAtBin (int bin) const
 bool SpectrumPanel::isEqBinMeasured (int bin) const
 {
     return eqMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+}
+
+// v2.46: same pair for the "EQ @ max" trace (see updateBallistics -
+// the values are maintained alongside the transfer curve).
+float SpectrumPanel::getEqMaxDbAtBin (int bin) const
+{
+    return maxEqDiff[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
+}
+
+bool SpectrumPanel::isEqMaxBinMeasured (int bin) const
+{
+    return eqMaxMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
 }
 
 void SpectrumPanel::paint (juce::Graphics& g)
@@ -1125,6 +1219,48 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     g.strokePath (path, juce::PathStrokeType (1.8f,
                                               juce::PathStrokeType::curved,
                                               juce::PathStrokeType::rounded));
+
+    // v2.46.0 (Clement's idea): the "EQ @ max" trace - dB MaxOut minus
+    // dB MaxIn over the 5-second sliding maxima. Dashed and softer
+    // than the transfer curve so the coherence-gated cross-spectrum
+    // (solid) stays the reference reading and this one reads as the
+    // peak-drive view: stable by construction, immediate on knob-up,
+    // holding for up to 5 s on knob-down.
+    {
+        juce::Path maxPath;
+        bool maxStarted = false;
+
+        for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
+        {
+            if (! eqMaxMeasured[(size_t) bin])
+            {
+                maxStarted = false;
+                continue;
+            }
+
+            const float x = xForBin (bin);
+            const float y = yForEqDb (juce::jlimit (-range, range,
+                                                    maxEqDiff[(size_t) bin]));
+
+            if (! maxStarted)
+            {
+                maxPath.startNewSubPath (x, y);
+                maxStarted = true;
+            }
+            else
+            {
+                maxPath.lineTo (x, y);
+            }
+        }
+
+        const juce::PathStrokeType maxStroke (1.4f);
+        const float maxDash[] = { 3.0f, 3.0f };
+        juce::Path dashedMax;
+        maxStroke.createDashedStroke (dashedMax, maxPath, maxDash, 2);
+
+        g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.55f));
+        g.strokePath (dashedMax, maxStroke);
+    }
 
     // the EQ scale labels, match the curve's range (v2.8: dynamic,
     // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).

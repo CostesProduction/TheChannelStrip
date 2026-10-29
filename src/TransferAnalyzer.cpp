@@ -1,47 +1,34 @@
 #include "TransferAnalyzer.h"
 #include <cmath>
 
-// v2.45: the EMA factor per completed frame. One frame every 8192
-// samples (~170 ms at 48 kHz); 1/32 gives an effective average over
-// the last ~32 frames (~5.4 s).
+// v2.46: the EMA factor per completed frame. One frame every 8192
+// samples (~170 ms at 48 kHz); 1/8 gives an effective average over
+// the last ~8 frames (~1.4 s).
 //
-// Why 1/32 (the full story, v2.44 -> v2.45): after v2.44's
-// Savitzky-Golay pass Clement still saw slow 1-2-octave waves ride
-// the EQ curve - but ONLY on real dynamic music, never on stationary
-// pink noise. That is the signature of ESTIMATOR VARIANCE on
-// intermittent energy, not of a smoothing problem: a band only
-// measures while its instruments play, and on bursty material each
-// burst leaves a slightly different energy-weighted H in the EMA, so
-// the estimate wanders with the programme. A 1-2-octave wave is
-// locally cubic, so NO frequency-domain kernel can remove it without
-// also eating a genuine Q1 EQ peak - the kernel family is exhausted;
-// the only remaining discriminator is TIME (a console response is
-// fixed, the variance waves move with the programme).
+// v2.45 tried 1/32 (~5.4 s) to kill the "waves" on dynamic music
+// (programme-driven estimator variance) - the full story is kept
+// below. Clement's bypass test settled it: in BYPASS the EQ curve
+// is a flat, immobile line on the same dynamic music, so the waves
+// are NOT estimator variance - they are the console's own programme-
+// dependent response (asymmetric L/R channels summed to mono, level
+// dependent saturation), an HONEST measurement no averaging can or
+// should remove. The x4 slower average bought nothing perceptible
+// and cost the knob reactivity Clement wants, so it is reverted.
+// The calm curve he asked for is now served by the v2.46 "EQ @ max"
+// display trace (see SpectrumPanel): the 5-second sliding maxima of
+// the IN and OUT curves hold the response at the programme's peak
+// drive - a fixed, repeatable operating point - and their dB
+// difference is an exact transfer for a linear console (the max is
+// homogeneous: max (H*x) = H * max (x)).
 //
-// A deviation detector (fast EMA vs slow EMA per band, tracking on
-// |dev| > threshold) was simulated and REJECTED: on a 12-instrument
-// bursty mock (duty ~15%) a real +6 dB Q1 knob step measures only
-// ~+2.9 dB at band level (energy-weighted aggregation dilutes the
-// peak), while the steady-state |dev| noise is ~1.2 dB rms -
-// indistinguishable. So v2.45 simply lengthens the ONE average every
-// band estimate needs. Reference simulation (that bursty mock,
-// console step +12 -> +18 dB Q1 @ 1.6 kHz): the typical band's wave
-// drops from 2.67 dB pp (1/8) to 0.19 dB pp (1/32, x14 calmer) and
-// 0.10 dB pp (1/64); the knob settles to +/-0.5 dB at the peak band
-// in 1.9 s (1/8), 9.4 s (1/32), 19.5 s (1/64) - on that mock, which
-// is harsher than real music (a real band gets energy far more
-// often). 1/32 is the calm/fast corner: the waves become invisible
-// while a knob move still settles within Clement's accepted 5-10 s
-// budget.
-//
-// Documented costs: a knob turn now needs ~5-10 s to fully settle
-// (was ~2 s) - the price of a calm curve on dynamic material. The
-// longer window only IMPROVES the random-phase junk cancellation in
-// Sxy (it cancels across frames, so more frames = less junk), and
-// the coherence gate gets a steadier g2. Warmup is unchanged: the
-// EMAs start empty and the accumulated complex estimate is valid as
-// soon as a band carries energy (the ratios are self-normalising).
-static constexpr double crossEmaAlpha = 1.0 / 32.0;
+// v2.45's documented dead end, kept for the record: a per-band
+// deviation detector (fast EMA vs slow EMA) cannot work - on a
+// bursty mock a real knob step measures only ~+2.9 dB at band level
+// while the steady-state deviation noise is ~1.2 dB rms. And the
+// frequency-domain kernel family was already exhausted: a 1-2 octave
+// wave is locally cubic, so any kernel that removes it eats a genuine
+// Q1 EQ peak.
+static constexpr double crossEmaAlpha = 1.0 / 8.0;
 
 void TransferAnalyzer::prepare (double newSampleRate, int maxBlockSize)
 {

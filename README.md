@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.45.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.46.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,40 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.46.0**
+  - **The "EQ @ max" trace (Clement's idea: dB MaxOut - dB MaxIn).**
+    A second EQ curve, drawn dashed next to the solid transfer
+    curve, computed from 5-second sliding maxima of the smoothed
+    IN and OUT curves. For a linear console it is the EXACT
+    transfer: the max is homogeneous (max (H*x) = H * max (x)) and
+    the IN/OUT display one-poles are identical, so the difference
+    is the response at the programme's PEAK DRIVE - a fixed,
+    repeatable operating point. That is what finally answers the
+    waves: Clement's bypass test proved they are the console's own
+    programme-dependent response (asymmetric L/R channels summed
+    to mono + level-dependent saturation), an honest measurement
+    no averaging can remove. The max trace fixes the operating
+    point instead of averaging over it: stable by construction,
+    transients count (the attack IS the max), immediate on a knob
+    up, holding up to 5 s on a knob down (the window Clement
+    chose). Gated like the transfer curve by a relative input
+    criterion (a band's 5 s max input within 45 dB of the
+    programme's strongest max band, floor -75 dB), smoothed with
+    the same Savitzky-Golay pass, and entirely display-side (UI
+    thread, 30 Hz, zero audio-thread cost). Documented cost: no
+    coherence rejection - where a console lowpass sinks the signal
+    under the console's own floor the held max Out eventually
+    reads the floor; the coherence-gated cross-spectrum curve
+    (solid) remains the reference measurement.
+  - **v2.45's slow average reverted (alpha 1/32 -> 1/8).** The
+    bypass test settled it: in bypass the EQ curve is a flat,
+    immobile line on the same dynamic music, so the waves were
+    never estimator variance - the x4 slower average bought
+    nothing perceptible and cost the knob reactivity Clement
+    wants (~2 s settle restored). The v2.45 experiment and its
+    documented dead ends (the undetectable knob-vs-wave
+    discriminator; the exhausted frequency-kernel family) are
+    kept in the code comments for the record.
 - **2.45.0**
   - **The programme-driven waves: longer averaging, not another
     kernel.** After 2.44.0's Savitzky-Golay pass Clement still saw

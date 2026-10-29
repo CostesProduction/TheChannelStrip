@@ -94,6 +94,12 @@ public:
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
+    // v2.46: same pair for the "EQ @ max" trace (dB maxOut - dB maxIn
+    // over 5-second sliding maxima), so the harness can drive and
+    // assert it exactly like the transfer curve.
+    float getEqMaxDbAtBin (int bin) const;
+    bool isEqMaxBinMeasured (int bin) const;
+
     // v2.41: forget every smoothed trace (curves, EQ diff, max-hold
     // ring). Called when the analyser strip is hidden so a re-show
     // starts from a clean display - the 10 s max-hold would otherwise
@@ -180,6 +186,54 @@ private:
     std::array<float, SpectrumAnalyzer::numScopeBins> maxOut;
     std::vector<float> maxRing;
     int maxRingIndex = 0;
+
+    // -----------------------------------------------------------------
+    // v2.46.0 (Clement's idea): the "EQ @ max" trace - a SECOND EQ
+    // curve, dB MaxOut - dB MaxIn, computed from 5-second sliding
+    // maxima of the smoothed IN and OUT curves (150 frames at 30 Hz -
+    // a shorter window than the 10 s max-hold overlay above, because
+    // this trace must also react when a knob goes DOWN: the old peak
+    // leaves the window after at most 5 s).
+    //
+    // Why it is exactly right for a linear console: the max is
+    // HOMOGENEOUS - max (H*x) = H * max (x) - and the IN/OUT display
+    // smoothing is affine-equivariant (the same one-pole on both
+    // curves, so smoothOut = H + smoothIn bin by bin), so the max
+    // difference is the exact transfer, measured at the programme's
+    // PEAK DRIVE of each band. That is the answer to the wave
+    // problem the v2.45 averaging could not solve: Clement's bypass
+    // test proved the waves are the console's own programme-
+    // dependent response (asymmetric L/R summed to mono + level
+    // dependent saturation) - an honest measurement, not noise. The
+    // max fixes the operating point instead of averaging over it: it
+    // always reports the response AT the loudest moment of the
+    // window, a repeatable, stable curve even on a saturating
+    // console, and transients count properly (the attack IS the max).
+    //
+    // Ballistics: UP is immediate (a louder passage lifts the max on
+    // the very next tick); DOWN follows the 5 s sliding window (the
+    // trace keeps a knob's old value until the loud passage that
+    // carries it exits the window) - Clement's accepted trade.
+    //
+    // Documented cost, honestly: no cross-spectrum junk rejection -
+    // where a console lowpass sinks the signal under the console's
+    // own floor, the held max Out eventually reads the floor (the
+    // v2.21.1 artifact); this trace is display-side (UI thread, 30
+    // Hz, zero audio-thread cost) and the coherence-gated transfer
+    // curve remains the reference measurement. A relative input gate
+    // (maxIn within 45 dB of the strongest max band, floor -75 dB)
+    // keeps the trace to bands that really carried programme energy,
+    // and the same Savitzky-Golay pass as the transfer curve smooths
+    // the difference for visual consistency.
+    // -----------------------------------------------------------------
+    static constexpr int maxEqFrames = 150;
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn {};
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqOut {};
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqDiff {};
+    std::vector<float> maxEqInRing;
+    std::vector<float> maxEqOutRing;
+    int maxEqRingIndex = 0;
+    std::array<bool, SpectrumAnalyzer::numScopeBins> eqMaxMeasured {};
 
     // v2.11: selectable IN/OUT smoothing time constant; v2.12 keeps two
     // speeds (Fast ~0.15 s, Slow ~1 s, the default).

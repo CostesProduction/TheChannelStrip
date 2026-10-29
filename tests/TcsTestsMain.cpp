@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.45.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.46.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -1288,10 +1288,11 @@ void testEqUncorrelatedConsoleNoise()
     auto mock = std::make_unique<MockToneConsole>();
     proc.getHostedStrip().setPlugin (std::move (mock));
 
-    // 6 s (since v2.45 the cross-spectrum EMAs average over the last
-    // ~32 frames of ~170 ms; the stationary mock needs no settling
-    // margin - the ratio estimates are self-normalising - and the
-    // random-phase tone only cancels across frames)
+    // 6 s (the cross-spectrum EMAs average over the last ~8 frames of
+    // ~170 ms, restored in v2.46 after the v2.45 experiment; the
+    // stationary mock needs no settling margin - the ratio estimates
+    // are self-normalising - and the random-phase tone only cancels
+    // across frames)
     for (int n = 0; n < (int) (6.0 * 48000.0 / 512.0); ++n)
     {
         src.fill (block);
@@ -1398,10 +1399,8 @@ void testEqCurveSmoothing()
     mock->setBandNoise (0.3f); // in-band noise PSD == input PSD, g2 ~ 0.5
     proc.getHostedStrip().setPlugin (std::move (mock));
 
-    // 4 s: ~24 cross-spectrum frames of 8192 samples; since v2.45 the
-    // EMAs average over ~32 frames (~5.4 s), so the estimate mixes the
-    // warmup - harmless here: the mock is stationary, the ratios are
-    // self-normalising, and the jaggedness metrics only improve
+    // 4 s: ~24 cross-spectrum frames of 8192 samples; the EMAs average
+    // over the last ~8 of them, as in the reference simulation
     for (int n = 0; n < (int) (4.0 * 48000.0 / 512.0); ++n)
     {
         src.fill (block);
@@ -1526,6 +1525,106 @@ void testEqCurveSmoothing()
                 + juce::String (waveResidue, 3)
                 + " < 0.45; the v2.43.1 cascade left 0.76, the raw "
                   "estimate is 1.0)");
+}
+
+// v2.46.0 (Clement's idea): the "EQ @ max" trace - dB MaxOut minus
+// dB MaxIn over 5-second sliding maxima of the SMOOTHED IN/OUT
+// curves. For a linear console the max is homogeneous
+// (max (H*x) = H * max (x)) and the IN/OUT one-poles are identical,
+// so the difference is the EXACT transfer at the programme's peak
+// drive. Ballistics contract under test: flat 0 dB in passthrough,
+// IMMEDIATE on a knob up (the max only moves up), and HOLDING on a
+// knob down (the old peak stays in the 5 s sliding window).
+void testEqMaxHoldTrace()
+{
+    beginTest ("EQ @ max trace: exact, immediate up, holding down (v2.46)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    NoiseSource src (0.3f);
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    auto mock = std::make_unique<MockConsole> (true);
+    MockConsole* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // v2.46.0 build 2 - the harness cadence lesson: the panel is driven
+    // at its REAL rate (a 30 Hz tick per ~3 audio blocks, as when the
+    // timer runs) while the audio streams. Feeding everything first and
+    // ticking afterwards leaves the analysers frozen on ONE raw frame,
+    // and the 5 s maxima then measure that single frame's per-band
+    // jitter (a few dB on noise) instead of the smoothed envelope the
+    // product computes - build 1's false 3.31 dB on this very
+    // assertion came from exactly that, not from the trace logic.
+    SpectrumPanel panel (proc);
+
+    auto drive = [&] (double seconds)
+    {
+        const int blocks = (int) (seconds * 48000.0 / 512.0);
+
+        for (int n = 0; n < blocks; ++n)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (n % 3 == 0)
+                panel.runAnalysisTick();
+        }
+    };
+
+    // ~3 s of broadband passthrough (fills the 150-frame window with
+    // converged display values; the relative max gate wakes the band)
+    drive (3.0);
+
+    const TransferAnalyzer& ana = proc.getTransferAnalyzer();
+    auto coveringBin = [&ana] (double freq)
+    {
+        for (int b = 0; b < TransferAnalyzer::numScopeBins - 1; ++b)
+            if (ana.getBinFrequency (b) <= freq
+                && ana.getBinFrequency (b + 1) > freq)
+                return b;
+
+        return TransferAnalyzer::numScopeBins - 1;
+    };
+
+    const int bin500 = coveringBin (500.0);
+
+    // 1. the band really carried programme energy
+    expectTrue (panel.isEqMaxBinMeasured (bin500),
+                "the 500 Hz band is measured by the max trace");
+
+    // 2. passthrough: the max difference reads a flat 0 dB transfer
+    expectNear (panel.getEqMaxDbAtBin (bin500), 0.0, 1.5,
+                "the max-trace EQ reads flat 0 dB in passthrough (got "
+                + juce::String (panel.getEqMaxDbAtBin (bin500), 2) + " dB)");
+
+    // 3. knob UP (+6 dB): the max only ever moves up, so the trace
+    // reacts within ~1-2 s of display, not within an EMA settle -
+    // ~94 display ticks while the new level streams in
+    mockPtr->gain.store (2.0f);
+    drive (3.0);
+
+    expectNear (panel.getEqMaxDbAtBin (bin500), 6.0, 1.5,
+                "the max-trace EQ reacts immediately on a knob up (got "
+                + juce::String (panel.getEqMaxDbAtBin (bin500), 2)
+                + " dB, expected ~+6)");
+
+    // 4. knob DOWN: the +6 dB peak is still inside the 5 s sliding
+    // window, so the trace HOLDS its value - the documented cost
+    mockPtr->gain.store (1.0f);
+    drive (1.0);
+
+    for (int t = 0; t < 10; ++t)
+        panel.runAnalysisTick();
+
+    expectTrue (panel.getEqMaxDbAtBin (bin500) > 3.0f,
+                "the max-trace EQ holds the recent peak after a knob "
+                "down (got "
+                + juce::String (panel.getEqMaxDbAtBin (bin500), 2)
+                + " dB > +3)");
 }
 
 // v2.19 (roadmap point 3): the hover readout's static helpers - the
@@ -1858,7 +1957,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.45.0");
+        session->setAttribute ("version", "2.46.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -2024,7 +2123,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.45.0");
+    session->setAttribute ("version", "2.46.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2247,8 +2346,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.45.0",
-                "saved state carries the current version tag (2.45.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.46.0",
+                "saved state carries the current version tag (2.46.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2586,7 +2685,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.45.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.46.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3249,7 +3348,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.45.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.46.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3265,6 +3364,7 @@ int main (int argc, char* argv[])
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
     testEqCurveSmoothing();
+    testEqMaxHoldTrace();
     testConsoleSlotStatus();
     testPresetManager();
     testCurrentPresetTracking();
