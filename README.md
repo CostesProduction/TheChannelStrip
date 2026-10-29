@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.49.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.50.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,36 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.50.0**
+  - **The low-end comb is fixed - the Savitzky-Golay smoothing now
+    runs on the EQ dB curve, not on the accumulated spectra, and the
+    averaging EMA is weighted by each band's own energy.** Clement's
+    report on 2.49: a ~12 dB peak-to-peak comb in the very low end
+    (20-200 Hz) exactly where the console's low cut buries the
+    output. The offline benchmark built for the investigation (19
+    estimator variants, 5 test programmes x 4 filters x clean / -85 dB
+    console noise, analytic ground truth) traced it to the v2.44
+    smoothing pass: on bursty bass the accumulators of neighbouring
+    bands differ by ORDERS OF MAGNITUDE, so the ratio of smoothed
+    values was biased towards the loud neighbours' ratio - 9.2 dB
+    RMS / 23.5 dB max error against the truth in the 60-213 Hz zone
+    (the measured teeth matched the screenshot at ~11 dB peak-to-
+    peak), while the same H1 estimator with the kernel moved AFTER
+    the ratio reads 0.53 dB RMS / 1.1 dB max - better than the
+    offline Welch ceiling (1.2 / 3.3 dB) and than the v2.48 max-hold
+    blends (1.6 / 4.0). The energy-weighted EMA (aEff = alpha * min
+    (1, sxx/Sxx) on all four accumulators) holds the estimate
+    between the bass notes instead of letting it decay into the
+    floor - correct for a static transfer, and the flush still
+    restarts everything on a real console change. The displayed
+    coherence is now the honest raw-accumulator value too (the 0.25
+    gate sees the undiluted dip of a narrow uncorrelated artifact;
+    the v2.48 raw-coherence hook carries the same number). New
+    regression test: a mock console whose 24 dB/oct low cut IS the
+    benchmark's filter A, a bursty bass programme, and the measured
+    curve asserted against the filter's analytic response in the
+    comb zone - the old code fails it by roughly an order of
+    magnitude.
 - **2.49.0**
   - **The single EQ curve is now the PURE optimised H1 method -
     Clement's A/B build: "j'aimerais que tu implémentes seulement ta

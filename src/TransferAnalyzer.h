@@ -108,6 +108,10 @@ public:
     // and still computed (one lock-free store per band per frame),
     // ready for the blend builds; removing it would break the v2.48
     // design contract.
+    // v2.50.0: since the SG kernel moved to the dB curve, the
+    // displayed coherence is computed from the RAW accumulators too -
+    // this hook and the main copyTransferData coherence now carry the
+    // SAME honest (undiluted) value, by construction.
     void copyRawCoherenceData (float* dest, int numBins) const;
 
     double getBinFrequency (int bin) const
@@ -162,6 +166,26 @@ public:
     // zero allocations. Edges replicate the first/last band (clamped
     // index), as with every kernel since v2.43.
     // -----------------------------------------------------------------
+    // (v2.44.0, retired in v2.50.0): the kernel used to be applied to
+    // the four ACCUMULATED spectra (Sxx, Syy, SxyRe, SxyIm), with H =
+    // Sxy/Sxx computed from the smoothed quantities. The 2026-10-29
+    // offline benchmark proved that on real programme the
+    // accumulators of neighbouring bands differ by orders of
+    // magnitude (bass fundamental vs window-leakage bands), so the
+    // ratio of SG-smoothed values was biased towards the loud
+    // neighbours' ratio - the comb Clement saw in the very low end
+    // under a console low cut (9.2 dB RMS / 23.5 dB max error
+    // against the analytic truth on the bench programmes, vs 0.53 /
+    // 1.1 dB with the kernel after the ratio; up to +5000 dB spikes
+    // in the surgical single-band test). The "same kernel cancels /
+    // identity stays 0 dB" argument only holds when the neighbours
+    // are comparable in magnitude - true on stationary noise, false
+    // on music. v2.50.0: H, g2 are computed from the RAW
+    // accumulators and the SAME 31-tap kernel is applied to the dB
+    // CURVE (a static LTI response is exactly the smooth (log f, dB)
+    // points the kernel was designed to fit); the per-band
+    // documented figures (Q1 peak 0.04 dB low, Q4 0.93 dB, lowpass
+    // knee 1.17 dB) keep their meaning.
     static constexpr int smoothHalfWidth = 15;
     static constexpr double smoothCoeffs[2 * smoothHalfWidth + 1] =
     {
@@ -241,10 +265,13 @@ private:
     // (the smoothing coefficients themselves are the public
     // smoothCoeffs above - see their comment for the full story)
 
-    // v2.44.0: scratch for the single Savitzky-Golay pass (the EMAs
-    // are the untouched source, the smoothed spectra land here).
-    // Fixed-size member, so the audio thread never allocates.
-    std::array<double, (size_t) (4 * numScopeBins)> smoothScratch {};
+    // v2.44.0 -> v2.50.0: scratch for the single Savitzky-Golay pass.
+    // Since v2.50.0 the pass runs over the per-band dB CURVE (the
+    // raw-accumulator H estimate, clamped to +/- 60 before the pass),
+    // so one numScopeBins scratch is enough (v2.44-v2.49 smoothed all
+    // four accumulated spectra here). Fixed-size member, so the
+    // audio thread never allocates.
+    std::array<double, (size_t) numScopeBins> smoothScratch {};
 
     std::array<std::atomic<float>, (size_t) numScopeBins> transferDb {};
     std::array<std::atomic<float>, (size_t) numScopeBins> coherence {};

@@ -305,104 +305,113 @@ void TransferAnalyzer::compute()
 
         const size_t bi = (size_t) b;
 
-        emaSxx  [bi] += alpha * (sxx - emaSxx  [bi]);
-        emaSyy  [bi] += alpha * (syy - emaSyy  [bi]);
-        emaSxyRe[bi] += alpha * (sre - emaSxyRe[bi]);
-        emaSxyIm[bi] += alpha * (sim - emaSxyIm[bi]);
+        // v2.50.0 (the comb fix, part 2/2): the EMA is WEIGHTED BY THE
+        // BAND'S OWN ENERGY. aEff = alpha * min (1, sxx / emaSxx): a
+        // frame whose input energy is far below the accumulator barely
+        // moves it, so BETWEEN the bass notes the estimator HOLDS its
+        // last valid value instead of decaying into the numerical /
+        // console floor (where the per-frame H becomes a ratio of two
+        // junk values). The bench measured that decay alone was worth
+        // ~10 dB RMS error in the low-cut zone on bursty programme;
+        // the energy weight removes it, and because the transfer is
+        // LTI-static the freeze between notes is CORRECT, not a bias
+        // (the flush still restarts everything on a real console
+        // change - a fresh accumulator accepts at full alpha). All
+        // four accumulators take the SAME aEff so H = Sxy/Sxx and g2
+        // keep their exact meanings, and aEff never exceeds the
+        // nominal alpha, so the fast restart and the tau ~5 s window
+        // behave exactly as before on any band that keeps playing.
+        const double aEff = alpha
+            * juce::jmin (1.0,
+                          sxx / (emaSxx[bi] > 1.0e-300 ? emaSxx[bi] : 1.0e-300));
+
+        emaSxx  [bi] += aEff * (sxx - emaSxx  [bi]);
+        emaSyy  [bi] += aEff * (syy - emaSyy  [bi]);
+        emaSxyRe[bi] += aEff * (sre - emaSxyRe[bi]);
+        emaSxyIm[bi] += aEff * (sim - emaSxyIm[bi]);
     }
 
-    // v2.44.0 pass 2: the outputs are computed from the FREQUENCY-
-    // SMOOTHED accumulators (see smoothCoeffs in the header). Because
-    // ALL the EMAs were just updated by the same frame, every
-    // neighbour is at the same temporal state: the kernel averages
-    // estimates of the SAME instant, so no temporal lag is added. The
-    // clamped index replicates the edge bands, and H = Sxy/Sxx + g2
-    // are ratios of quantities filtered by the SAME kernel, so any
-    // kernel scale cancels and the identity stays exactly 0 dB.
+    // -----------------------------------------------------------------
+    // v2.50.0 pass 2 (the comb fix, part 1/2): H and coherence are
+    // computed from the RAW accumulators, and the Savitzky-Golay
+    // kernel is applied to the RESULTING dB CURVE - not to the four
+    // accumulated spectra as in v2.44-v2.49.
     //
-    // The single Savitzky-Golay pass: every band takes the fixed
-    // polynomial-fit FIR over its +/- smoothHalfWidth neighbourhood of
-    // each accumulated spectrum. ~32k flops per frame, zero
-    // allocations.
-    const double* const emaPtrs[4] = { emaSxx.data(), emaSyy.data(),
-                                       emaSxyRe.data(), emaSxyIm.data() };
-    double* const sm[4] = { smoothScratch.data(),
-                            smoothScratch.data() + numScopeBins,
-                            smoothScratch.data() + 2 * numScopeBins,
-                            smoothScratch.data() + 3 * numScopeBins };
-
-    for (int q = 0; q < 4; ++q)
-    {
-        const double* const src = emaPtrs[q];
-        double* const dst = sm[q];
-
-        for (int b = 0; b < numScopeBins; ++b)
-        {
-            double acc = 0.0;
-
-            for (int k = -smoothHalfWidth; k <= smoothHalfWidth; ++k)
-            {
-                const int nb = juce::jlimit (0, numScopeBins - 1, b + k);
-                acc += smoothCoeffs[k + smoothHalfWidth] * src[nb];
-            }
-
-            dst[b] = acc;
-        }
-    }
-
+    // WHY: on real programme the accumulators of neighbouring bands
+    // differ by ORDERS OF MAGNITUDE (a bass fundamental band carries
+    // the energy, its neighbours carry window leakage), so smoothing
+    // the spectra first mixes quantities that were never comparable:
+    // the ratio of smoothed values is biased towards the LOUD
+    // neighbours' ratio (upwards, towards 0 dB) and can even blow up
+    // where the smoothed Sxx crosses ~0. The 2026-10-29 offline
+    // benchmark (19 estimator variants, 5 programmes x 4 filters x
+    // clean/-85 dB console noise) measured exactly the comb Clement
+    // saw on his screenshot: 9.2 dB RMS / 23.5 dB max error, 11 dB
+    // peak-to-peak teeth between 60-213 Hz under a 24 dB/oct low cut
+    // at 300 Hz - while the same H1 with the kernel moved AFTER the
+    // ratio reads 0.53 dB RMS / 1.1 dB max, BETTER than the offline
+    // Welch ceiling (1.2 / 3.3) and than the v2.48 max-hold blends
+    // (1.6 / 4.0). Smoothing the dB of a static LTI transfer is also
+    // what the kernel is DESIGNED for - slopes (shelves) and
+    // curvature (EQ peaks) pass through - the v2.44 reference
+    // figures keep their meaning.
+    //
+    // The coherence is likewise computed from the RAW accumulators:
+    // the v2.44 argument for smoothing it (curve and gate consistent)
+    // is void now that the curve itself is post-ratio, and the RAW
+    // dip is the honest one (a 1-band uncorrelated artifact reads
+    // g2 0.50 raw vs 0.93 smoothed - the display gate stays 0.25 and
+    // now sees the undiluted value; the v2.48 raw-coherence hook and
+    // this member now carry the same number, by construction).
+    // -----------------------------------------------------------------
     for (int b = 0; b < numScopeBins; ++b)
     {
         const size_t bi = (size_t) b;
 
-        const double smSxx = sm[0][bi];
-        const double smSyy = sm[1][bi];
+        const double rSxx = emaSxx[bi];
+        const double rSyy = emaSyy[bi];
 
-        // H1 transfer estimate: H = Sxy / Sxx. The dB form uses
-        // 20*log10|H| (== 10*log10|H|^2), the same scale the old power
-        // ratio produced for a pure gain, so the display keeps its
-        // meaning. Both are computed from the smoothed quantities, so
-        // the curve is the honest neighbourhood average transfer.
-        const double magH = std::sqrt (sm[2][bi] * sm[2][bi]
-                                    + sm[3][bi] * sm[3][bi]);
-        const double db = smSxx > 1.0e-30
-            ? 20.0 * std::log10 (juce::jmax (magH / smSxx, 1.0e-30))
+        const double magH = std::sqrt (emaSxyRe[bi] * emaSxyRe[bi]
+                                    + emaSxyIm[bi] * emaSxyIm[bi]);
+
+        const double db = rSxx > 1.0e-30
+            ? 20.0 * std::log10 (juce::jmax (magH / rSxx, 1.0e-30))
             : 0.0;
 
-        transferDb[bi].store ((float) juce::jlimit (-60.0, 60.0, db),
-                              std::memory_order_relaxed);
+        smoothScratch[bi] = juce::jlimit (-60.0, 60.0, db);
 
         // coherence g2 = |Sxy|^2 / (Sxx * Syy): 1 when the output band
         // is entirely explained by the input, towards 0 when it is
-        // dominated by uncorrelated junk (the console's floor above
-        // its lowpass). This is Smaart's coherence-blanking quantity.
-        // Recomputed from the SAME smoothed spectra as H, so curve and
-        // gate stay consistent (the smoothing even raises it a little:
-        // the neighbourhood agrees more than the single noisy band).
-        const double den = smSxx * smSyy;
+        // dominated by uncorrelated junk. Computed from the raw
+        // quantities (see above) and stored under BOTH hooks - the
+        // display gate and the v2.48 blend contract read the same
+        // honest value now.
+        const double den = rSxx * rSyy;
         const double g2 = den > 1.0e-60
             ? juce::jlimit (0.0, 1.0, (magH * magH) / den)
             : 0.0;
 
         coherence[bi].store ((float) g2, std::memory_order_relaxed);
+        rawCoherence[bi].store ((float) g2, std::memory_order_relaxed);
+    }
 
-        // v2.48.0: the RAW coherence - the same quantity from the
-        // UNsmoothed accumulators. g2 is a self-normalising ratio, so
-        // on an honest (fully correlated) band it reads ~1 from the
-        // very first frame after a flush; it only drops where the
-        // band's output is genuinely explained by something other
-        // than its input (console noise, dither, an uncorrelated
-        // tone). The max-hold members of the EQ curve use it as their
-        // junk detector (see SpectrumPanel): below 0.75 a dB-difference
-        // would measure the junk, so the bin reads the cross-spectrum
-        // member instead.
-        const double rawDen = emaSxx[bi] * emaSyy[bi];
-        const double rawMagSq = emaSxyRe[bi] * emaSxyRe[bi]
-                              + emaSxyIm[bi] * emaSxyIm[bi];
-        const double rawG2 = rawDen > 1.0e-60
-            ? juce::jlimit (0.0, 1.0, rawMagSq / rawDen)
-            : 0.0;
+    // the single Savitzky-Golay pass: every band takes the fixed
+    // polynomial-fit FIR over its +/- smoothHalfWidth neighbourhood
+    // of the dB curve (clamped index replicates the edge bands).
+    // ~8k flops per frame, zero allocations.
+    for (int b = 0; b < numScopeBins; ++b)
+    {
+        double acc = 0.0;
 
-        rawCoherence[bi].store ((float) rawG2, std::memory_order_relaxed);
+        for (int k = -smoothHalfWidth; k <= smoothHalfWidth; ++k)
+        {
+            const int nb = juce::jlimit (0, numScopeBins - 1, b + k);
+            acc += smoothCoeffs[k + smoothHalfWidth] * smoothScratch[(size_t) nb];
+        }
+
+        transferDb[(size_t) b].store (
+            (float) juce::jlimit (-60.0, 60.0, acc),
+            std::memory_order_relaxed);
     }
 }
 

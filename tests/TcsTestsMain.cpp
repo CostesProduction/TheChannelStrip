@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.49.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.50.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -27,6 +27,17 @@
 //     knob DOWN also re-converges within ~2 s (the flush works in
 //     BOTH directions - the discriminator vs the max-hold blend,
 //     which held the old response up to 5 s);
+//   - EQ curve frequency smoothing (v2.43): the kernel kills the
+//     band-scale jitter of the raw per-band estimates while the
+//     passthrough still reads flat 0 dB
+//   - EQ curve under a low cut over bursty bass (v2.50, the comb
+//     regression): a mock console whose 24 dB/oct low cut at 300 Hz
+//     is the benchmark's filter A, a bursty bass-with-harmonics
+//     programme, and the measured curve asserted against the filter's
+//     ANALYTIC response in the 60-213 Hz zone - the v2.44-v2.49
+//     smoothing-on-accumulators measured ~9 dB RMS / 23 dB max comb
+//     teeth there, the v2.50 kernel-after-the-ratio reads within
+//     ~1 dB of the truth
 //   - console slot status reporting (v2.24, roadmap point 7: missing /
 //     blacklisted / moved-file slots each carry their own explanation,
 //     and clicking an unavailable console posts an explicit message
@@ -99,6 +110,7 @@
 //    the JUCE shutdown.
 // ---------------------------------------------------------------------------
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -363,6 +375,19 @@ public:
     // OFF by default: every existing mock-based test is untouched.
     void setBandNoise (float gainToUse) { bandNoiseGain.store (gainToUse); }
 
+    // v2.50.0 (testEqLowcutCombRegression): OPTIONAL 24 dB/oct low cut
+    // at 300 Hz INSIDE the console - two cascaded RBJ high-pass
+    // biquads (Q 0.5412 / 1.3066 = the two sections of a 4th-order
+    // Butterworth). This is the exact filter of the 2026-10-29
+    // offline benchmark's scenario A, the one that reproduced
+    // Clement's screenshot comb (~11 dB peak-to-peak teeth between
+    // 60-213 Hz with the v2.44-v2.49 smoothing-on-accumulators).
+    // The analytic magnitude is reproduced by lowcutMagnitudeDb()
+    // below, so the test asserts the measured EQ curve against the
+    // TRUE response. OFF by default: every existing mock-based test
+    // is untouched.
+    void setLowcut (bool on) { lowcutOn.store (on); }
+
     const juce::String getName() const override { return "MockConsole"; }
 
     void prepareToPlay (double sampleRate, int) override
@@ -381,6 +406,28 @@ public:
         // deterministic from run to run: fixed seed, zeroed filter state
         noiseState = 0x1B7ED9Bu;
         noiseX1 = noiseX2 = noiseY1 = noiseY2 = 0.0f;
+
+        // the v2.50 low cut: RBJ high-pass coefficients for both
+        // sections (fc 300 Hz, Q 0.5412 / 1.3066), normalised so the
+        // audio loop is a plain 5-tap recurrence per section
+        for (int s = 0; s < 2; ++s)
+        {
+            const double q = (s == 0) ? 0.54119610 : 1.30656296;
+            const double w0 = juce::MathConstants<double>::twoPi * 300.0
+                              / sampleRate;
+            const double alpha = std::sin (w0) / (2.0 * q);
+            const double a0 = 1.0 + alpha;
+            const double cosw0 = std::cos (w0);
+
+            lcb0[s] = (float) ((1.0 + cosw0) * 0.5 / a0);
+            lcb1[s] = (float) (-(1.0 + cosw0) / a0);
+            lcb2[s] = lcb0[s];
+            lca1[s] = (float) (-2.0 * cosw0 / a0);
+            lca2[s] = (float) ((1.0 - alpha) / a0);
+
+            for (int c = 0; c < 2; ++c)
+                lcX1[s][c] = lcX2[s][c] = lcY1[s][c] = lcY2[s][c] = 0.0f;
+        }
     }
 
     void releaseResources() override {}
@@ -433,6 +480,36 @@ public:
                     buffer.setSample (c, i, buffer.getSample (c, i) + y);
             }
         }
+
+        // the v2.50 low cut: two cascaded high-pass sections per channel
+        if (lowcutOn.load())
+        {
+            const int numSamples = buffer.getNumSamples();
+
+            for (int c = 0; c < buffer.getNumChannels(); ++c)
+            {
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    float x = buffer.getSample (c, i);
+
+                    for (int s = 0; s < 2; ++s)
+                    {
+                        const float y = lcb0[s] * x + lcb1[s] * lcX1[s][c]
+                                      + lcb2[s] * lcX2[s][c]
+                                      - lca1[s] * lcY1[s][c]
+                                      - lca2[s] * lcY2[s][c];
+
+                        lcX2[s][c] = lcX1[s][c];
+                        lcX1[s][c] = x;
+                        lcY2[s][c] = lcY1[s][c];
+                        lcY1[s][c] = y;
+                        x = y;
+                    }
+
+                    buffer.setSample (c, i, x);
+                }
+            }
+        }
     }
 
     double getTailLengthSeconds() const override { return 2.0; }
@@ -457,6 +534,14 @@ private:
     juce::uint32 noiseState = 0x1B7ED9Bu;
     float nb0 = 0.0f, nb2 = 0.0f, na1 = 0.0f, na2 = 0.0f;
     float noiseX1 = 0.0f, noiseX2 = 0.0f, noiseY1 = 0.0f, noiseY2 = 0.0f;
+
+    // v2.50.0: the optional 24 dB/oct low cut (see setLowcut)
+    std::atomic<bool> lowcutOn { false };
+    float lcb0[2] = { 0.0f, 0.0f }, lcb1[2] = { 0.0f, 0.0f };
+    float lcb2[2] = { 0.0f, 0.0f }, lca1[2] = { 0.0f, 0.0f };
+    float lca2[2] = { 0.0f, 0.0f };
+    float lcX1[2][2] = {}, lcX2[2][2] = {};
+    float lcY1[2][2] = {}, lcY2[2][2] = {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockConsole)
 };
@@ -1599,6 +1684,199 @@ void testEqCurveSmoothing()
                   "estimate is 1.0)");
 }
 
+// ---------------------------------------------------------------------------
+// v2.50.0 (Clement's "peigne dans le tres grave" report on v2.49): the
+// comb regression test. The 2026-10-29 offline benchmark (19 estimator
+// variants, 5 programmes x 4 filters x clean / -85 dB console noise)
+// traced the artifact to the v2.44 Savitzky-Golay pass being applied to
+// the four ACCUMULATED spectra: on bursty bass the accumulators of
+// neighbouring bands differ by orders of magnitude, so the ratio of
+// smoothed values is biased towards the LOUD neighbours' ratio - the
+// teeth measured 9.2 dB RMS / 23.5 dB max against the analytic truth
+// in the 60-213 Hz zone under a 24 dB/oct low cut at 300 Hz (the
+// screenshot showed ~11 dB peak-to-peak). v2.50.0 computes H from the
+// RAW accumulators and applies the SAME 31-tap kernel to the dB curve
+// (bench: 0.53 dB RMS / 1.1 dB max - better than the offline Welch
+// ceiling and than the v2.48 max-hold blends), and weights the EMA by
+// the band's own energy so the estimate holds between notes instead
+// of decaying into the floor.
+//
+// This test reproduces the scenario END TO END: a bursty
+// bass-with-harmonics programme (55 Hz fundamental + a decaying
+// harmonic series, a 1.4 s / 1.0 s loud-quiet envelope cycle), a
+// mock console whose low cut IS the benchmark's filter A, and the
+// measured EQ curve asserted against the mock's ANALYTIC response in
+// exactly the 60-213 Hz zone where the comb lived. The v2.44-v2.49
+// code fails this by roughly an order of magnitude; the fixed code
+// reads within ~1 dB of the truth.
+//
+// The exact magnitude of the implemented filter (two cascaded RBJ
+// high-pass sections, Q 0.5412 / 1.3066 - identical to the mock's
+// coefficients):
+//   |H(jw)|^2 per section = w^4 / ((w^2-w0^2)^2 + (w*w0/Q)^2)
+static double lowcutMagnitudeDb (double freq)
+{
+    const double w0 = juce::MathConstants<double>::twoPi * 300.0 / 48000.0;
+    const double w = juce::MathConstants<double>::twoPi * freq / 48000.0;
+    const double qs[2] = { 0.54119610, 1.30656296 };
+
+    double magSq = 1.0;
+
+    for (double q : qs)
+    {
+        const double dw = w * w - w0 * w0;
+        magSq *= (w * w) * (w * w) / (dw * dw + (w * w0 / q) * (w * w0 / q));
+    }
+
+    return 10.0 * std::log10 (magSq);
+}
+
+void testEqLowcutCombRegression()
+{
+    beginTest ("EQ curve under a low cut over bursty bass (v2.50 comb fix)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    auto mock = std::make_unique<MockConsole> (true);
+    mock->setLowcut (true);
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    // bursty bass: 55 Hz fundamental + decaying harmonic series (so
+    // the SG neighbourhood of the checked zone is fed up to ~900 Hz,
+    // as on real programme), with a loud/quiet envelope cycle
+    static constexpr int numPartials = 10;
+    const double freqs[numPartials] = { 55.0, 110.0, 165.0, 220.0, 275.0,
+                                        330.0, 440.0, 550.0, 660.0, 880.0 };
+    const double amps[numPartials] = { 0.30, 0.09, 0.05, 0.035, 0.025,
+                                       0.02, 0.015, 0.012, 0.01, 0.008 };
+
+    double phase[numPartials] = {};
+
+    const double sr = 48000.0;
+    juce::AudioBuffer<float> block (2, 512);
+    juce::MidiBuffer noMidi;
+
+    // 12 s = 1125 blocks of 512 exactly, ~70 cross-spectrum frames -
+    // the EMA tail is long settled
+    const int numBlocks = (int) ((12.0 * sr) / 512.0);
+
+    for (int blk = 0; blk < numBlocks; ++blk)
+    {
+        for (int i = 0; i < 512; ++i)
+        {
+            const double t = (double) ((long long) blk * 512 + i) / sr;
+            const double cycle = std::fmod (t, 2.4);
+            const double env = (cycle < 1.4) ? 1.0 : 0.12;
+
+            double v = 0.0;
+
+            for (int p = 0; p < numPartials; ++p)
+            {
+                v += amps[p] * std::sin (phase[p]);
+                phase[p] += juce::MathConstants<double>::twoPi * freqs[p] / sr;
+            }
+
+            const float s = (float) (v * env);
+
+            for (int c = 0; c < 2; ++c)
+                block.setSample (c, i, s);
+        }
+
+        proc.processBlock (block, noMidi);
+    }
+
+    float eqDb[TransferAnalyzer::numScopeBins];
+    float eqCoherence[TransferAnalyzer::numScopeBins];
+
+    proc.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
+                                                 TransferAnalyzer::numScopeBins);
+
+    const TransferAnalyzer& ana = proc.getTransferAnalyzer();
+
+    // the comb zone: bands whose low edge sits in 60-213 Hz (the
+    // v2.41 narrow-band region) with a displayable truth
+    std::vector<int> zone;
+
+    for (int b = 0; b < TransferAnalyzer::numScopeBins; ++b)
+    {
+        const double f = ana.getBinFrequency (b);
+
+        if (f >= 60.0 && f <= 213.0 && std::abs (lowcutMagnitudeDb (f)) <= 40.0)
+            zone.push_back (b);
+    }
+
+    expectTrue (zone.size() >= 8,
+                "the scenario feeds at least 8 checkable low bands (got "
+                + juce::String ((int) zone.size()) + ")");
+
+    if (zone.size() < 8)
+        return; // nothing checkable - the expect above already flagged it
+
+    // 1. every checked band is honestly measured (the coherence gate
+    // would blank it otherwise)
+    float g2min = 1.0f;
+
+    for (int b : zone)
+        g2min = juce::jmin (g2min, eqCoherence[b]);
+
+    expectTrue (g2min > 0.25f,
+                "the comb zone is measured (min coherence "
+                + juce::String (g2min, 3) + " > 0.25 gate)");
+
+    // 2. THE regression metric: the measured curve against the
+    // analytic response - median and max |error| over the zone
+    std::vector<double> err;
+
+    for (int b : zone)
+        err.push_back (std::abs ((double) eqDb[b] - lowcutMagnitudeDb (ana.getBinFrequency (b))));
+
+    std::sort (err.begin(), err.end());
+
+    const double median = err[err.size() / 2];
+    const double worst = err.back();
+
+    expectTrue (median < 1.5,
+                "the low-cut zone reads the true response (median |err| "
+                + juce::String (median, 3) + " dB < 1.5; the v2.44-v2.49 "
+                "comb measured ~9 dB RMS here)");
+
+    expectTrue (worst < 3.5,
+                "no comb teeth left (max |err| " + juce::String (worst, 3)
+                + " dB < 3.5; the v2.44-v2.49 comb measured up to 23 dB)");
+
+    // 3. smoothness: no band-to-band teeth LEFT ON TOP of the filter's
+    // own steep slope - the metric is the deviation from the TRUE
+    // successive deltas (a 24 dB/oct low cut legitimately descends
+    // ~0.8 dB per band; the v2.44-v2.49 comb added teeth ON TOP of
+    // that slope). The reference simulation measured 0.13 dB mean
+    // deviation for the fixed code, 2.3 dB for the comb.
+    double jagSum = 0.0;
+    int jagCount = 0;
+
+    for (size_t i = 0; i + 1 < zone.size(); ++i)
+    {
+        if (zone[i + 1] == zone[i] + 1)
+        {
+            const double f0 = ana.getBinFrequency (zone[i]);
+            const double f1 = ana.getBinFrequency (zone[i + 1]);
+            const double curveDelta = (double) eqDb[zone[i + 1]] - (double) eqDb[zone[i]];
+            const double truthDelta = lowcutMagnitudeDb (f1) - lowcutMagnitudeDb (f0);
+
+            jagSum += std::abs (curveDelta - truthDelta);
+            ++jagCount;
+        }
+    }
+
+    const double jagMean = jagCount > 0 ? jagSum / (double) jagCount : 0.0;
+
+    expectTrue (jagMean < 0.6,
+                "the curve follows the filter's slope without teeth (mean "
+                "|delta deviation| " + juce::String (jagMean, 3)
+                + " dB < 0.6; the v2.44-v2.49 comb measured ~2.3)");
+}
+
 // v2.46.0 (Clement's idea) -> v2.48.0 (a full member) -> v2.49.0 (off
 // the drawn curve, kept fully alive): the "EQ @ max"
 // machinery - dB MaxOut minus dB MaxIn over 5-second sliding maxima
@@ -2573,8 +2851,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.49.0",
-                "saved state carries the current version tag (2.49.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.50.0",
+                "saved state carries the current version tag (2.50.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2912,7 +3190,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.49.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.50.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3575,7 +3853,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.49.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.50.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3591,6 +3869,7 @@ int main (int argc, char* argv[])
     testEqWeakContent();
     testEqUncorrelatedConsoleNoise();
     testEqCurveSmoothing();
+    testEqLowcutCombRegression();
     testEqMaxHoldTrace();
     testEqVeriteCurve();
     testConsoleSlotStatus();

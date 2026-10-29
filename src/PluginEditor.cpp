@@ -855,15 +855,26 @@ void SpectrumPanel::updateBallistics()
     //    console's uncorrelated floor cancels out of the averaged Sxy
     //    by CONSTRUCTION (the v2.22 junk rejection - no coherence
     //    patch needed, it is the estimator itself);
-    //  - the tau ~5 s energy-weighted EMAs in the analyser (v2.47)
-    //    with the deterministic flush + parameter relay, so a knob
-    //    or console change re-converges within ~1 s instead of
-    //    blurring five seconds of the old response into the new one;
+    //  - the tau ~5 s energy-weighted EMAs in the analyser (v2.47,
+    //    and since v2.50 weighted by each band's own energy so the
+    //    estimate holds between the notes instead of decaying into
+    //    the floor) with the deterministic flush + parameter relay,
+    //    so a knob or console change re-converges within ~1 s
+    //    instead of blurring five seconds of the old response into
+    //    the new one;
     //  - the Savitzky-Golay 31-tap frequency smoothing (v2.44) and
     //    the v2.41 fractional bin sampling below 213 Hz, both inside
-    //    the analyser itself;
+    //    the analyser itself - since v2.50 the kernel runs on the EQ
+    //    dB CURVE, after the ratio (the v2.44-on-accumulators pass
+    //    was the source of the low-end comb Clement reported on
+    //    2.49: neighbouring bands' accumulators differ by orders of
+    //    magnitude on bass programme, so the smoothed ratio was
+    //    biased towards the loud neighbours - see the v2.50
+    //    changelog and the TransferAnalyzer for the benchmark
+    //    numbers);
     //  - the v2.12 persistence and the relative input + coherence
-    //    gates, unchanged;
+    //    gates, unchanged (the coherence is the honest raw value
+    //    since v2.50);
     //  - a light final one-pole (tau ~0.3 s) for display continuity.
     //
     // The max-hold windows are STILL COMPUTED above - with their own
