@@ -323,7 +323,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.50.0 - Doctor report\n"
+    report << "TheChannelStrip 2.51.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -1019,7 +1019,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.50.0");
+    xml->setAttribute ("version", "2.51.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1336,7 +1336,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.50.0");
+    xml->setAttribute ("version", "2.51.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2146,7 +2146,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.50.0");
+    xml->setAttribute ("version", "2.51.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
@@ -2299,14 +2299,58 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
         tiltDb.store ((float) tilt.getDoubleValue(), std::memory_order_relaxed);
 
     // v2.8: restore the display options; missing attributes (older
-    // sessions) keep the defaults (10 dB/div, 4 dB/div, analyser shown).
+    // sessions) keep the v2.51 defaults (15 dB/div, 6 dB/div).
+    // v2.51 (Clement's display rework): the analyser grid went from
+    // nine to six divisions, so the scale ladder changed. Analyser:
+    // 15/12/9 dB per division = the zooms [+30;-60] / [+24;-48] /
+    // [+18;-36]. EQ: 8/6/4/2 dB per division = +/-24/18/12/6 dB.
+    // The legacy remap is VERSION-GATED: the EQ ladder's 4 dB/div is
+    // ambiguous - a pre-2.51 session saved 4 meaning +/-18 dB, while
+    // a 2.51 session saves 4 meaning +/-12 dB - so the mapping only
+    // applies when the session's own version attribute is older than
+    // 2.51.0 (the harness caught the plain remap breaking the roundtrip
+    // of a 2.51-saved 4). For those legacy sessions: analyser 10 (was
+    // [+30;-60]) -> 15, 6 (was [+18;-36]) -> 9; EQ 4 (was +/-18) -> 6,
+    // 2 (was +/-9) -> 2. Anything off the ladder snaps to the closest
+    // scale.
+    const bool legacyScales = xml->getStringAttribute ("version")
+                                 .compare ("2.51.0") < 0;
+
     const auto ana = xml->getStringAttribute ("anaDbDiv");
     if (ana.isNotEmpty())
-        anaDbDiv.store ((float) ana.getDoubleValue(), std::memory_order_relaxed);
+    {
+        float v = (float) ana.getDoubleValue();
+
+        if (legacyScales)
+        {
+            if (v == 10.0f)
+                v = 15.0f;
+            else if (v == 6.0f)
+                v = 9.0f;
+        }
+
+        if (v != 15.0f && v != 12.0f && v != 9.0f)
+            v = (v > 12.0f) ? 15.0f : ((v > 10.5f) ? 12.0f : 9.0f);
+
+        anaDbDiv.store (v, std::memory_order_relaxed);
+    }
 
     const auto eq = xml->getStringAttribute ("eqDbDiv");
     if (eq.isNotEmpty())
-        eqDbDiv.store ((float) eq.getDoubleValue(), std::memory_order_relaxed);
+    {
+        float v = (float) eq.getDoubleValue();
+
+        // legacy sessions only: 4 (was +/-18 dB) -> 6, the new +/-18
+        // scale. A 2.51 session saving 4 keeps it - it means +/-12.
+        if (legacyScales && v == 4.0f)
+            v = 6.0f;
+
+        if (v != 8.0f && v != 6.0f && v != 4.0f && v != 2.0f)
+            v = (v > 7.0f) ? 8.0f : ((v > 5.0f) ? 6.0f
+                                    : ((v > 3.0f) ? 4.0f : 2.0f));
+
+        eqDbDiv.store (v, std::memory_order_relaxed);
+    }
 
     analyserVisible.store (xml->getBoolAttribute ("analyserVisible", true),
                            std::memory_order_relaxed);

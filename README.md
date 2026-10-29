@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.50.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.51.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -68,11 +68,12 @@ them in a clean, focused workflow:
   curve accordingly. **v2.13: clicking the reference label at the 0 line
   cycles three presets — Record (-37 LUFS), Mix (-23 LUFS, the default)
   and Master (-14 LUFS).**
-  The scale is nine divisions deep with the top at
-  3 x dB/div, so the 0 line sits one third of the panel height from the
-  top in both settings. Pick **10 or 6 dB per division** by clicking the
+  **v2.51: the scale is six divisions deep (seven lines) with the top
+  at 2 x dB/div, so the 0 line sits one third of the panel height from
+  the top and the panel's mid-height line is the EQ's own zero.** Cycle
+  **15, 12 or 9 dB per division** by clicking the
   left dB scale labels
-  (10 → +30 to -60 dB, 6 → +18 to -36 dB). The horizontal axis is a clean log scale
+  (+30 to -60 dB, +24 to -48 dB, +18 to -36 dB). The horizontal axis is a clean log scale
   from **16 Hz to 24 kHz** (v2.9: the data-free edges centre the useful
   band and keep the labels clear of the panel borders; no value written
   at the 16 Hz left edge) with a graduation at every 20/30/.../90,
@@ -101,8 +102,9 @@ them in a clean, focused workflow:
   **dedicated scale** (classic EQ display range, labelled on the
   right edge, faint 0 dB anchor line) so EQ moves are easy to read, plus
   a slow input-energy-weighted smoothing (~0.4 s at full energy) so the
-  curve stays stable and readable. v2.8 makes that scale selectable:
-  **4 dB per division (+/-18 dB) or 2 dB per division (+/-9 dB)**, from
+  curve stays stable and readable. v2.51 makes that scale a four-step
+  zoom: **+/-24, +/-18, +/-12 or +/-6 dB** (8/6/4/2 dB per division),
+  from
   the sidebar. **v2.21 made it a measurement-grade estimate** (power-
   domain averaging of the band energies plus a Smaart-style relative
   validity gate). **v2.22 upgrades it to the full dual-FFT method**:
@@ -300,6 +302,30 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.51.0**
+  - **Analyser display rework (Clement's four-point request).** The
+    horizontal grid went from ten lines (nine divisions) to **seven
+    lines (six divisions)**: with the new zoom ladder every scale is
+    an integer dB per division again, the panel is calmer, and the
+    exact mid-height IS a grid line - which is where the EQ's
+    symmetric scale puts its zero. The analyser's 0 dB line keeps its
+    spot one third from the top, so **both zeros now sit on grid
+    lines, on two different lines**; the EQ-zero line carries a
+    discrete green tint (the EQ curve's colour family) so the eye
+    pairs it with the green right-hand scale.
+  - **Analyser zooms (click the left dB scale to cycle):** [+30;-60]
+    at 15 dB/div, [+24;-48] at 12 dB/div, [+18;-36] at 9 dB/div -
+    the old two-scale toggle (10/6 dB per division) is gone.
+  - **EQ zooms (click the right green scale to cycle):** +/-24,
+    +/-18, +/-12 then +/-6 dB (8/6/4/2 dB per division over the
+    full six-division grid). The old +/-9 dB scale is gone.
+  - **Legacy sessions map to the same visual range on load:**
+    analyser 10 dB/div -> 15 ([+30;-60] unchanged), 6 -> 9
+    ([+18;-36] unchanged); EQ 4 dB/div (was +/-18) -> 6, 2 -> 2.
+    The remap is keyed on the session's own version tag, so a 2.51
+    session saving 4 (meaning +/-12 dB) is never mistaken for the old
+    4 (which meant +/-18 dB). Covered by a new offline test alongside
+    the roundtrip.
 - **2.50.0**
   - **The low-end comb is fixed - the Savitzky-Golay smoothing now
     runs on the EQ dB curve, not on the accumulated spectra, and the
@@ -1546,8 +1572,8 @@ Delete `scanned_plugins.xml` to redo a full scan.
     slowly (~4 s in the bass, ~0.6 s in the treble), as requested.
   - **Scale controls moved onto the analyser itself**: the SCALE dB/DIV
     and EQ dB/DIV button rows are gone from the sidebar. Clicking the
-    analyser's left dB scale toggles 10 / 6 dB per division; clicking
-    the right green EQ scale toggles 4 / 2 dB per division. The window
+    analyser's left dB scale cycles 15 / 12 / 9 dB per division; clicking
+    the right green EQ scale cycles +/-24 / +/-18 / +/-12 / +/-6 dB. The window
     minimum height drops accordingly (700 px with the analyser, 520
     without).
   - **Uniform tilt button font**: the tilt buttons (-3 / -4.5 / -6) and

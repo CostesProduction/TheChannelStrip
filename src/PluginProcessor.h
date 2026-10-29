@@ -228,11 +228,14 @@ public:
     void setTiltDb (float tilt) { tiltDb.store (tilt, std::memory_order_relaxed); }
 
     // ---- v2.8: analyser display options (persisted with the state) ----
-    // Spectrum vertical scale: dB per division (top = +10 dB relative to
-    // the -23 LUFS reference, 9 divisions down).
+    // v2.51: spectrum vertical scale: dB per division over a six-division
+    // grid (top = 2 x dB/div relative to the loudness reference). The
+    // ladder is 15/12/9; legacy 10/6 values are mapped on load (see
+    // setStateInformation).
     float getAnaDbDiv() const { return anaDbDiv.load (std::memory_order_relaxed); }
     void setAnaDbDiv (float div) { anaDbDiv.store (div, std::memory_order_relaxed); }
-    // EQ transfer curve scale: dB per division (+/- 4.5 divisions).
+    // v2.51: EQ transfer curve scale: dB per division (+/- 3 divisions,
+    // ladder 8/6/4/2 = +/-24/18/12/6 dB; legacy 4/2 mapped on load).
     float getEqDbDiv() const { return eqDbDiv.load (std::memory_order_relaxed); }
     void setEqDbDiv (float div) { eqDbDiv.store (div, std::memory_order_relaxed); }
     // Show/hide the analyser strip (the window re-fits when it changes).
@@ -450,8 +453,8 @@ private:
     std::atomic<bool> suppressPresetDirty { false };
     std::atomic<bool> presetDirtyPending { false };
     // v2.8: display options + editor-open gate (see the editor API above).
-    std::atomic<float> anaDbDiv { 10.0f };
-    std::atomic<float> eqDbDiv { 4.0f };
+    std::atomic<float> anaDbDiv { 15.0f }; // v2.51: 15/12/9 dB/div
+    std::atomic<float> eqDbDiv { 6.0f };   // v2.51: 8/6/4/2 dB/div
     std::atomic<bool> analyserVisible { true };
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).

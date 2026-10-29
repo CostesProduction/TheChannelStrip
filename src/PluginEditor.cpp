@@ -317,9 +317,10 @@ juce::String SpectrumPanel::lufsTargetLabel() const
 }
 
 // v2.12: the scale toggles live on the analyser itself. The left column
-// (the dB labels of the spectrum scale) toggles 10/6 dB per division;
-// the right column (the green EQ range labels) toggles 4/2 dB per
-// division. v2.13: the loudness-reference label at the 0 dB line
+// (the dB labels of the spectrum scale) cycles the three v2.51 zooms
+// (15/12/9 dB per division); the right column (the green EQ range
+// labels) cycles the four EQ zooms (+/-24/18/12/6 dB).
+// v2.13: the loudness-reference label at the 0 dB line
 // ("Mix (-23 LUFS)", drawn from x=40 at the zero line) cycles the
 // Record/Mix/Master presets. The editor wires the actual toggling
 // through the std::function hooks (it owns the persisted state); clicks
@@ -1143,20 +1144,26 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
         }
     }
 
-    // v2.9: horizontals - nine divisions, top = 3 x dB per division
-    // (+30 dB at 10 dB/div, +18 dB at 6 dB/div, relative to the
-    // loudness reference), so the 0 dB line sits one third of the
-    // panel height from the top in both scales. The 0 dB line (which
-    // IS the reference LUFS absolute) is slightly brighter and
-    // annotated on the left (v2.13: the annotation is clickable).
+    // v2.9: horizontals. v2.51 (Clement's display rework): SEVEN lines
+    // = six divisions, so every analyser zoom (15/12/9 dB per division)
+    // lands on integer dB labels. The 0 dB line sits one third of the
+    // panel height from the top (division 2 of 6), like always, and the
+    // exact MID-height is a grid line - the middle one, division 3 -
+    // which is where the EQ's symmetric scale puts its own zero
+    // (Clement's point 2: both zeros on a line, two different lines).
+    // The 0 dB line (which IS the reference LUFS absolute) is slightly
+    // brighter and annotated on the left (v2.13: clickable); the EQ-zero
+    // middle line gets a discrete green tint, the EQ curve's colour
+    // family, so the eye pairs it with the green right-hand scale.
     const float zeroY = yForDb (0.0f);
 
-    for (int k = 0; k <= 9; ++k)
+    for (int k = 0; k <= 6; ++k)
     {
         const float db = topDb() - (float) k * dbPerDiv;
 
         g.setColour (std::abs (db) < 0.01f ? juce::Colour (0xff3a4560)
-                                          : juce::Colour (0xff1a2233));
+                                          : ((k == 3) ? juce::Colour (0xff20402a)
+                                                      : juce::Colour (0xff1a2233)));
         g.drawHorizontalLine ((int) yForDb (db), 0.0f, w);
     }
 
@@ -1164,7 +1171,7 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
     g.setColour (juce::Colour (0xff5c6a85));
     g.setFont (juce::Font (juce::FontOptions (11.0f)));
 
-    for (int k = 0; k <= 9; ++k)
+    for (int k = 0; k <= 6; ++k)
     {
         const float db = topDb() - (float) k * dbPerDiv;
         const int y = juce::jmax (2, (int) yForDb (db) - 6);
@@ -1224,9 +1231,10 @@ float SpectrumPanel::yForDb (float db) const
     return h * (1.0f - y01);
 }
 
-// v2.8: dedicated scale for the EQ curve: +/- 4.5 divisions of eqDbPerDiv
-// spans the full panel height, like a classic EQ display (+/-18 dB at
-// 4 dB/div, +/-9 dB at 2 dB/div).
+// v2.51: dedicated scale for the EQ curve: +/- 3 divisions of eqDbPerDiv
+// spans the full six-division panel, so the EQ's zero sits exactly on
+// the middle grid line, like a classic EQ display (+/-24 dB at
+// 8 dB/div, +/-18 at 6, +/-12 at 4, +/-6 at 2).
 float SpectrumPanel::yForEqDb (float db) const
 {
     const float h = (float) getHeight();
@@ -1321,9 +1329,10 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
 // v2.6: measured transfer function of the hosted plugin (OUT minus IN).
 // The tilt cancels in the difference, so no tilt is applied here - and
 // neither does the v2.8 loudness offset. v2.7: the curve uses its own
-// scale instead of sharing the spectrum's. v2.8: that scale is
-// selectable, +/- 4.5 divisions of 4 or 2 dB (i.e. +/-18 dB or +/-9 dB),
-// labelled on the right edge (v2.12: clicking those labels toggles the
+// scale instead of sharing the spectrum's. v2.51: that scale is
+// selectable, +/- 3 divisions of 8/6/4/2 dB (i.e. +/-24/18/12/6 dB
+// over the full six-division grid),
+// labelled on the right edge (v2.12: clicking those labels cycles the
 // scale).
 // v2.12: the path covers every bin that has EVER been measured
 // (since v2.47.0 that flag is the single curve's eqVeriteMeasured
@@ -1400,8 +1409,8 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
                                               juce::PathStrokeType::curved,
                                               juce::PathStrokeType::rounded));
 
-    // the EQ scale labels, match the curve's range (v2.8: dynamic,
-    // "+18"/"0"/"-18" at 4 dB/div, "+9"/"0"/"-9" at 2).
+    // the EQ scale labels, match the curve's range (v2.51: dynamic,
+    // "+24"/"0"/"-24" at 8 dB/div, "+18" at 6, "+12" at 4, "+6" at 2).
     // v2.20 (point 6): the column moved FLUSH against the right edge -
     // mirroring the spectrum's dB labels at the far left - so it no
     // longer shares the top-right corner with the hover readout (which
@@ -2103,22 +2112,33 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     }
 
     // ---- v2.12: the scale button rows are gone - the scales are
-    //      toggled by clicking the analyser's own scale labels ----
-    // Clicking the analyser's LEFT dB scale toggles 10 / 6 dB per
-    // division (spectrum); clicking the RIGHT green EQ scale toggles
-    // 4 / 2 dB per division. The state stays in the processor (saved
+    //      cycled by clicking the analyser's own scale labels ----
+    // v2.51: clicking the analyser's LEFT dB scale cycles the three
+    // zooms 15 / 12 / 9 dB per division (spectrum); clicking the
+    // RIGHT green EQ scale cycles 8 / 6 / 4 / 2 dB per division.
+    // The state stays in the processor (saved
     // with the session, exactly like the v2.8 buttons); the panel just
     // reports which column was clicked (see SpectrumPanel::mouseDown).
     spectrumPanel.onAnalyzerScaleClicked = [this]
     {
-        const float newDiv = (proc.getAnaDbDiv() > 7.5f) ? 6.0f : 10.0f;
+        // v2.51: three zooms now, cycled by successive clicks:
+        // 15 -> 12 -> 9 -> 15 dB per division, i.e. [+30;-60] ->
+        // [+24;-48] -> [+18;-36] (Clement's point 3).
+        const float cur = proc.getAnaDbDiv();
+        const float newDiv = (cur > 13.5f) ? 12.0f
+                          : ((cur > 10.5f) ? 9.0f : 15.0f);
         proc.setAnaDbDiv (newDiv);
         spectrumPanel.setDbPerDiv (newDiv);
     };
 
     spectrumPanel.onEqScaleClicked = [this]
     {
-        const float newDiv = (proc.getEqDbDiv() > 3.0f) ? 2.0f : 4.0f;
+        // v2.51: four zooms now (Clement's choice): 8 -> 6 -> 4 -> 2 ->
+        // 8 dB per division, i.e. +/-24 -> +/-18 -> +/-12 -> +/-6 dB.
+        const float cur = proc.getEqDbDiv();
+        const float newDiv = (cur > 7.0f) ? 6.0f
+                          : ((cur > 5.0f) ? 4.0f
+                          : ((cur > 3.0f) ? 2.0f : 8.0f));
         proc.setEqDbDiv (newDiv);
         spectrumPanel.setEqDbPerDiv (newDiv);
     };
@@ -2154,11 +2174,13 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         "IN and OUT spectra overlaid. The dB scales and the LUFS reference"
         " at 0 dB are clickable; hovering reads the exact level.";
 
-    // restore the saved scales (defaults: 10 dB and 4 dB per division;
-    // legacy values are snapped to the two current scales, like the
-    // v2.9 button restore did).
-    spectrumPanel.setDbPerDiv (proc.getAnaDbDiv() > 7.5f ? 10.0f : 6.0f);
-    spectrumPanel.setEqDbPerDiv (proc.getEqDbDiv() > 3.0f ? 4.0f : 2.0f);
+    // restore the saved scales (v2.51 defaults: 15 dB and 6 dB per
+    // division). Legacy 10/6 and 4/2 values are mapped to the new
+    // scale ladder processor-side in setStateInformation (kept there
+    // so the mapping is covered by the offline tests), so the editor
+    // just applies what it reads.
+    spectrumPanel.setDbPerDiv (proc.getAnaDbDiv());
+    spectrumPanel.setEqDbPerDiv (proc.getEqDbDiv());
 
     // ---- v2.8: show/hide the analyser strip ----
     // v2.34.1 (Clement's suggestion): the old "Display" text toggle
@@ -2836,11 +2858,12 @@ juce::String TheChannelStripAudioProcessorEditor::helpTextFor (juce::Component* 
 
             if (zone == SpectrumPanel::HelpZone::analyzerScale)
                 return "Left scale: the IN/OUT spectra's display scale. Click it to"
-                       " switch between 10 and 6 dB per division.";
+                       " cycle the zoom: 15, 12 then 9 dB per division"
+                       " (+30/-60, +24/-48, +18/-36).";
 
             if (zone == SpectrumPanel::HelpZone::eqScale)
                 return "Right scale: the EQ (OUT vs IN) curve's own scale. Click it"
-                       " to switch between 4 and 2 dB per division.";
+                       " to cycle the zoom: +/-24, +/-18, +/-12 then +/-6 dB.";
         }
 
         const auto entry = helpTexts.find (c);

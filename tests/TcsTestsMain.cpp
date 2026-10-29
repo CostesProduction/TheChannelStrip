@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.50.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.51.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -65,6 +65,8 @@
 //     current preset disowns it)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
+//   - v2.51 scale ladder: legacy 10/6 and 4/2 dB/div session values
+//     are mapped to the new 15/12/9 and 8/6/4/2 ladders on load
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
 //   - click-free console crossfade (bounded slew + convergence)
 //   - native mono negotiation vs stereo-bridge fallback (the v2.14
@@ -2837,8 +2839,8 @@ void testStateRoundtrip()
 
     TheChannelStripAudioProcessor proc;
     proc.setTiltDb (-3.0f);
-    proc.setAnaDbDiv (6.0f);
-    proc.setEqDbDiv (2.0f);
+    proc.setAnaDbDiv (12.0f); // v2.51 scale: must survive unchanged
+    proc.setEqDbDiv (4.0f);   // v2.51 scale: must survive unchanged
     proc.setAnalyserVisible (false);
     proc.setSpecTau (0.15f);
     proc.setLufsTarget (-37.0f);
@@ -2851,18 +2853,87 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.50.0",
-                "saved state carries the current version tag (2.50.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.51.0",
+                "saved state carries the current version tag (2.51.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
 
     expectNear (restored.getTiltDb(), -3.0,  0.01, "tilt restored");
-    expectNear (restored.getAnaDbDiv(), 6.0,  0.01, "spectrum dB/div restored");
-    expectNear (restored.getEqDbDiv(),  2.0,  0.01, "EQ dB/div restored");
+    expectNear (restored.getAnaDbDiv(), 12.0,  0.01, "spectrum dB/div restored");
+    expectNear (restored.getEqDbDiv(),  4.0,  0.01, "EQ dB/div restored");
     expectTrue (! restored.getAnalyserVisible(), "analyser visibility restored");
     expectNear (restored.getSpecTau(), 0.15, 0.01, "response speed restored");
     expectNear (restored.getLufsTarget(), -37.0, 0.01, "loudness reference restored");
+}
+
+// v2.51.0 (Clement's analyser display rework): the scale ladder
+// changed - the grid went from nine to SIX divisions, so the analyser
+// scales are now 15/12/9 dB per division ([+30;-60], [+24;-48],
+// [+18;-36]) and the EQ scales 8/6/4/2 dB per division (+/-24/18/12/6).
+// The legacy remap is VERSION-GATED: the EQ ladder's 4 dB/div is
+// ambiguous - a pre-2.51 session saved 4 meaning +/-18 dB, while a
+// 2.51 session saves 4 meaning +/-12 dB - so the mapping only fires
+// when the session's version attribute is older than 2.51.0 (the
+// first harness build caught the ungated remap breaking the 2.51
+// roundtrip of a 4). For those legacy sessions: analyser 10 (was
+// [+30;-60]) -> 15, 6 (was [+18;-36]) -> 9; EQ 4 (was +/-18) -> 6,
+// 2 (was +/-9) -> 2 (the new +/-6 dB scale).
+void testDisplayScaleLegacyMapping()
+{
+    beginTest ("v2.51 scale ladder: legacy session scales are mapped");
+
+    // builds a minimal session tagged with a given version and the
+    // two scale attributes (the fake-session pattern), loads it and
+    // returns the scales the processor settled on
+    auto loadScales = [] (const char* version, double ana, double eq)
+    {
+        auto session = std::make_unique<juce::XmlElement> ("TCS");
+        session->setAttribute ("version", version);
+        session->setAttribute ("anaDbDiv", ana);
+        session->setAttribute ("eqDbDiv", eq);
+
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (*session, block);
+
+        TheChannelStripAudioProcessor proc;
+        proc.setStateInformation (block.getData(), (int) block.getSize());
+
+        return std::make_pair (proc.getAnaDbDiv(), proc.getEqDbDiv());
+    };
+
+    // a v2.50 session with the old WIDE scales reopens on the new
+    // scales with the SAME visual range
+    {
+        const auto s = loadScales ("2.50.0", 10.0, 4.0);
+
+        expectNear (s.first, 15.0, 0.01,
+                    "legacy 10 dB/div maps to 15 dB/div (same [+30;-60] range)");
+        expectNear (s.second, 6.0, 0.01,
+                    "legacy EQ 4 dB/div (was +/-18) maps to 6 dB/div (+/-18)");
+    }
+
+    // a v2.50 session with the old FINE scales maps down the same way
+    {
+        const auto s = loadScales ("2.50.0", 6.0, 2.0);
+
+        expectNear (s.first, 9.0, 0.01,
+                    "legacy 6 dB/div maps to 9 dB/div (same [+18;-36] range)");
+        expectNear (s.second, 2.0, 0.01,
+                    "legacy EQ 2 dB/div stays 2 dB/div (now +/-6 dB)");
+    }
+
+    // a v2.51 session passes through UNMAPPED - including the
+    // ambiguous 4, which the new ladder reads as +/-12 dB (the exact
+    // roundtrip the ungated remap used to break)
+    {
+        const auto s = loadScales ("2.51.0", 12.0, 4.0);
+
+        expectNear (s.first, 12.0, 0.01,
+                    "a current session's analyser scale is not remapped");
+        expectNear (s.second, 4.0, 0.01,
+                    "a current session keeps EQ 4 dB/div - it means +/-12 dB");
+    }
 }
 
 void testLatencyForwarding()
@@ -3190,7 +3261,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.50.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.51.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3853,7 +3924,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.50.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.51.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3878,6 +3949,7 @@ int main (int argc, char* argv[])
     testSilentConsoleWarning();
     testHoverReadout();
     testStateRoundtrip();
+    testDisplayScaleLegacyMapping();
     testLatencyForwarding();
     testCrossfadeClickFree();
     testMonoNative();

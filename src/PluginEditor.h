@@ -23,10 +23,12 @@
 // v2.8 rescales the whole panel around a -23 LUFS loudness reference:
 // the vertical axis shows dB *relative to the (smoothed) input loudness,
 // so "0" on the left axis means "-23 LUFS absolute" and a mix mastered
-// around -23 LUFS reads with its mid-band roughly at the 0 line. Nine
-// divisions, top = 3 x dB/div; the user picks 10 or 6 dB per division
-// for the spectra and 4 or 2 dB per division (+/-4.5 divisions) for the
-// EQ curve. v2.12: those two scales are toggled by CLICKING the
+// around -23 LUFS reads with its mid-band roughly at the 0 line. Since
+// v2.51 the grid is SIX divisions (seven lines), top = 2 x dB/div; the
+// user picks 15/12/9 dB per division (zooms [+30;-60] / [+24;-48] /
+// [+18;-36]) for the spectra and 8/6/4/2 dB per division (+/-24/18/12/6
+// dB, +/- 3 divisions) for the
+// EQ curve. v2.12: those two scales are cycled by CLICKING the
 // analyser's own scale labels (left = spectrum dB/div, right green =
 // EQ dB/div); the sidebar button rows are gone. v2.13: the loudness
 // reference itself is clickable too - the reference label at the 0 dB
@@ -62,8 +64,8 @@ public:
     enum class HelpZone { graph, analyzerScale, eqScale, lufsReference };
     HelpZone helpZoneFor (juce::Point<int> localPos) const;
     void setTilt (float newTiltDbPerOct);
-    void setDbPerDiv (float dbPerDivision);   // v2.9: 10 or 6
-    void setEqDbPerDiv (float dbPerDivision); // v2.8: 4 or 2
+    void setDbPerDiv (float dbPerDivision);   // v2.51: 15, 12 or 9
+    void setEqDbPerDiv (float dbPerDivision); // v2.51: 8, 6, 4 or 2
     void setSpecTau (float tauSeconds) { specTau = juce::jmax (0.05f, tauSeconds); } // v2.11
     // v2.13: loudness reference of the axis (0 dB line = this many LUFS
     // absolute). Changing it re-snaps the calibration immediately.
@@ -136,22 +138,30 @@ private:
     // readable above everything.
     void drawHoverReadout (juce::Graphics& g) const;
 
-    // v2.9: the axis is 9 divisions deep, top = 3 x dB/div and bottom =
-    // -6 x dB/div (both relative to the -23 LUFS reference), so the 0 dB
-    // line stays at one third of the panel height in both scales.
-    // v2.8 had a fixed +10 dB top; the new tops are +30 (10 dB/div)
-    // and +18 (6 dB/div), bottoms -60 and -36.
-    float topDb() const    { return 3.0f * dbPerDiv; }
-    float bottomDb() const { return -6.0f * dbPerDiv; }
-    // v2.8: the EQ curve spans +/- 4.5 divisions of its own scale.
-    float eqRangeDb() const { return 4.5f * eqDbPerDiv; }
+    // v2.51 (Clement's display rework): the axis is now SIX divisions
+    // (seven lines) instead of nine, top = 2 x dB/div and bottom =
+    // -4 x dB/div (both relative to the loudness reference), so the
+    // 0 dB line stays at one third of the panel height and the exact
+    // mid-height of the panel IS a grid line - the middle one - which
+    // is where the EQ's symmetric scale puts its own zero (point 2:
+    // both zeros sit on a line, on two DIFFERENT lines). The three
+    // analyser zooms are 15/12/9 dB per division, i.e. [+30;-60],
+    // [+24;-48] and [+18;-36] - all integer dB per division.
+    float topDb() const    { return 2.0f * dbPerDiv; }
+    float bottomDb() const { return -4.0f * dbPerDiv; }
+    // v2.51: the EQ curve spans +/- 3 divisions of its own scale
+    // (the full six-division grid), so its zero lands exactly on the
+    // middle grid line. 8/6/4/2 dB per division = +/-24/18/12/6 dB.
+    float eqRangeDb() const { return 3.0f * eqDbPerDiv; }
 
     TheChannelStripAudioProcessor& processor;
     float tilt = -4.5f; // dB/oct, SPAN convention: negative flattens a falling spectrum
 
     // v2.8: selectable scales (see setDbPerDiv / setEqDbPerDiv).
-    float dbPerDiv = 10.0f;
-    float eqDbPerDiv = 4.0f;
+    // v2.51 defaults: 15 dB/div analyser (zoom [+30;-60]) and 6 dB/div
+    // EQ (+/-18 dB) - the same visual defaults as the old 10 and 4.
+    float dbPerDiv = 15.0f;
+    float eqDbPerDiv = 6.0f;
     // v2.8.1: calibrated offset between the FFT bins' own scale and the
     // display's loudness-referenced axis (0 dB = -23 LUFS): the measured
     // gap between the spectrum's energy-weighted mean and (LUFS + 23).
