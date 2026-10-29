@@ -91,16 +91,18 @@ public:
     // analysis directly (no visible editor, no running timer) and
     // inspects the measured EQ curve bin by bin.
     void runAnalysisTick();
-    // v2.48.0: the EQ curve the panel draws is still ONE curve - now the
-    // max-hold blend of Clement's v2.48 design call (the mean of the
-    // 5-second and 2-second "EQ @ max" windows, with the cross-spectrum
-    // H1 as the junk fallback member; see smoothEqVerite below).
+    // v2.49.0: the EQ curve the panel draws is still ONE curve - now
+    // the PURE optimised H1 cross-spectrum member (Clement's A/B
+    // build: "only your optimised H1 method, without my Max Hold
+    // idea" - so he can compare it against the v2.48 max-hold
+    // blends; see smoothEqVerite below).
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
-    // v2.46 -> v2.48: the "EQ @ max" machinery SURVIVES as the members
-    // of the single EQ curve (and the harness still drives it directly
-    // through these hooks to test the max logic itself).
+    // v2.46 -> v2.49: the "EQ @ max" machinery still runs with its
+    // own gates - Clement's idea, kept fully alive and directly
+    // testable through these hooks - but since v2.49.0 it does NOT
+    // vote on the drawn curve (the pure-H1 A/B build).
     float getEqMaxDbAtBin (int bin) const;
     bool isEqMaxBinMeasured (int bin) const;
 
@@ -170,40 +172,43 @@ private:
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMeasured;
 
     // -----------------------------------------------------------------
-    // v2.47.0 -> v2.48.0 (Clement's calls, both his): ONE EQ curve,
-    // and its truth is the MAX-HOLD family - "j'ai l'impression que les
-    // formes issues des courbes en maximum hold sont beaucoup plus
-    // propres". The single line is now:
+    // v2.47.0 -> v2.49.0. ONE EQ curve, always - but WHICH estimator
+    // it reads is the ongoing A/B between Clement's max-hold family
+    // and my H1 cross-spectrum method:
+    //  - v2.47: blend 2/3 H1 (tau 5 s) + 1/3 max anchor;
+    //  - v2.48: the max-hold blend - the mean of the 5 s and 2 s
+    //    "EQ @ max" windows, with the H1 as the junk-fallback member
+    //    ("j'ai l'impression que les formes issues des courbes en
+    //    maximum hold sont beaucoup plus propres");
+    //  - v2.49 (THIS BUILD, Clement's call): the PURE optimised H1
+    //    member alone - "j'aimerais voir ce que ça donne seulement
+    //    ta suggestion (vs les blend)" - so the two truths can be
+    //    compared on his console, with his ears and eyes.
     //
-    //   EQ = 1/2 * (5-second "EQ @ max") + 1/2 * (2-second "EQ @ max")
-    //   ...and wherever the band's RAW coherence says the output is
-    //   junk-dominated, the bin falls back to the H1 cross-spectrum
-    //   member (the v2.22 junk rejection, kept alive by design: a
-    //   dB difference measures EVERYTHING the console put in the
-    //   band, so on a console with a floor above its lowpass the max
-    //   members would show the v2.21.1 phantom again - the fallback
-    //   reads the true rolloff there instead).
+    //   EQ = smoothDiff, the H1 cross-spectrum estimate
+    //        20*log10|Sxy/Sxx|, in every band it ever measured
     //
-    // Why max-hold: for a linear console the max difference is the
-    // EXACT transfer at the programme's peak drive, a fixed operating
-    // point that stays stable even on a saturating console - the
-    // shapes read clean. The v2.48 reference simulation (soft-
-    // saturation mock, bursty programme, ground truth at two drive
-    // levels) raced Clement's three candidates: the (5 s; 2 s) pair
-    // keeps the 5 s window's stability (median wander 2.57 dB p-p vs
-    // 2.54 for the 5 s alone), settles on a knob turn in ~1.3 s
-    // WITHOUT any flush (the max only moves up), and has the best
-    // all-band fidelity of the three blends (0.66 dB). The 1 s pair
-    // was eliminated - its short ring catches isolated burst spikes
-    // in weak bands (14.2 dB p-p excursions blended) - and the 300 ms
-    // pair trades fidelity (0.89 dB) for speed the 2 s pair already
-    // delivers.
+    // The H1 method, as optimised across the versions (all of it
+    // still in the code below or in the TransferAnalyzer): complex
+    // cross-spectrum accumulation that cancels the console's
+    // uncorrelated floor BY CONSTRUCTION (v2.22), the tau ~5 s
+    // energy-weighted EMAs with the deterministic flush + parameter
+    // relay so knob and console changes re-converge in ~1 s (v2.47),
+    // the Savitzky-Golay 31-tap frequency smoothing (v2.44), the
+    // fractional bin sampling below 213 Hz (v2.41), the v2.12
+    // persistence and the relative input + coherence gates. The
+    // light final one-pole (tau ~0.3 s) keeps the display continuous.
     //
-    // Measured flags combine as a UNION and the weights renormalise
-    // over whichever members are valid in the bin. Persistence
-    // (v2.12) is preserved as-is: the flags are sticky and every
-    // member array holds its last value while the gates are closed,
-    // so the curve stays on screen when the signal stops.
+    // The max-hold members are still computed (their gates and
+    // harness hooks intact, their trace test unchanged) but they no
+    // longer vote on this curve - going back to the blend family is
+    // a one-block change in updateBallistics. Honest trade, for the
+    // A/B: a knob DOWN now converges down in ~1 s (no max to hold
+    // it), junk is rejected everywhere by construction (no
+    // raw-coherence routing), and on a saturating console the H1
+    // reads the energy-weighted small-signal transfer rather than
+    // the peak-drive response - the shapes Clement found less clean
+    // in v2.47.
     // -----------------------------------------------------------------
     std::array<float, SpectrumAnalyzer::numScopeBins> smoothEqVerite {};
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqVeriteMeasured {};
@@ -231,12 +236,19 @@ private:
     int maxRingIndex = 0;
 
     // -----------------------------------------------------------------
-    // v2.46.0 (Clement's idea) -> v2.48.0 (a full member): the "EQ @
+    // v2.46.0 (Clement's idea) -> v2.49.0: the "EQ @
     // max" machinery - dB MaxOut - dB MaxIn, computed from sliding
     // maxima of the smoothed IN and OUT curves. The LONG window (5 s,
     // 150 frames at 30 Hz) is the v2.46 trace, kept one frame shorter
     // than a knob-down needs to leave it; the SHORT window (2 s, 60
     // frames) is the v2.48 addition.
+    //
+    // v2.49: these windows no longer vote on the drawn EQ curve (the
+    // pure-H1 A/B build) - but the machinery is kept COMPLETE and
+    // testable (its own gates, its hooks, its harness test), so the
+    // blend family can come back as a one-block change the day the
+    // A/B says so. Everything below therefore still runs at every
+    // display tick.
     //
     // Why the max is exactly right for a linear console: it is
     // HOMOGENEOUS - max (H*x) = H * max (x) - and the IN/OUT display
@@ -249,9 +261,11 @@ private:
     // point even on a saturating console, and transients count
     // properly (the attack IS the max).
     //
-    // v2.48: the two windows are the two MEMBERS of the single EQ
+    // v2.48: the two windows became the two MEMBERS of the single EQ
     // curve (see smoothEqVerite above) - the mean of the long (the
-    // stability) and the short (the reactivity). Documented costs,
+    // stability) and the short (the reactivity); v2.49 takes them
+    // OFF that curve for the pure-H1 A/B, without touching this
+    // machinery. Documented costs,
     // unchanged from v2.46: on a knob DOWN the maxima HOLD the old
     // value until the loud passage that carries them exits the window
     // (5 s / 2 s), which reads as the curve gliding down; and no
@@ -278,8 +292,10 @@ private:
     // v2.48.0: the SHORT window of the pair - the identical machinery
     // over a 2-second ring (60 frames at 30 Hz), Clement's pick of the
     // three simulated candidates (5 s; 1 s) / (5 s; 2 s) / (5 s; 300 ms)
-    // - see smoothEqVerite above for the numbers and the header of the
-    // 5 s block above for the shared story.
+    // - see smoothEqVerite above for the A/B story and the header of
+    // the 5 s block above for the shared story. Like the 5 s window,
+    // since v2.49.0 it stays computed and tested but off the drawn
+    // curve.
     static constexpr int maxEqFrames2 = 60;
     std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn2 {};
     std::array<float, SpectrumAnalyzer::numScopeBins> maxEqOut2 {};

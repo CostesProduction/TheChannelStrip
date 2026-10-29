@@ -85,14 +85,16 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
 {
     loadKnownPluginList();
 
-    // v2.47.0 (the EQ-Verite curve) -> v2.48.0: when the hosted console's
+    // v2.47.0 (the EQ-Verite curve) -> v2.49.0: when the hosted console's
     // response changes - a knob moved on the hosted plugin (parameter
     // relay, see HostedStrip) or the console was swapped/cleared - the
     // transfer estimators restart, so the long 5 s averaging window
-    // never blurs an old response into a new one. The v2.48 EQ curve is
-    // the max-hold blend (reactive on a knob-up by construction), and
-    // this flush is what keeps its H1 FALLBACK member - the junk
-    // rejection path - honest across a knob turn. The callback only
+    // never blurs an old response into a new one. v2.49.0 (the pure-H1
+    // A/B build): the single EQ curve IS the H1 member now, so this
+    // flush carries the curve's knob reactivity in BOTH directions -
+    // up (the fast post-flush EMA converges within ~1 s) and down
+    // (where the v2.48 max-hold members used to hold the old response
+    // up to 5 s, the H1 simply re-measures it). The callback only
     // performs an atomic store (TransferAnalyzer::requestFlush), safe
     // from any thread; it is written ONCE here and never re-assigned.
     hostedStrip.onConsoleResponseChanged = [this]
@@ -321,7 +323,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.48.0 - Doctor report\n"
+    report << "TheChannelStrip 2.49.0 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -1017,7 +1019,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.48.0");
+    xml->setAttribute ("version", "2.49.0");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1334,7 +1336,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.48.0");
+    xml->setAttribute ("version", "2.49.0");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -2144,7 +2146,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.48.0");
+    xml->setAttribute ("version", "2.49.0");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 

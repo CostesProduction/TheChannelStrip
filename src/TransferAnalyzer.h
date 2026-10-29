@@ -97,11 +97,17 @@ public:
     // (before the Savitzky-Golay frequency pass). The SG window dilutes
     // a NARROW uncorrelated artifact with ~30 coherent neighbours (a
     // 1-band console tone reads g2 0.50 raw -> 0.93 smoothed), and the
-    // max-hold members of the v2.48 EQ curve need the undiluted dip to
+    // max-hold members of the v2.48 EQ curve needed the undiluted dip to
     // know when a band's output is junk-dominated: there the dB-difference
     // members must not vote (they would honestly measure the console's
     // junk as if it were signal), so the bin falls back to the
     // cross-spectrum member, which rejects junk by construction.
+    // v2.49.0: the drawn EQ curve is the pure H1 member (Clement's A/B
+    // build), which rejects junk by construction everywhere - so this
+    // hook is not fetched by the editor in this build. It stays public
+    // and still computed (one lock-free store per band per frame),
+    // ready for the blend builds; removing it would break the v2.48
+    // design contract.
     void copyRawCoherenceData (float* dest, int numBins) const;
 
     double getBinFrequency (int bin) const
@@ -245,7 +251,9 @@ private:
 
     // v2.48.0: the RAW (pre-SG) coherence snapshot (see
     // copyRawCoherenceData) - one more lock-free store per band per
-    // frame on the audio thread, zero allocations.
+    // frame on the audio thread, zero allocations. v2.49.0: kept
+    // computed for the blend builds; the pure-H1 curve does not
+    // fetch it (the editor block reads the H1 member directly).
     std::array<std::atomic<float>, (size_t) numScopeBins> rawCoherence {};
 
     std::array<double, (size_t) numScopeBins> binFrequencies {};

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.48.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.49.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,61 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.49.0**
+  - **The single EQ curve is now the PURE optimised H1 method -
+    Clement's A/B build: "j'aimerais que tu implémentes seulement ta
+    méthode H1 optimisée par toi, sans mon idée de Max Hold.
+    J'aimerais voir ce que ça donne seulement ta suggestion (vs les
+    blend)".** The drawn curve, the hover readout and the harness
+    hooks all read the cross-spectrum H1 estimate
+    20*log10|Sxy/Sxx| **alone** - the exact member, with the same
+    gates and display chain, that v2.48 read in its junk-fallback
+    bands, so the comparison against the 2.48 max-hold blends is
+    clean: same estimator, no max votes. The method, as optimised
+    across the versions: complex cross-spectrum accumulation that
+    cancels the console's uncorrelated floor BY CONSTRUCTION (the
+    v2.22 junk rejection - no raw-coherence routing patch needed,
+    it is the estimator itself); the tau ~5 s energy-weighted EMAs
+    with the deterministic flush + parameter relay (v2.47), so a
+    knob or console change re-converges within ~1 s in BOTH
+    directions; the Savitzky-Golay 31-tap frequency smoothing
+    (v2.44); the fractional bin sampling below 213 Hz (v2.41); the
+    v2.12 persistence and the relative input + coherence gates.
+  - **What changed vs 2.48, honestly.** A knob DOWN now converges
+    down within ~1-2 s - the flush restarts the estimators and the
+    fast post-flush EMA carries the new response, where the max
+    members used to HOLD the old value up to 5 s (the glide). Junk
+    is rejected everywhere by construction (2.48 needed the
+    raw-coherence 0.75 patch to route junk-dominated bands to this
+    very estimator). And on a saturating console the H1 reads the
+    energy-weighted small-signal transfer rather than the response
+    at the programme's peak drive - the shapes Clement found less
+    clean in v2.47 ("je pense que je préfère les courbes issues de
+    maximum hold"). That trade is exactly what this build puts on
+    the table: the two truths, side by side across versions, for
+    his ears and eyes on his console. The v2.47 reference simulation
+    (soft-saturation mock, ground truth at two drive levels)
+    measured the pure tau-5 s H1 at ~0.9 dB median band wander with
+    a ~1.1 s settle on a knob turn - the numbers behind what he
+    saw in 2.47.
+  - **The max-hold family is NOT deleted.** Both "EQ @ max" windows
+    (5 s and 2 s) are still computed at every display tick, with
+    their own gates and their direct harness hooks, and the v2.46
+    trace test is unchanged - they simply no longer vote on the
+    drawn curve, so going back to the blend family (or building a
+    third candidate from both) is a one-block change in
+    updateBallistics. The RAW coherence hook stays public and
+    computed in the TransferAnalyzer for the blend builds; this
+    build does not fetch it.
+  - **Updated harness test.** The EQ-curve test now exercises the
+    pure H1 end to end at the real 30 Hz panel cadence: flat 0 dB
+    in passthrough, reacting within ~1 s to a knob turned through
+    the REAL hosted parameter (relay -> flush -> fast EMA), and -
+    the new discriminator, the assertion that proves "sans Max
+    Hold" - re-converging DOWN within ~2 s of a knob-down, where
+    the blend would still hold the old +6 dB peak in its 5 s max
+    windows; plus the unchanged v2.12 persistence after the signal
+    stops.
 - **2.48.0**
   - **The EQ curve's truth is now the MAX-HOLD family (Clement's
     verdict after living with v2.47: "j'ai l'impression que les formes
