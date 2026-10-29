@@ -91,16 +91,16 @@ public:
     // analysis directly (no visible editor, no running timer) and
     // inspects the measured EQ curve bin by bin.
     void runAnalysisTick();
-    // v2.47.0: the EQ curve the panel draws is now ONE curve - the
-    // EQ-Verite blend (2/3 cross-spectrum transfer + 1/3 max-anchor,
-    // see smoothEqVerite below). These hooks return that single curve;
-    // the v2.46 trace pair is gone from the display.
+    // v2.48.0: the EQ curve the panel draws is still ONE curve - now the
+    // max-hold blend of Clement's v2.48 design call (the mean of the
+    // 5-second and 2-second "EQ @ max" windows, with the cross-spectrum
+    // H1 as the junk fallback member; see smoothEqVerite below).
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
-    // v2.46 -> v2.47: the "EQ @ max" machinery SURVIVES as the anchor
-    // third of the single EQ curve (and the harness still drives it
-    // directly through these hooks to test the max logic itself).
+    // v2.46 -> v2.48: the "EQ @ max" machinery SURVIVES as the members
+    // of the single EQ curve (and the harness still drives it directly
+    // through these hooks to test the max logic itself).
     float getEqMaxDbAtBin (int bin) const;
     bool isEqMaxBinMeasured (int bin) const;
 
@@ -170,35 +170,40 @@ private:
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMeasured;
 
     // -----------------------------------------------------------------
-    // v2.47.0 (Clement's design call): ONE EQ curve. No engineer wants
-    // to cross-read several traces to know what the console does - the
-    // panel now draws a single line, the best ESTIMATE OF THE TRUTH:
+    // v2.47.0 -> v2.48.0 (Clement's calls, both his): ONE EQ curve,
+    // and its truth is the MAX-HOLD family - "j'ai l'impression que les
+    // formes issues des courbes en maximum hold sont beaucoup plus
+    // propres". The single line is now:
     //
-    //   EQ = 2/3 * (H1 cross-spectrum transfer, tau ~5 s, flushed)
-    //     + 1/3 * (the v2.46 max anchor)
+    //   EQ = 1/2 * (5-second "EQ @ max") + 1/2 * (2-second "EQ @ max")
+    //   ...and wherever the band's RAW coherence says the output is
+    //   junk-dominated, the bin falls back to the H1 cross-spectrum
+    //   member (the v2.22 junk rejection, kept alive by design: a
+    //   dB difference measures EVERYTHING the console put in the
+    //   band, so on a console with a floor above its lowpass the max
+    //   members would show the v2.21.1 phantom again - the fallback
+    //   reads the true rolloff there instead).
     //
-    // The reference simulation (soft-saturation mock, bursty
-    // programme, ground truth at two drive levels) picked these exact
-    // weights: of every blend tested, 2/3 slow + 1/3 max had the best
-    // median wander (2.2 dB p-p vs 4.3 dB for the production tau of
-    // v2.46), ZERO staircase steps, and a fidelity to the exact
-    // energy-weighted response within ~0.5 dB. The long-window H1
-    // member measures the energy-weighted truth (what the programme
-    // actually experienced); the max member anchors the curve at the
-    // console's peak-drive response, which stabilises the residual
-    // wander and bridges the flush restart. Both members are already
-    // smoothed (H1 display EMA; the max difference runs the same
-    // Savitzky-Golay pass as the transfer curve), so the blend itself
-    // only needs a light final one-pole for continuity.
+    // Why max-hold: for a linear console the max difference is the
+    // EXACT transfer at the programme's peak drive, a fixed operating
+    // point that stays stable even on a saturating console - the
+    // shapes read clean. The v2.48 reference simulation (soft-
+    // saturation mock, bursty programme, ground truth at two drive
+    // levels) raced Clement's three candidates: the (5 s; 2 s) pair
+    // keeps the 5 s window's stability (median wander 2.57 dB p-p vs
+    // 2.54 for the 5 s alone), settles on a knob turn in ~1.3 s
+    // WITHOUT any flush (the max only moves up), and has the best
+    // all-band fidelity of the three blends (0.66 dB). The 1 s pair
+    // was eliminated - its short ring catches isolated burst spikes
+    // in weak bands (14.2 dB p-p excursions blended) - and the 300 ms
+    // pair trades fidelity (0.89 dB) for speed the 2 s pair already
+    // delivers.
     //
-    // Measured flags combine as a UNION: a bin is drawn once EITHER
-    // member has measured it, and the value is the weight-renormalised
-    // blend of whichever members are valid there (a band the max
-    // never gated in but the H1 measures reads the H1 alone, and vice
-    // versa). Persistence (v2.12) is preserved as-is: the flags are
-    // sticky and both member arrays hold their last value while the
-    // gates are closed, so the curve stays on screen when the signal
-    // stops.
+    // Measured flags combine as a UNION and the weights renormalise
+    // over whichever members are valid in the bin. Persistence
+    // (v2.12) is preserved as-is: the flags are sticky and every
+    // member array holds its last value while the gates are closed,
+    // so the curve stays on screen when the signal stops.
     // -----------------------------------------------------------------
     std::array<float, SpectrumAnalyzer::numScopeBins> smoothEqVerite {};
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqVeriteMeasured {};
@@ -226,39 +231,39 @@ private:
     int maxRingIndex = 0;
 
     // -----------------------------------------------------------------
-    // v2.46.0 (Clement's idea) -> v2.47.0 (the ANCHOR): the "EQ @ max"
-    // machinery - dB MaxOut - dB MaxIn, computed from 5-second sliding
-    // maxima of the smoothed IN and OUT curves (150 frames at 30 Hz -
-    // a shorter window than the 10 s max-hold overlay above, because
-    // the anchor must also react when a knob goes DOWN: the old peak
-    // leaves the window after at most 5 s).
+    // v2.46.0 (Clement's idea) -> v2.48.0 (a full member): the "EQ @
+    // max" machinery - dB MaxOut - dB MaxIn, computed from sliding
+    // maxima of the smoothed IN and OUT curves. The LONG window (5 s,
+    // 150 frames at 30 Hz) is the v2.46 trace, kept one frame shorter
+    // than a knob-down needs to leave it; the SHORT window (2 s, 60
+    // frames) is the v2.48 addition.
     //
     // Why the max is exactly right for a linear console: it is
     // HOMOGENEOUS - max (H*x) = H * max (x) - and the IN/OUT display
     // smoothing is affine-equivariant (the same one-pole on both
     // curves, so smoothOut = H + smoothIn bin by bin), so the max
     // difference is the exact transfer, measured at the programme's
-    // PEAK DRIVE of each band. That is what makes it a good ANCHOR
-    // for the single EQ curve: it always reports the response AT the
+    // PEAK DRIVE of each band. That is what makes the max family the
+    // clean-shapes truth: it always reports the response AT the
     // loudest moment of the window, a repeatable, stable operating
     // point even on a saturating console, and transients count
     // properly (the attack IS the max).
     //
-    // v2.47.0: the trace is no longer drawn as a second curve - it is
-    // the anchor THIRD of the EQ-Verite blend (see smoothEqVerite
-    // above), which is what tames its one honest cost: on a knob DOWN
-    // the max HOLDS the old value until the loud passage that carries
-    // it exits the 5 s window, and at 1/3 weight that hold reads as
-    // the curve gliding down instead of a dashed line squatting high.
-    // The other documented cost is unchanged: no cross-spectrum junk
-    // rejection - where a console lowpass sinks the signal under the
-    // console's own floor, the held max Out eventually reads the
-    // floor (the v2.21.1 artifact) - which is exactly why the H1
-    // member carries 2/3 of the blend. A relative input gate (maxIn
-    // within 45 dB of the strongest max band, floor -75 dB) keeps the
-    // anchor to bands that really carried programme energy, and the
-    // same Savitzky-Golay pass as the transfer curve smooths the
-    // difference for visual consistency. Display-side (UI thread,
+    // v2.48: the two windows are the two MEMBERS of the single EQ
+    // curve (see smoothEqVerite above) - the mean of the long (the
+    // stability) and the short (the reactivity). Documented costs,
+    // unchanged from v2.46: on a knob DOWN the maxima HOLD the old
+    // value until the loud passage that carries them exits the window
+    // (5 s / 2 s), which reads as the curve gliding down; and no
+    // cross-spectrum junk rejection - where a console lowpass sinks
+    // the signal under the console's own floor the held max Out
+    // eventually reads the floor (the v2.21.1 artifact) - which is
+    // exactly why the blend's raw-coherence fallback reads the H1
+    // member in those bands instead. A relative input gate (maxIn
+    // within 45 dB of the strongest max band, floor -75 dB) keeps
+    // both windows to bands that really carried programme energy, and
+    // the same Savitzky-Golay pass as the transfer curve smooths the
+    // differences for visual consistency. Display-side (UI thread,
     // 30 Hz, zero audio-thread cost).
     // -----------------------------------------------------------------
     static constexpr int maxEqFrames = 150;
@@ -269,6 +274,20 @@ private:
     std::vector<float> maxEqOutRing;
     int maxEqRingIndex = 0;
     std::array<bool, SpectrumAnalyzer::numScopeBins> eqMaxMeasured {};
+
+    // v2.48.0: the SHORT window of the pair - the identical machinery
+    // over a 2-second ring (60 frames at 30 Hz), Clement's pick of the
+    // three simulated candidates (5 s; 1 s) / (5 s; 2 s) / (5 s; 300 ms)
+    // - see smoothEqVerite above for the numbers and the header of the
+    // 5 s block above for the shared story.
+    static constexpr int maxEqFrames2 = 60;
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn2 {};
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqOut2 {};
+    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqDiff2 {};
+    std::vector<float> maxEqIn2Ring;
+    std::vector<float> maxEqOut2Ring;
+    int maxEqRingIndex2 = 0;
+    std::array<bool, SpectrumAnalyzer::numScopeBins> eqMax2Measured {};
 
     // v2.11: selectable IN/OUT smoothing time constant; v2.12 keeps two
     // speeds (Fast ~0.15 s, Slow ~1 s, the default).

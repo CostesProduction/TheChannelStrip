@@ -93,6 +93,17 @@ public:
     // dB (20*log10|H|, clamped to +/- 60) and the coherence g2 in [0, 1].
     void copyTransferData (float* db, float* coherence, int numBins) const;
 
+    // v2.48.0: the same per-bin coherence, but from the RAW accumulators
+    // (before the Savitzky-Golay frequency pass). The SG window dilutes
+    // a NARROW uncorrelated artifact with ~30 coherent neighbours (a
+    // 1-band console tone reads g2 0.50 raw -> 0.93 smoothed), and the
+    // max-hold members of the v2.48 EQ curve need the undiluted dip to
+    // know when a band's output is junk-dominated: there the dB-difference
+    // members must not vote (they would honestly measure the console's
+    // junk as if it were signal), so the bin falls back to the
+    // cross-spectrum member, which rejects junk by construction.
+    void copyRawCoherenceData (float* dest, int numBins) const;
+
     double getBinFrequency (int bin) const
     {
         return binFrequencies[(size_t) juce::jlimit (0, numScopeBins - 1, bin)];
@@ -231,6 +242,11 @@ private:
 
     std::array<std::atomic<float>, (size_t) numScopeBins> transferDb {};
     std::array<std::atomic<float>, (size_t) numScopeBins> coherence {};
+
+    // v2.48.0: the RAW (pre-SG) coherence snapshot (see
+    // copyRawCoherenceData) - one more lock-free store per band per
+    // frame on the audio thread, zero allocations.
+    std::array<std::atomic<float>, (size_t) numScopeBins> rawCoherence {};
 
     std::array<double, (size_t) numScopeBins> binFrequencies {};
 

@@ -263,6 +263,13 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     eqMaxMeasured.fill (false);
+    // v2.48.0: the short 2 s max window starts empty like the 5 s one.
+    maxEqIn2.fill (-100.0f);
+    maxEqOut2.fill (-100.0f);
+    maxEqDiff2.fill (0.0f);
+    maxEqIn2Ring.assign ((size_t) maxEqFrames2 * SpectrumAnalyzer::numScopeBins, -100.0f);
+    maxEqOut2Ring.assign ((size_t) maxEqFrames2 * SpectrumAnalyzer::numScopeBins, -100.0f);
+    eqMax2Measured.fill (false);
     // v2.47.0: the single EQ-Verite curve starts empty like its members.
     smoothEqVerite.fill (0.0f);
     eqVeriteMeasured.fill (false);
@@ -400,6 +407,12 @@ void SpectrumPanel::resetDisplay()
     maxEqInRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     maxEqOutRing.assign ((size_t) maxEqFrames * SpectrumAnalyzer::numScopeBins, -100.0f);
     eqMaxMeasured.fill (false);
+    maxEqIn2.fill (-100.0f);
+    maxEqOut2.fill (-100.0f);
+    maxEqDiff2.fill (0.0f);
+    maxEqIn2Ring.assign ((size_t) maxEqFrames2 * SpectrumAnalyzer::numScopeBins, -100.0f);
+    maxEqOut2Ring.assign ((size_t) maxEqFrames2 * SpectrumAnalyzer::numScopeBins, -100.0f);
+    eqMax2Measured.fill (false);
     smoothEqVerite.fill (0.0f);
     eqVeriteMeasured.fill (false);
     repaint();
@@ -675,6 +688,74 @@ void SpectrumPanel::updateBallistics()
         }
     }
 
+    // v2.48.0 (Clement's design call): the SHORT max window - the same
+    // machinery as the 5 s block above over a 2-second ring (60 frames
+    // at 30 Hz). The two windows are the two members of the single EQ
+    // curve below: the long one brings the stability, the short one the
+    // reactivity. The v2.48 reference simulation (the sim_eq_k
+    // scenario: soft-saturation mock, bursty programme, ground truth
+    // at two drive levels) raced Clement's three candidate pairs and
+    // the (5 s; 2 s) blend won: median wander 2.57 dB p-p (vs 2.54 for
+    // the 5 s window alone - the pair inherits its stability), settle
+    // ~1.3 s (no flush needed: the max only ever moves up), and the
+    // best all-band fidelity of the three blends (0.66 dB). The 1 s
+    // pair was eliminated - its ring catches isolated burst spikes in
+    // weak bands (14.2 dB p-p excursions once blended) - and the
+    // 300 ms pair trades fidelity (0.89 dB) for speed the 2 s pair
+    // already delivers.
+    {
+        std::copy (smoothIn.begin(), smoothIn.end(),
+                   maxEqIn2Ring.begin() + maxEqRingIndex2 * SpectrumAnalyzer::numScopeBins);
+        std::copy (smoothOut.begin(), smoothOut.end(),
+                   maxEqOut2Ring.begin() + maxEqRingIndex2 * SpectrumAnalyzer::numScopeBins);
+        maxEqRingIndex2 = (maxEqRingIndex2 + 1) % maxEqFrames2;
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            float mi = -100.0f;
+            float mo = -100.0f;
+
+            for (int f = 0; f < maxEqFrames2; ++f)
+            {
+                mi = juce::jmax (mi, maxEqIn2Ring[(size_t) f * SpectrumAnalyzer::numScopeBins
+                                                  + (size_t) b]);
+                mo = juce::jmax (mo, maxEqOut2Ring[(size_t) f * SpectrumAnalyzer::numScopeBins
+                                                   + (size_t) b]);
+            }
+
+            maxEqIn2 [(size_t) b] = mi;
+            maxEqOut2[(size_t) b] = mo;
+        }
+
+        // the same relative input gate as the 5 s maxima
+        float peakMaxIn = -100.0f;
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+            peakMaxIn = juce::jmax (peakMaxIn, maxEqIn2[(size_t) b]);
+
+        const float maxGateDb = juce::jmax (-75.0f, peakMaxIn - 45.0f);
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+            if (maxEqIn2[(size_t) b] > maxGateDb)
+                eqMax2Measured[(size_t) b] = true;
+
+        // raw dB difference, then the same Savitzky-Golay pass
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            double acc = 0.0;
+
+            for (int k = -TransferAnalyzer::smoothHalfWidth;
+                 k <= TransferAnalyzer::smoothHalfWidth; ++k)
+            {
+                const int bb = juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, b + k);
+                acc += TransferAnalyzer::smoothCoeffs[k + TransferAnalyzer::smoothHalfWidth]
+                     * (double) (maxEqOut2[(size_t) bb] - maxEqIn2[(size_t) bb]);
+            }
+
+            maxEqDiff2[(size_t) b] = (float) acc;
+        }
+    }
+
     // v2.22: the EQ curve is the CROSS-SPECTRUM transfer estimate - the
     // full dual-FFT measurement that Smaart-class systems perform. The
     // TransferAnalyzer on the audio thread accumulates, per display
@@ -752,13 +833,30 @@ void SpectrumPanel::updateBallistics()
     }
 
     // -----------------------------------------------------------------
-    // v2.47.0 (Clement's design call): ONE curve - the EQ-Verite blend.
-    // Every member above is computed and gated exactly as before (the
-    // H1 transfer with its coherence + relative gates, the v2.46 max
-    // anchor with its own gate); here they merge into the single line
-    // the panel draws:
+    // v2.47.0 -> v2.48.0 (Clement's calls): ONE curve, and its truth is
+    // the MAX-HOLD family - "j'ai l'impression que les formes issues
+    // des courbes en maximum hold sont beaucoup plus propres". Every
+    // member above is computed and gated exactly as before (the two
+    // "EQ @ max" windows with their own gates, the H1 transfer with
+    // its coherence + relative gates); here they merge into the single
+    // line the panel draws:
     //
-    //   EQ = (2 * smoothDiff + maxEqDiff) / 3   (2/3 H1 + 1/3 anchor)
+    //   coherent band:  EQ = (max5s + max2s) / 2
+    //   junk-dominated:  EQ = the H1 member (smoothDiff)
+    //
+    // The raw-coherence fallback is the piece that keeps the v2.22
+    // junk rejection alive inside a max-hold curve: a dB difference
+    // measures EVERYTHING the console put in the band, so where the
+    // RAW coherence (undiluted by the Savitzky-Golay window) says the
+    // band's output is not explained by its input, the max members do
+    // not vote and the bin reads the cross-spectrum member, which
+    // rejects uncorrelated junk by construction - on a console with a
+    // floor above its lowpass the maxima would otherwise show the
+    // v2.21.1 phantom boost again. g2 is self-normalising, so an
+    // honest band reads ~1 from the first frame after a flush and
+    // the fallback never lingers on a clean console; the 0.75 floor
+    // sits between that honest ~1 and the ~0.5 of a junk-dominated
+    // band (the reference simulation's console-tone scenario).
     //
     // The measured flags combine as a UNION and the weights
     // renormalise over whichever members are valid in the bin, so a
@@ -766,36 +864,60 @@ void SpectrumPanel::updateBallistics()
     // flags keep the whole curve on screen when the signal stops -
     // the v2.12 persistence, unchanged). A light final one-pole
     // (tau ~0.3 s) keeps the blend continuous when a member wakes up
-    // or a flush restarts the H1 mid-window.
+    // or the fallback hands a bin back to the max members.
     //
-    // Why these weights: the v2.47 reference simulation (soft-
-    // saturation mock, bursty programme, ground truth at two drive
-    // levels) tested every candidate - the production 1/8 window,
-    // fast/slow H1, the max alone, and the 4-curve and 2-curve
-    // averages. 2/3 slow H1 + 1/3 max had the best median wander of
-    // all the blends that keep a sub-second knob response (2.2 dB p-p
-    // vs 4.3 dB for the v2.46 production settings), zero staircase
-    // steps, and fidelity to the exact energy-weighted response within
-    // ~0.5 dB. Clement's own summary of what the display owes the
-    // engineer: ONE curve, the best estimate of the truth.
+    // Why these members: the v2.48 reference simulation raced
+    // Clement's three candidate pairs on the soft-saturation mock
+    // (ground truth at two drive levels) and the (5 s; 2 s) blend won
+    // - see the 2 s block above for the numbers. Documented costs: a
+    // knob DOWN glides over the members' hold (up to 5 s, the v2.46
+    // contract), and a band whose honest content is dominated by
+    // distortion products (low raw coherence, real signal-dependent
+    // content) conservatively reads the linear-part H1 transfer
+    // there instead of the max.
     // -----------------------------------------------------------------
     {
+        // the junk detector: the RAW per-band coherence, undiluted by
+        // the frequency smoothing (a 1-band console tone reads 0.50
+        // raw but 0.93 once the SG window has diluted its dip)
+        float rawCoherence[SpectrumAnalyzer::numScopeBins];
+        processor.getTransferAnalyzer().copyRawCoherenceData (
+            rawCoherence, SpectrumAnalyzer::numScopeBins);
+
         constexpr float veriteAlpha = 1.0f / (1.0f + 30.0f * 0.3f);
+        constexpr float maxCoherenceFloor = 0.75f;
 
         for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
         {
             const size_t bi = (size_t) b;
 
-            const float wH = eqMeasured[bi] ? 2.0f : 0.0f; // the H1 truth: 2/3
-            const float wM = eqMaxMeasured[bi] ? 1.0f : 0.0f; // the anchor: 1/3
-            const float wSum = wH + wM;
+            const bool coherent = rawCoherence[b] >= maxCoherenceFloor;
 
-            if (wSum <= 0.0f)
-                continue; // neither member ever measured here: hold
+            const float wM5 = (eqMaxMeasured [bi] && coherent) ? 1.0f : 0.0f;
+            const float wM2 = (eqMax2Measured[bi] && coherent) ? 1.0f : 0.0f;
+            const float wMax = wM5 + wM2;
+
+            float target = 0.0f;
+            bool haveTarget = false;
+
+            if (wMax > 0.0f)
+            {
+                // the max-hold truth: the mean of the two windows
+                target = (wM5 * maxEqDiff[bi] + wM2 * maxEqDiff2[bi]) / wMax;
+                haveTarget = true;
+            }
+            else if (eqMeasured[bi])
+            {
+                // junk-dominated (or a band the max never gated in):
+                // the cross-spectrum member, immune to junk
+                target = smoothDiff[bi];
+                haveTarget = true;
+            }
+
+            if (! haveTarget)
+                continue; // nothing ever measured here: hold
 
             eqVeriteMeasured[bi] = true;
-
-            const float target = (wH * smoothDiff[bi] + wM * maxEqDiff[bi]) / wSum;
 
             smoothEqVerite[bi] += veriteAlpha * (target - smoothEqVerite[bi]);
         }
@@ -894,8 +1016,9 @@ void SpectrumPanel::runAnalysisTick()
 
 float SpectrumPanel::getEqDbAtBin (int bin) const
 {
-    // v2.47.0: the harness reads the SINGLE curve the panel draws -
-    // the EQ-Verite blend (2/3 H1 transfer + 1/3 max anchor).
+    // v2.48.0: the harness reads the SINGLE curve the panel draws - now
+    // the max-hold blend (mean of the 5 s and 2 s "EQ @ max" windows,
+    // with the H1 cross-spectrum as the junk fallback member).
     return smoothEqVerite[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
 }
 
@@ -904,7 +1027,7 @@ bool SpectrumPanel::isEqBinMeasured (int bin) const
     return eqVeriteMeasured[(size_t) juce::jlimit (0, SpectrumAnalyzer::numScopeBins - 1, bin)];
 }
 
-// v2.46 -> v2.47: the max machinery is now the ANCHOR third of the
+// v2.46 -> v2.48: the max machinery is now the pair of MEMBERS of the
 // single EQ curve (kept directly testable through these hooks).
 float SpectrumPanel::getEqMaxDbAtBin (int bin) const
 {
@@ -1213,8 +1336,8 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
 // labelled on the right edge (v2.12: clicking those labels toggles the
 // scale).
 // v2.12: the path covers every bin that has EVER been measured
-// (since v2.47.0 that flag is the UNION eqVeriteMeasured - either the
-// H1 member or the max anchor gated the bin in), not just the bins
+// (since v2.47.0 that flag is the UNION eqVeriteMeasured - whichever
+// member gated the bin in), not just the bins
 // where the input currently has energy
 // - previously the path broke wherever smoothIn fell below -80 dB, so
 // whole pieces of the curve vanished and came back with the program's
@@ -1228,11 +1351,10 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
 
     const float range = eqRangeDb();
 
-    // v2.47.0: ONE curve - the EQ-Verite blend (2/3 cross-spectrum
-    // truth + 1/3 max anchor), drawn for exactly the bins either
-    // member ever measured (sticky flags, v2.12 persistence). The
-    // v2.46 dashed max trace is gone from the display: its job is now
-    // the anchor third of this line.
+    // v2.48.0: ONE curve - the max-hold blend (the mean of the 5 s and
+    // 2 s "EQ @ max" windows, with the H1 cross-spectrum member as the
+    // junk fallback), drawn for exactly the bins any member ever
+    // measured (sticky flags, v2.12 persistence).
     for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
     {
         if (! eqVeriteMeasured[(size_t) bin])

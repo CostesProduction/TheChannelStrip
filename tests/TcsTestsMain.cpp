@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.47.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.48.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -17,12 +17,16 @@
 //     that adds an independent 12 kHz tone; the cross-spectrum transfer
 //     reads flat 0 dB there while the coherence dips below 1 - the old
 //     power ratio would have read the tone as a +3 dB phantom boost)
-//   - EQ-Verite curve (v2.47.0, Clement's design call: ONE curve, the
-//     best estimate of the truth): the single blend of 2/3 long-window
-//     H1 transfer + 1/3 max anchor reads flat in passthrough, reacts
-//     within ~1 s to a knob turned through the REAL hosted parameter
-//     (the parameter relay flushes the long window), and persists
-//     after the signal stops (v2.12 gate, unchanged)
+//   - EQ-Verite curve (v2.47.0 -> v2.48.0, Clement's design calls: ONE
+//     curve, and its truth is the MAX-HOLD family - "les formes issues
+//     des courbes en maximum hold sont beaucoup plus propres"): the
+//     single blend of the 5-second and 2-second "EQ @ max" windows
+//     reads flat in passthrough, reacts within ~1 s to a knob turned
+//     through the REAL hosted parameter (the max only ever moves up),
+//     and persists after the signal stops (v2.12 gate, unchanged);
+//     where a band's RAW coherence says the output is junk-dominated
+//     the bin falls back to the cross-spectrum member (the v2.22 junk
+//     rejection, still under test in the uncorrelated-noise test)
 //   - console slot status reporting (v2.24, roadmap point 7: missing /
 //     blacklisted / moved-file slots each carry their own explanation,
 //     and clicking an unavailable console posts an explicit message
@@ -1595,16 +1599,17 @@ void testEqCurveSmoothing()
                   "estimate is 1.0)");
 }
 
-// v2.46.0 (Clement's idea) -> v2.47.0 (the ANCHOR): the "EQ @ max"
+// v2.46.0 (Clement's idea) -> v2.48.0 (a full member): the "EQ @ max"
 // machinery - dB MaxOut minus dB MaxIn over 5-second sliding maxima
 // of the SMOOTHED IN/OUT curves. For a linear console the max is
 // homogeneous (max (H*x) = H * max (x)) and the IN/OUT one-poles are
 // identical, so the difference is the EXACT transfer at the programme's
-// peak drive. Since v2.47 this value anchors the single EQ-Verite
-// curve at 1/3 weight; the ballistics contract it must keep is
-// unchanged and still under test here: flat 0 dB in passthrough,
-// IMMEDIATE on a knob up (the max only moves up), and HOLDING on a
-// knob down (the old peak stays in the 5 s sliding window).
+// peak drive. Since v2.48 this value is one of the two members of the
+// single EQ-Verite curve (mean with the 2 s window); the ballistics
+// contract it must keep is unchanged and still under test here: flat
+// 0 dB in passthrough, IMMEDIATE on a knob up (the max only moves up),
+// and HOLDING on a knob down (the old peak stays in the 5 s sliding
+// window).
 void testEqMaxHoldTrace()
 {
     beginTest ("EQ @ max trace: exact, immediate up, holding down (v2.46)");
@@ -1697,24 +1702,27 @@ void testEqMaxHoldTrace()
                 + " dB > +3)");
 }
 
-// v2.47.0 (Clement's design call - "one curve, the best estimate of the
-// truth"): the panel now draws a SINGLE EQ curve, the Verite blend
-// (2/3 cross-spectrum H1 transfer with the long tau ~5 s window +
-// 1/3 max anchor). Three contracts are exercised end to end with the
-// REAL production path, at the real 30 Hz panel cadence (the build 2
+// v2.47.0 -> v2.48.0 (Clement's design calls - "one curve", then "the
+// truth is a mean of a long-term and a short-term maximum hold"): the
+// panel draws a SINGLE EQ curve, now the max-hold blend - the mean of
+// the 5-second and 2-second "EQ @ max" windows, with the cross-spectrum
+// H1 as the junk fallback member (where a band's RAW coherence says
+// the output is junk-dominated, the dB-difference members would
+// honestly measure the console's junk, so the bin reads the H1
+// instead). Three contracts are exercised end to end with the REAL
+// production path, at the real 30 Hz panel cadence (the build 2
 // lesson of v2.46: one tick per ~3 audio blocks, never feed-then-tick):
 //
-//   1. flat 0 dB in passthrough (the blend of two members that each
-//      read 0 dB reads 0 dB);
+//   1. flat 0 dB in passthrough (the mean of two windows that each
+//      read the exact 0 dB transfer reads 0 dB);
 //   2. a knob turned through the REAL hosted parameter (not a test
-//      back door) flushes the long-window estimators, so the curve
-//      reads the new response within ~1 s of audio - without the flush
-//      the tau ~5 s window would still sit near +1 dB after 1 s, and
-//      even with the anchor helping it cannot pass the +3 dB gate;
+//      back door) reads within ~1 s of audio: the max only ever moves
+//      UP, so the new higher output enters both sliding windows the
+//      moment the display curve rises - no flush, no EMA settle;
 //   3. the v2.12 persistence: the signal stops, the curve stays.
 void testEqVeriteCurve()
 {
-    beginTest ("EQ-Verite curve: single blend, flush on knob, persistence (v2.47)");
+    beginTest ("EQ-Verite curve: max-hold blend, knob reactivity, persistence (v2.48)");
 
     TheChannelStripAudioProcessor proc;
     proc.prepareToPlay (48000.0, 512);
@@ -1774,11 +1782,11 @@ void testEqVeriteCurve()
                 + juce::String (panel.getEqDbAtBin (bin500), 2) + " dB)");
 
     // 2. the knob turn: +6 dB through the REAL hosted parameter, so
-    // the relay fires the flush and the long window restarts fast.
-    // ~1 s of audio later the curve must read the new response -
-    // the +3 dB gate is chosen to fail without the flush (a tau ~5 s
-    // window alone reaches ~+1 dB in 1 s, and even with the anchor's
-    // help the blend stays near +2.3 dB).
+    // the relay fires (the flush still restarts the H1 fallback
+    // member's estimators) - but the REACTIVITY under test is the max
+    // members': the max only ever moves UP, so the new higher output
+    // enters both sliding windows as soon as the display curve rises.
+    // ~1 s of audio later the curve must read the new response.
     // setValueNotifyingHost expects a NORMALIZED 0-1 value, not the raw
     // gain - convert the linear gain 2.0 (i.e. +6 dB) first.
     mockPtr->gainParam->setValueNotifyingHost (
@@ -1786,14 +1794,14 @@ void testEqVeriteCurve()
     drive (1.0);
 
     expectTrue (panel.getEqDbAtBin (bin500) > 3.0f,
-                "the flush makes the EQ-Verite curve react within ~1 s "
-                "of a hosted knob turn (got "
+                "the max-hold blend reacts within ~1 s of a hosted "
+                "knob turn (got "
                 + juce::String (panel.getEqDbAtBin (bin500), 2)
-                + " dB > +3; without the flush the 5 s window would "
-                  "still read near +2)");
+                + " dB > +3; the max only ever moves up, so both "
+                  "windows carry the new response immediately)");
 
-    // 3. converged blend: the flush's fast frames are done, the long
-    // window and the anchor agree - the curve settles on the true +6
+    // 3. converged blend: the display smoothing has settled, both
+    // max windows carry the new response - the curve reads +6
     drive (4.0);
 
     expectNear (panel.getEqDbAtBin (bin500), 6.0, 1.5,
@@ -2149,7 +2157,7 @@ void testPresetManager()
         // re-fills there (the v2.27 fake-session pattern)
         const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
         auto session = std::make_unique<juce::XmlElement> ("TCS");
-        session->setAttribute ("version", "2.47.0");
+        session->setAttribute ("version", "2.48.0");
         session->setAttribute ("hostedIdent", fakeIdent);
 
         auto* cs = session->createNewChildElement ("consoleState");
@@ -2315,7 +2323,7 @@ void testCurrentPresetTracking()
     // combo box shows it again on reload
     const auto fakeIdent = juce::String ("VST3|/fake/ssl|bx_console SSL 4000 E");
     auto session = std::make_unique<juce::XmlElement> ("TCS");
-    session->setAttribute ("version", "2.47.0");
+    session->setAttribute ("version", "2.48.0");
     session->setAttribute ("hostedIdent", fakeIdent);
 
     auto* cs = session->createNewChildElement ("consoleState");
@@ -2538,8 +2546,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.47.0",
-                "saved state carries the current version tag (2.47.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.48.0",
+                "saved state carries the current version tag (2.48.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2877,7 +2885,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.47.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.48.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3540,7 +3548,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.47.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.48.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();

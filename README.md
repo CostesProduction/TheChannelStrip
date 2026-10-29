@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.47.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.48.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -300,6 +300,61 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.48.0**
+  - **The EQ curve's truth is now the MAX-HOLD family (Clement's
+    verdict after living with v2.47: "j'ai l'impression que les formes
+    issues des courbes en maximum hold sont beaucoup plus propres...
+    la vérité est une moyenne du maximum hold long terme et d'un
+    maximum hold plus court terme").** The single curve is now the
+    mean of two "EQ @ max" windows: the v2.46 5-second maximum and a
+    new 2-second maximum, both dB MaxOut - dB MaxIn over sliding
+    maxima of the smoothed IN/OUT curves - for a linear console the
+    exact transfer at the programme's peak drive, the fixed operating
+    point that reads clean and stays stable on a saturating console.
+    The pair is not a guess: the v2.48 reference simulation (the same
+    soft-saturation mock and two-level ground truth as v2.47) raced
+    Clement's three candidate pairs - (5 s; 1 s), (5 s; 2 s),
+    (5 s; 300 ms) - and the 2 s pair won: median band wander 2.57 dB
+    peak-to-peak (vs 2.54 for the 5 s window alone - the pair inherits
+    its stability), settle on a knob turn ~1.3 s WITHOUT any flush
+    (the max only ever moves up), and the best all-band fidelity of
+    the three blends (0.66 dB). The 1 s pair was eliminated - its
+    short ring catches isolated burst spikes in weak bands (14.2 dB
+    excursions once blended) - and the 300 ms pair trades fidelity
+    (0.89 dB) for speed the 2 s pair already delivers.
+  - **The v2.22 junk rejection survives inside a max-hold curve.** A
+    dB difference measures EVERYTHING the console put in the band -
+    where a console lowpass sinks the signal under the console's own
+    floor, the maxima would show the v2.21.1 phantom boost again. The
+    TransferAnalyzer now also exposes the RAW per-band coherence
+    (before the Savitzky-Golay window that dilutes a narrow artifact's
+    dip from 0.50 to 0.93), and wherever it says a band's output is
+    not explained by its input (below 0.75) the max members do not
+    vote: the bin falls back to the cross-spectrum H1 member, which
+    rejects uncorrelated junk by construction. g2 is self-normalising,
+    so an honest band reads ~1 from the first frame after a flush and
+    the fallback never lingers on a clean console.
+  - **Everything still speaks the single curve.** The hover readout,
+    the harness hooks (getEqDbAtBin / isEqBinMeasured) and the drawn
+    line are the same blend; both max windows keep their own gate and
+    the 5 s one keeps its direct hooks (getEqMaxDbAtBin), so the v2.46
+    trace test is unchanged - the ballistics contract (flat in
+    passthrough, immediate up, holding down) is the same. The v2.47
+    flush and parameter relay stay (they keep the H1 fallback member
+    honest across a knob turn). Updated harness test: the max-hold
+    blend flat in passthrough, reacting within ~1 s to a knob turned
+    through the REAL hosted parameter, and persisting after the
+    signal stops.
+  - **Honest costs, kept in the code comments.** On a knob DOWN the
+    maxima hold their old value until the carrying passage exits the
+    window (up to 5 s / 2 s), which reads as the curve gliding down
+    (the v2.46 contract, now at full weight); and a band whose honest
+    content is dominated by distortion products (low raw coherence,
+    real signal-dependent content) conservatively reads the
+    linear-part H1 transfer instead of the max. The v2.47
+    energy-weighted H1 blend remains in the code as the fallback
+    member and its estimators - retired from the display by
+    Clement's call, not deleted.
 - **2.47.0**
   - **ONE EQ curve - the "EQ-Vérité" (Clement's design call: "no
     engineer accepts cross-reading several curves; one curve that

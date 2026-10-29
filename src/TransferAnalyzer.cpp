@@ -70,6 +70,7 @@ void TransferAnalyzer::prepare (double newSampleRate, int maxBlockSize)
 
     for (auto& v : transferDb) v.store (0.0f, std::memory_order_relaxed);
     for (auto& c : coherence)  c.store (0.0f, std::memory_order_relaxed);
+    for (auto& c : rawCoherence) c.store (0.0f, std::memory_order_relaxed);
 
     fifoPos.store (0, std::memory_order_relaxed);
     fifoIn.fill (0.0f);
@@ -96,6 +97,7 @@ void TransferAnalyzer::reset()
 
     for (auto& v : transferDb) v.store (0.0f, std::memory_order_relaxed);
     for (auto& c : coherence)  c.store (0.0f, std::memory_order_relaxed);
+    for (auto& c : rawCoherence) c.store (0.0f, std::memory_order_relaxed);
 
     fifoPos.store (0, std::memory_order_relaxed);
     fifoIn.fill (0.0f);
@@ -382,6 +384,34 @@ void TransferAnalyzer::compute()
             : 0.0;
 
         coherence[bi].store ((float) g2, std::memory_order_relaxed);
+
+        // v2.48.0: the RAW coherence - the same quantity from the
+        // UNsmoothed accumulators. g2 is a self-normalising ratio, so
+        // on an honest (fully correlated) band it reads ~1 from the
+        // very first frame after a flush; it only drops where the
+        // band's output is genuinely explained by something other
+        // than its input (console noise, dither, an uncorrelated
+        // tone). The max-hold members of the EQ curve use it as their
+        // junk detector (see SpectrumPanel): below 0.75 a dB-difference
+        // would measure the junk, so the bin reads the cross-spectrum
+        // member instead.
+        const double rawDen = emaSxx[bi] * emaSyy[bi];
+        const double rawMagSq = emaSxyRe[bi] * emaSxyRe[bi]
+                              + emaSxyIm[bi] * emaSxyIm[bi];
+        const double rawG2 = rawDen > 1.0e-60
+            ? juce::jlimit (0.0, 1.0, rawMagSq / rawDen)
+            : 0.0;
+
+        rawCoherence[bi].store ((float) rawG2, std::memory_order_relaxed);
+    }
+}
+
+void TransferAnalyzer::copyRawCoherenceData (float* dest, int numBins) const
+{
+    for (int b = 0; b < numBins && b < numScopeBins; ++b)
+    {
+        if (dest != nullptr)
+            dest[b] = rawCoherence[(size_t) b].load (std::memory_order_relaxed);
     }
 }
 
