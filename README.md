@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.51.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.51.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -301,6 +301,37 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.51.1**
+  - **Hotfix: crash of Studio Pro (PreSonus/Fender) 8.1.2 at session
+    load.** The host aborted with `POINTER_BEING_FREED_WAS_NOT_ALLOCATED`
+    in `operator delete` on a JUCE `LambdaThread`: two concurrent
+    `instantiateHosted` runs (session restore racing the end-of-scan
+    restore) both pushed to the hosted plugin's `relayedParameters`
+    vector, and the double push corrupted the buffer into a double
+    free. The race was latent since the relay rework (v2.47) - v2.51.0
+    merely changed the timing at session load enough to expose it.
+  - **Every `instantiateHosted` call now runs under one instantiation
+    lock** (`instantiateGuard`), so only one hosted console is ever
+    being built / swapped at a time - across the scan thread, the
+    restore path and the console-selection `Thread::launch`.
+  - **Superseded-request checkpoints.** A console selection that was
+    replaced mid-build (e.g. rapid switching while a heavy plugin
+    constructs) now aborts cleanly at three checkpoints instead of
+    installing a plugin nobody asked for anymore.
+  - **The relay vector itself is now guarded** (`relayGuard` in
+    HostedStrip) around attach/detach, so even future call paths
+    cannot corrupt the parameter relay.
+  - **Duplicate restores are skipped**: a restore with nothing left to
+    apply while a console is already hosted no longer tears the strip
+    down and rebuilds it.
+  - **Scan/restore deadlock fix**: `runScan` releases the scan lock
+    *before* triggering the pending restore, so the documented lock
+    order `instantiateGuard` -> `scanLock` can never deadlock.
+  - No user-facing change: parameters, presets, sessions and the
+    analyser display are untouched; sessions saved by 2.51.0 load as
+    they are. Test suite extended with superseded-guard,
+    duplicate-restore-skip and relay thread-safety stress tests.
 
 - **2.51.0**
   - **Analyser display rework (Clement's four-point request).** The

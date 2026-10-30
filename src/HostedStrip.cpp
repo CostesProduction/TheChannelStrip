@@ -32,10 +32,13 @@ HostedStrip::~HostedStrip()
 }
 
 // v2.47.0: attach the change relay to every parameter of one plugin.
-// Called on the message thread (setPlugin paths); the parameter list
-// of a live plugin is stable there.
+// v2.51.1: called from the instantiation thread as well, so the vector
+// is guarded (two overlapping setPlugin/clearPlugin runs used to race
+// it to a double free).
 void HostedStrip::attachRelayTo (juce::AudioProcessor& plugin)
 {
+    const juce::ScopedLock lock (relayGuard);
+
     for (auto* param : plugin.getParameters())
     {
         if (param == nullptr)
@@ -49,8 +52,11 @@ void HostedStrip::attachRelayTo (juce::AudioProcessor& plugin)
 // v2.47.0: detach everywhere we attached. Idempotent and order-safe
 // (a plugin that already died with its listeners registered cannot
 // happen: this runs before every retirement path).
+// v2.51.1: guarded like attachRelayTo - see the relayGuard comment.
 void HostedStrip::detachRelayFromAll()
 {
+    const juce::ScopedLock lock (relayGuard);
+
     for (auto* param : relayedParameters)
         if (param != nullptr)
             param->removeListener (&paramRelay);
@@ -103,7 +109,9 @@ void HostedStrip::setPlugin (std::unique_ptr<juce::AudioProcessor> newPlugin)
     // parameters must not notify once it starts fading), then the
     // new one is attached, then the response-change callback fires -
     // a different console IS a different response, and the transfer
-    // estimators restart on it (message thread, like the swap itself).
+    // estimators restart on it (v2.51.1: setPlugin runs on the
+    // instantiation thread as well as the message thread; the slot
+    // exchange itself is atomic, and the relay is guarded).
     detachRelayFromAll();
     attachRelayTo (*slot->plugin);
 

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.51.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.51.1 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -82,6 +82,12 @@
 //     churn on a never-recreated instance, and hostile session states
 //     (garbage bytes, empty, truncated, huge valid-XML fakes) fed
 //     during playback
+//   - v2.51.1 hotfix (the Studio Pro 8.1.2 crash): a superseded
+//     instantiation aborts before the plugin is even attempted, a
+//     duplicate restore with nothing to apply is skipped without
+//     touching the hosted console, and concurrent setPlugin /
+//     clearPlugin storms leave the parameter relay consistent (the
+//     exact double free that aborted the DAW)
 //
 // Run after a build:
 //
@@ -121,6 +127,7 @@
 #include <iostream>
 #include <memory>
 #include <new>
+#include <thread>
 #include <vector>
 
 #include <juce_events/juce_events.h>                 // ScopedJuceInitialiser_GUI
@@ -2853,8 +2860,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.51.0",
-                "saved state carries the current version tag (2.51.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.51.1",
+                "saved state carries the current version tag (2.51.1)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -3261,7 +3268,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.51.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.51.1"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -3835,6 +3842,127 @@ void testTortureHostileSessions()
                 "the output is still the expected signal at the end");
 }
 
+// ---------------------------------------------------------------------------
+// v2.51.1 hotfix tests (the Studio Pro 8.1.2 crash). The abort was a
+// POINTER_BEING_FREED_WAS_NOT_ALLOCATED in operator delete from
+// instantiateHosted: two overlapping instantiation runs raced the
+// HostedStrip relay vector to a double free. Three contracts:
+//
+//   1. superseded guard - a request whose ident no longer matches
+//      (checkpoint 1) aborts BEFORE createPluginInstance, so a fresh
+//      shell with an EMPTY ident must refuse a ghost description
+//      without touching its status area;
+//   2. duplicate-restore skip - a restore with nothing left to apply
+//      while a console is already hosted returns silently BEFORE the
+//      ident checkpoint, so the hosted mock is left exactly as it is;
+//   3. relay thread safety - concurrent setPlugin / clearPlugin runs
+//      (the exact overlap that crashed the DAW) leave a CONSISTENT
+//      relay: after a final clear and the 150 ms retire grace, the
+//      vector is empty and nothing was freed twice.
+// ---------------------------------------------------------------------------
+void testSupersededInstantiationGuard()
+{
+    beginTest ("v2.51.1: superseded instantiation aborts before building");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    // a fresh shell has NO console selected: the guarded ident is empty
+    expectTrue (proc.getCurrentPluginIdent().isEmpty(),
+                "a fresh shell has an empty hosted ident");
+
+    // a ghost description pointing at a file that does not exist
+    juce::PluginDescription ghost;
+    ghost.name = "bx_console SSL 4000 G (superseded)";
+    ghost.pluginFormatName = "VST3";
+    ghost.fileOrIdentifier = "/nonexistent/superseded/bx_console SSL 4000 G.vst3";
+    ghost.uniqueId = 0x87654321;
+
+    // a direct instantiation whose ident does not match the (empty)
+    // selection must abort at checkpoint 1 - BEFORE the plugin is even
+    // attempted. Both entry modes (fresh selection / pending restore)
+    // are driven, and neither may leave a trace in the status area.
+    proc.instantiateHostedForTest (ghost, false);
+    proc.instantiateHostedForTest (ghost, true);
+
+    expectTrue (! proc.getHostStatus().contains ("ERROR"),
+                "a superseded request leaves no error status");
+    expectTrue (! proc.getHostStatus().contains ("Hosted"),
+                "a superseded request never hosts anything");
+    expectTrue (proc.getHostedStrip().getActivePlugin() == nullptr,
+                "no console was created by the superseded requests");
+}
+
+void testDuplicateRestoreSkip()
+{
+    beginTest ("v2.51.1: a duplicate restore with nothing to apply is skipped");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+    const auto* hostedBefore = proc.getHostedStrip().getActivePlugin();
+    expectTrue (hostedBefore != nullptr, "a console is hosted before the restore");
+
+    // a restore while a console is ALREADY hosted and the pending state
+    // blob is empty is the launch-time duplicate (the editor selection
+    // and the session restore converging on the same slot). It must be
+    // skipped BEFORE the ident checkpoint - the hosted instance is left
+    // alone instead of being torn down and rebuilt.
+    juce::PluginDescription ghost;
+    ghost.name = "bx_console SSL 4000 G (duplicate)";
+    ghost.pluginFormatName = "VST3";
+    ghost.fileOrIdentifier = "/nonexistent/duplicate/bx_console SSL 4000 G.vst3";
+    ghost.uniqueId = 0x87654321;
+
+    proc.instantiateHostedForTest (ghost, true);
+
+    expectTrue (! proc.getHostStatus().contains ("ERROR"),
+                "the duplicate restore leaves no error status");
+    expectTrue (proc.getHostedStrip().getActivePlugin() == hostedBefore,
+                "the duplicate restore left the hosted console untouched");
+}
+
+void testRelayThreadSafety()
+{
+    beginTest ("v2.51.1: relay attach/detach survives concurrent swap storms");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    // the exact overlap that aborted Studio Pro: setPlugin (which
+    // detaches the old relay then attaches the new one) and clearPlugin
+    // (which detaches) running on several threads at once. Each mock
+    // carries a REAL AudioProcessorParameter, so every swap pushes to
+    // and pops from the guarded vector - the unguarded code double
+    // freed its buffer here.
+    {
+        auto churn = [&proc]()
+        {
+            for (int i = 0; i < 150; ++i)
+            {
+                proc.getHostedStrip().setPlugin (std::make_unique<MockParamConsole>());
+                proc.getHostedStrip().clearPlugin();
+            }
+        };
+
+        std::thread a (churn), b (churn), c (churn);
+        a.join();
+        b.join();
+        c.join();
+    }
+
+    // a final clear, then let the 150 ms retire grace period drain the
+    // outgoing slots before asserting the relay is exactly empty
+    proc.getHostedStrip().clearPlugin();
+    juce::Thread::sleep (400);
+
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 0,
+                "the relay is empty and consistent after the storm");
+    expectTrue (proc.getHostedStrip().getActivePlugin() == nullptr,
+                "no console is hosted after the final clear");
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -3924,7 +4052,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.51.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.51.1" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -3962,6 +4090,11 @@ int main (int argc, char* argv[])
     testTortureConsoleSwapStorm();
     testTortureFormatAndRateChurn();
     testTortureHostileSessions();
+
+    // v2.51.1 hotfix (the Studio Pro crash): the guarded instantiation
+    testSupersededInstantiationGuard();
+    testDuplicateRestoreSkip();
+    testRelayThreadSafety();
 
     if (integration)
         testIntegrationRealConsole();

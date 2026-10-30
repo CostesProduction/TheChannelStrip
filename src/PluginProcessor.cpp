@@ -323,7 +323,7 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
 {
     juce::String report;
 
-    report << "TheChannelStrip 2.51.0 - Doctor report\n"
+    report << "TheChannelStrip 2.51.1 - Doctor report\n"
               "=====================================\n"
            << "generated: "
            << juce::Time::getCurrentTime().toString (true, true, true, true) << "\n"
@@ -829,7 +829,9 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     // turned just before the switch must not star the next console.
     flushPresetDirtyIntoCurrentConsole();
 
-    currentPluginIdent = identFor (slot.desc);
+    // v2.51.1: the ident is published BEFORE the launch, so the
+    // in-flight request can detect that it has been superseded.
+    setCurrentPluginIdent (identFor (slot.desc));
 
     logHostStatus ("Instantiating '" + slot.desc.name + "'...");
     juce::Thread::launch ([this, desc = slot.desc] () { instantiateHosted (desc, false); });
@@ -840,7 +842,10 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
     // v2.15.5: stop forwarding gain reduction BEFORE the console goes
     // away, so the host can never pull through a dying instance.
     grForwarder.disconnect();
-    currentPluginIdent = juce::String();
+    // v2.51.1: an empty ident makes any in-flight instantiation abort
+    // at its next checkpoint instead of installing a console the user
+    // just cleared away.
+    setCurrentPluginIdent (juce::String());
 
     // v2.26: a pending preset application belongs to the console being
     // cleared away - it must not leak onto whatever is hosted next.
@@ -1019,7 +1024,7 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
     }
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.51.0");
+    xml->setAttribute ("version", "2.51.1");
     xml->setAttribute ("name", trimmed);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1336,7 +1341,7 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
         : active->getName();
 
     auto xml = std::make_unique<juce::XmlElement> ("tcsPreset");
-    xml->setAttribute ("version", "2.51.0");
+    xml->setAttribute ("version", "2.51.1");
     xml->setAttribute ("name", name);
     xml->setAttribute ("consoleName", consoleName);
     xml->setAttribute ("state", state.toBase64Encoding());
@@ -1541,8 +1546,6 @@ void TheChannelStripAudioProcessor::requestDefaultScan()
 
 void TheChannelStripAudioProcessor::runScan()
 {
-    const juce::ScopedLock lock (scanLock);
-
     // v1.0.8: clear the scanning flag on every exit path.
     struct FlagReset
     {
@@ -1550,85 +1553,96 @@ void TheChannelStripAudioProcessor::runScan()
         ~FlagReset() { f.store (false, std::memory_order_relaxed); }
     } resetFlag { scanning };
 
-    logHostStatus ("Scanning the default VST3 folders...");
-
-    // v1.0.7 fix: without JUCE_PLUGINHOST_VST3 / JUCE_PLUGINHOST_AU,
-    // addDefaultFormats() registers NOTHING and every scan silently finds
-    // 0 plugins. Fail loudly instead.
-    if (hostedStrip.getFormatManager().getNumFormats() == 0)
+    // v2.51.1: the scan lock is released BEFORE the restore below. The
+    // restore's instantiateHosted takes the instantiation lock and
+    // then logs through logHostStatus, which takes the scan lock - the
+    // two locks must never be held in opposite orders by two threads
+    // at once, or a scanning thread and an instantiating thread
+    // deadlock each other.
     {
-        logHostStatus ("ERROR: no plugin format is registered. The build is missing "
-                       "JUCE_PLUGINHOST_VST3=1 / JUCE_PLUGINHOST_AU=1 "
-                       "(see target_compile_definitions in CMakeLists.txt).");
-        return;
-    }
+        const juce::ScopedLock lock (scanLock);
 
-    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+        logHostStatus ("Scanning the default VST3 folders...");
 
-    // v1.0.10: the collection scan runs OUT OF PROCESS. In the Standalone we
-    // spawn this same executable with --tcs-scan-child; a hostile plugin can
-    // only kill the helper, and the parent relaunches helpers until the scan
-    // completes. In a DAW host we do NOT scan at all (v2.9.1, see below); the
-    // in-process fallback is only kept for the Standalone when spawning the
-    // helper fails (a crash there only kills the Standalone). The scan covers
-    // VST3 only (validating a large AudioUnit collection too doubles the scan
-    // time for little benefit).
-    bool handledByChildren = false;
+        // v1.0.7 fix: without JUCE_PLUGINHOST_VST3 / JUCE_PLUGINHOST_AU,
+        // addDefaultFormats() registers NOTHING and every scan silently finds
+        // 0 plugins. Fail loudly instead.
+        if (hostedStrip.getFormatManager().getNumFormats() == 0)
+        {
+            logHostStatus ("ERROR: no plugin format is registered. The build is missing "
+                           "JUCE_PLUGINHOST_VST3=1 / JUCE_PLUGINHOST_AU=1 "
+                           "(see target_compile_definitions in CMakeLists.txt).");
+            return;
+        }
 
-    if (isStandaloneApp())
-        handledByChildren = launchScanChildren();
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
 
-    if (handledByChildren)
-    {
-        loadKnownPluginList();
-    }
-    else if (! isStandaloneApp())
-    {
-        // v2.9.1 crash fix: NEVER load third-party plugin modules in-process
-        // while running inside a DAW. The out-of-process helper only exists
-        // in the Standalone, and the old in-process fallback loaded every
-        // VST3 module on this background thread - some modules cannot
-        // survive that: Native Instruments' VC 76 calls HIToolbox's
-        // TSMGetInputSourceProperty from its module startup, which asserts
-        // it runs on the host's MAIN thread -> dispatch_assert_queue_fail ->
-        // SIGTRAP -> the whole DAW dies (crash report, Studio Pro 8.1.2,
-        // October 2026). Anti-tamper SIGTRAPs (iZotope-style) are the same
-        // class of problem. So inside a DAW, "Rescan" only RELOADS the saved
-        // database (scanned_plugins.xml, shared with the Standalone); the
-        // full folder scan runs in the Standalone, where a hostile plugin
-        // can only kill the helper.
-        loadKnownPluginList();
+        // v1.0.10: the collection scan runs OUT OF PROCESS. In the Standalone we
+        // spawn this same executable with --tcs-scan-child; a hostile plugin can
+        // only kill the helper, and the parent relaunches helpers until the scan
+        // completes. In a DAW host we do NOT scan at all (v2.9.1, see below); the
+        // in-process fallback is only kept for the Standalone when spawning the
+        // helper fails (a crash there only kills the Standalone). The scan covers
+        // VST3 only (validating a large AudioUnit collection too doubles the scan
+        // time for little benefit).
+        bool handledByChildren = false;
 
-        const auto& types = hostedStrip.getKnownPluginList().getTypes();
+        if (isStandaloneApp())
+            handledByChildren = launchScanChildren();
 
-        if (types.isEmpty())
-            logHostStatus ("No saved plugin database: launch the Standalone once. "
-                           "It scans the VST3 folders OUT OF PROCESS and shares the "
-                           "result with the plugin instances.");
+        if (handledByChildren)
+        {
+            loadKnownPluginList();
+        }
+        else if (! isStandaloneApp())
+        {
+            // v2.9.1 crash fix: NEVER load third-party plugin modules in-process
+            // while running inside a DAW. The out-of-process helper only exists
+            // in the Standalone, and the old in-process fallback loaded every
+            // VST3 module on this background thread - some modules cannot
+            // survive that: Native Instruments' VC 76 calls HIToolbox's
+            // TSMGetInputSourceProperty from its module startup, which asserts
+            // it runs on the host's MAIN thread -> dispatch_assert_queue_fail ->
+            // SIGTRAP -> the whole DAW dies (crash report, Studio Pro 8.1.2,
+            // October 2026). Anti-tamper SIGTRAPs (iZotope-style) are the same
+            // class of problem. So inside a DAW, "Rescan" only RELOADS the saved
+            // database (scanned_plugins.xml, shared with the Standalone); the
+            // full folder scan runs in the Standalone, where a hostile plugin
+            // can only kill the helper.
+            loadKnownPluginList();
+
+            const auto& types = hostedStrip.getKnownPluginList().getTypes();
+
+            if (types.isEmpty())
+                logHostStatus ("No saved plugin database: launch the Standalone once. "
+                               "It scans the VST3 folders OUT OF PROCESS and shares the "
+                               "result with the plugin instances.");
+            else
+                logHostStatus ("Plugin database reloaded - "
+                               + juce::String (types.size()) + " plugin(s) known, "
+                               + juce::String (hostedStrip.getKnownPluginList().getBlacklistedFiles().size())
+                               + " blacklisted. The full folder scan only runs in the "
+                                 "Standalone (out-of-process); loading third-party modules "
+                                 "here could crash the host.");
+        }
         else
-            logHostStatus ("Plugin database reloaded - "
-                           + juce::String (types.size()) + " plugin(s) known, "
-                           + juce::String (hostedStrip.getKnownPluginList().getBlacklistedFiles().size())
-                           + " blacklisted. The full folder scan only runs in the "
-                             "Standalone (out-of-process); loading third-party modules "
-                             "here could crash the host.");
-    }
-    else
-    {
-        // Standalone, and spawning the helper failed: in-process fallback.
-        // A hostile plugin can only kill the Standalone itself here.
-        scanDirectoryForFormat (juce::File ("/Library/Audio/Plug-Ins/VST3"));
-        saveKnownPluginList();
-        scanDirectoryForFormat (home.getChildFile ("Library/Audio/Plug-Ins/VST3"));
-        saveKnownPluginList();
-    }
+        {
+            // Standalone, and spawning the helper failed: in-process fallback.
+            // A hostile plugin can only kill the Standalone itself here.
+            scanDirectoryForFormat (juce::File ("/Library/Audio/Plug-Ins/VST3"));
+            saveKnownPluginList();
+            scanDirectoryForFormat (home.getChildFile ("Library/Audio/Plug-Ins/VST3"));
+            saveKnownPluginList();
+        }
 
-    saveKnownPluginList();
-    logHostStatus ("Scan finished - "
-                   + juce::String (hostedStrip.getKnownPluginList().getTypes().size())
-                   + " plugin(s) known, "
-                   + juce::String (hostedStrip.getKnownPluginList().getBlacklistedFiles().size())
-                   + " blacklisted.");
+        saveKnownPluginList();
+        logHostStatus ("Scan finished - "
+                       + juce::String (hostedStrip.getKnownPluginList().getTypes().size())
+                       + " plugin(s) known, "
+                       + juce::String (hostedStrip.getKnownPluginList().getBlacklistedFiles().size())
+                       + " blacklisted.");
+    } // v2.51.1: scan lock released here (see the top of runScan)
+
     maybeRestoreHosted();
 }
 
@@ -1896,6 +1910,44 @@ void TheChannelStripAudioProcessor::scanDirectoryForFormat (const juce::File& di
 void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescription& desc,
                                                        bool applyPendingState)
 {
+    // v2.51.1: ONE instantiation at a time. This function can be
+    // entered from three threads - the host's state-loading thread
+    // (setStateInformation -> maybeRestoreHosted), the scan thread
+    // (runScan -> maybeRestoreHosted) and the background launch in
+    // selectConsole. Two of them overlapping raced the HostedStrip
+    // relay vector and the parameter listeners to a double free
+    // (Studio Pro 8.1.2 crash: POINTER_BEING_FREED_WAS_NOT_ALLOCATED
+    // in operator delete, called from this function). The whole body
+    // runs under the instantiation lock.
+    const juce::ScopedLock instantiateLocker (instantiateGuard);
+
+    // v2.51.1: a restore with nothing left to apply while a console is
+    // already hosted is the launch-time duplicate (the editor's
+    // selection and the session restore converging on the same slot).
+    // The pending state was consumed by the first instantiation, and
+    // pendingRestore is only armed with a NON-empty state blob - so
+    // this can never skip a restore that still has work to do.
+    if (applyPendingState && savedHostedStateForRestore.getSize() == 0
+        && hostedStrip.getActivePlugin() != nullptr)
+    {
+        pendingRestore.store (false, std::memory_order_relaxed);
+        return;
+    }
+
+    // v2.51.1: everything below keys off the IDENT OF THE REQUEST, not
+    // the live member - a newer selection can change currentPluginIdent
+    // at any moment, and this console's remembered state / pending
+    // preset belong to the console WE are building, not to whatever was
+    // selected meanwhile.
+    const juce::String targetIdent = identFor (desc);
+
+    // v2.51.1: checkpoint 1 - a request whose ident no longer matches
+    // has been superseded by a newer selection (selectConsole publishes
+    // the new ident BEFORE launching) or cleared away. Installing it
+    // would host a console the user just left.
+    if (targetIdent != getCurrentPluginIdent())
+        return;
+
     juce::String error;
 
     std::unique_ptr<juce::AudioProcessor> plugin (
@@ -1914,6 +1966,13 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                               : juce::String()));
         return;
     }
+
+    // v2.51.1: checkpoint 2 - the construction above can take seconds
+    // (real console constructors are heavy); the selection can have
+    // moved on while we were building. The unique_ptr destroys the
+    // unused instance.
+    if (targetIdent != getCurrentPluginIdent())
+        return;
 
     // v2.14.2: bus inventory of the fresh instance, so the layout
     // negotiation can be followed in the Terminal (a sidechain bus is
@@ -1947,18 +2006,29 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
 
     const int numHostedParams = (int) plugin->getParameters().size();
 
+    // v2.51.1: checkpoint 3 - last look before the swap.
+    if (targetIdent != getCurrentPluginIdent())
+        return;
+
     hostedStrip.setPlugin (std::move (plugin));
+
+    // v2.51.1: clearHostedPlugin can run on the message thread at any
+    // moment - never dereference the active slot without a null check.
+    auto* active = hostedStrip.getActivePlugin();
+
+    if (active == nullptr)
+        return;
 
     // v2.27: watch the hosted console's parameters so a knob move can
     // flag the console's current preset as modified ("*"). This only
     // registers our listener in the JUCE parameter objects (never a
     // call into the plugin), and the processor outlives every hosted
     // instance, so no removal is needed.
-    for (auto* p : hostedStrip.getActivePlugin()->getParameters())
+    for (auto* p : active->getParameters())
         p->addListener (this);
 
     juce::String message = "Hosted '" + desc.name + "' ready (latency "
-                         + juce::String (hostedStrip.getActivePlugin()->getLatencySamples())
+                         + juce::String (active->getLatencySamples())
                          + " samples, " + juce::String (numHostedParams) + " parameters"
                          + (mono ? ", native mono layout" : "") + ").";
     logHostStatus (message);
@@ -1968,7 +2038,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
     // wrapper, the wrapper asks us, we ask the console). The forwarder
     // logs either "forwarding to the host" or the exact reason the
     // console does not expose PreSonus::IGainReductionInfo.
-    if (auto* instance = dynamic_cast<juce::AudioPluginInstance*> (hostedStrip.getActivePlugin()))
+    if (auto* instance = dynamic_cast<juce::AudioPluginInstance*> (active))
         grForwarder.connect (*instance);
     else
         juce::Logger::writeToLog ("[TheChannelStrip] gain reduction: hosted plugin is not an "
@@ -1991,7 +2061,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
             // v2.11: the state restored from the session becomes this
             // console's remembered state (captured BEFORE the reset below)
             const juce::ScopedLock lock (consoleStateLock);
-            consoleStates[currentPluginIdent] = savedHostedStateForRestore;
+            consoleStates[targetIdent] = savedHostedStateForRestore;
         }
 
         savedHostedStateForRestore.reset();
@@ -2019,7 +2089,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                 const juce::ScopedLock lock (consoleStateLock);
 
                 if (pendingPresetState.getSize() > 0
-                    && pendingPresetIdent == currentPluginIdent)
+                    && pendingPresetIdent == targetIdent)
                 {
                     presetToApply = pendingPresetState;
                     presetNameToApply = pendingPresetName; // v2.27
@@ -2043,14 +2113,14 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
                 }
 
                 const juce::ScopedLock lock (consoleStateLock);
-                consoleStates[currentPluginIdent] = presetToApply;
+                consoleStates[targetIdent] = presetToApply;
 
                 // v2.27: the queued preset is now this console's
                 // current one, unmodified by definition. v2.30: its
                 // exact file is remembered with it.
-                consolePresetNames[currentPluginIdent] = presetNameToApply;
-                consolePresetModified[currentPluginIdent] = false;
-                consolePresetFiles[currentPluginIdent] = presetFileToApply;
+                consolePresetNames[targetIdent] = presetNameToApply;
+                consolePresetModified[targetIdent] = false;
+                consolePresetFiles[targetIdent] = presetFileToApply;
             }
             else
             {
@@ -2058,7 +2128,7 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
 
                 {
                     const juce::ScopedLock lock (consoleStateLock);
-                    const auto it = consoleStates.find (currentPluginIdent);
+                    const auto it = consoleStates.find (targetIdent);
 
                     if (it != consoleStates.end())
                         remembered = it->second;
@@ -2081,7 +2151,11 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
 
 void TheChannelStripAudioProcessor::maybeRestoreHosted()
 {
-    if (! pendingRestore.load (std::memory_order_relaxed) || currentPluginIdent.isEmpty())
+    // v2.51.1: guarded reads - this can run on the scan thread while
+    // the message thread changes the ident.
+    const juce::String ident = getCurrentPluginIdent();
+
+    if (! pendingRestore.load (std::memory_order_relaxed) || ident.isEmpty())
         return;
 
     juce::PluginDescription desc;
@@ -2091,7 +2165,7 @@ void TheChannelStripAudioProcessor::maybeRestoreHosted()
 
         for (auto& t : types)
         {
-            if (identFor (t) == currentPluginIdent)
+            if (identFor (t) == ident)
             {
                 desc = t;
                 break;
@@ -2103,6 +2177,15 @@ void TheChannelStripAudioProcessor::maybeRestoreHosted()
         return; // plugin not scanned yet: retry after the next scan
 
     instantiateHosted (desc, true);
+}
+
+void TheChannelStripAudioProcessor::setCurrentPluginIdent (const juce::String& ident)
+{
+    // v2.51.1: single guarded write point for the ident (see the member
+    // declaration) - selectConsole, clearHostedPlugin and
+    // setStateInformation all publish through here.
+    const juce::ScopedLock lock (identGuard);
+    currentPluginIdent = ident;
 }
 
 // ---------------------------------------------------------------------------
@@ -2146,7 +2229,7 @@ void TheChannelStripAudioProcessor::saveKnownPluginList()
 void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
-    xml->setAttribute ("version", "2.51.0");
+    xml->setAttribute ("version", "2.51.1");
     xml->setAttribute ("hostedIdent", currentPluginIdent);
     xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
 
@@ -2269,12 +2352,14 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
         }
     }
 
-    currentPluginIdent = xml->getStringAttribute ("hostedIdent");
+    // v2.51.1: the ident is published through the guarded setter (the
+    // background instantiation threads read it).
+    setCurrentPluginIdent (xml->getStringAttribute ("hostedIdent"));
 
     // the supported bx_console models are the only hostable plugins. A
     // legacy v1 session (which could host anything, e.g. an EQ or saturator
     // saved by the v1 shell) is politely ignored instead of auto-hosted.
-    if (currentPluginIdent.isNotEmpty())
+    if (getCurrentPluginIdent().isNotEmpty())
     {
         const auto savedName = currentPluginIdent.fromLastOccurrenceOf ("|", false, false);
         bool isConsole = false;
@@ -2290,7 +2375,7 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
         {
             logHostStatus ("Ignoring saved hosted plugin '" + savedName
                            + "': v2 hosts the supported bx_console models only.");
-            currentPluginIdent = juce::String();
+            setCurrentPluginIdent (juce::String());
         }
     }
 
@@ -2371,17 +2456,26 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
     if (target.isNotEmpty())
         lufsTarget.store ((float) target.getDoubleValue(), std::memory_order_relaxed);
 
-    savedHostedStateForRestore.reset();
-    pendingRestore.store (false, std::memory_order_relaxed);
-
-    const auto stateB64 = xml->getStringAttribute ("hostedState");
-    if (stateB64.isNotEmpty())
+    // v2.51.1: the pending-restore blob is read by the background
+    // instantiation (instantiateHosted) under the instantiation lock -
+    // arming it here under the same lock closes the last racy access.
+    // The lock is re-entrant, so the maybeRestoreHosted call further
+    // down (same thread) can take it again freely.
     {
-        juce::MemoryBlock block;
-        if (block.fromBase64Encoding (stateB64))
-            savedHostedStateForRestore.append (block.getData(), block.getSize());
+        const juce::ScopedLock instantiateLocker (instantiateGuard);
 
-        pendingRestore.store (true, std::memory_order_relaxed);
+        savedHostedStateForRestore.reset();
+        pendingRestore.store (false, std::memory_order_relaxed);
+
+        const auto stateB64 = xml->getStringAttribute ("hostedState");
+        if (stateB64.isNotEmpty())
+        {
+            juce::MemoryBlock block;
+            if (block.fromBase64Encoding (stateB64))
+                savedHostedStateForRestore.append (block.getData(), block.getSize());
+
+            pendingRestore.store (true, std::memory_order_relaxed);
+        }
     }
 
     // v2.11: per-console remembered states. Missing elements (older

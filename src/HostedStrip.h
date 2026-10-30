@@ -131,10 +131,14 @@ private:
     void detachRelayFromAll();
 
     ParamRelay paramRelay;
-    // message thread only (setPlugin / clearPlugin / destructor); the
-    // audio thread never touches it, retireOutgoingNow included (it
-    // hands destruction to a background thread, and the relay is
-    // always detached BEFORE a plugin retires).
+    // v2.47.0: the parameter-change relay (see onConsoleResponseChanged).
+    // v2.51.1: the vector is guarded by relayGuard. setPlugin /
+    // clearPlugin are called from the background instantiation thread
+    // (instantiateHosted) as well as the message thread, and two
+    // overlapping attach/detach runs raced the vector to a double free
+    // (Studio Pro crash). Never hold relayGuard while calling into
+    // plugin code.
+    juce::CriticalSection relayGuard;
     std::vector<juce::AudioProcessorParameter*> relayedParameters;
 
     void retireOutgoingNow();

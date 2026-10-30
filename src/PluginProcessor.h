@@ -70,7 +70,20 @@ public:
     juce::AudioProcessorValueTreeState& getApvts() { return apvts; }
     HostedStrip& getHostedStrip() { return hostedStrip; }
     juce::CriticalSection& getScanLock() { return scanLock; }
-    juce::String getCurrentPluginIdent() const { return currentPluginIdent; }
+    // v2.51.1: guarded read - the ident is written on the message/host
+    // thread and read from the background instantiation threads.
+    juce::String getCurrentPluginIdent() const
+    {
+        const juce::ScopedLock lock (identGuard);
+        return currentPluginIdent;
+    }
+    // v2.51.1: test hook - drives the (now serialized) instantiation
+    // path directly; production flows go through selectConsole and
+    // maybeRestoreHosted.
+    void instantiateHostedForTest (const juce::PluginDescription& desc, bool applyPendingState)
+    {
+        instantiateHosted (desc, applyPendingState);
+    }
     // Last hosting event (scan result / instantiation error). Sticky.
     juce::String getHostStatus();
     // v2.27: status posts from the editor (e.g. a failed Save-to-file)
@@ -375,6 +388,8 @@ private:
 
     void instantiateHosted (const juce::PluginDescription& desc, bool applyPendingState);
     void maybeRestoreHosted();
+    // v2.51.1: identGuard-guarded write (see the member declaration).
+    void setCurrentPluginIdent (const juce::String& ident);
 
     // ---- v2.14: native mono hosting ----
     // tryApplyMonoLayout asks a hosted console for a native mono->mono bus
@@ -403,7 +418,21 @@ private:
     GRForwarder grForwarder;
 
     juce::CriticalSection scanLock;
+    // v2.51.1: currentPluginIdent is written on the message/host thread
+    // (selectConsole, clearHostedPlugin, setStateInformation) and read on
+    // the background instantiation threads - every cross-thread access
+    // goes through the identGuard (getCurrentPluginIdent /
+    // setCurrentPluginIdent).
     juce::String currentPluginIdent;
+    mutable juce::CriticalSection identGuard;
+    // v2.51.1: serializes instantiateHosted (see PluginProcessor.cpp) -
+    // two overlapping instantiations raced the HostedStrip relay vector
+    // to a double free (Studio Pro 8.1.2 crash, POINTER_BEING_FREED_WAS_
+    // NOT_ALLOCATED). Lock order against scanLock is ALWAYS
+    // instantiateGuard first, scanLock second (instantiateHosted logs
+    // through logHostStatus), so runScan must release scanLock before
+    // it calls maybeRestoreHosted.
+    juce::CriticalSection instantiateGuard;
     juce::String hostStatus;
     juce::MemoryBlock savedHostedStateForRestore; // uses reset()/append(): MemoryBlock has no clear()
     std::atomic<bool> pendingRestore { false };
