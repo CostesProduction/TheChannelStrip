@@ -402,9 +402,9 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     for (auto& b : anaZoomButtons)
     {
         styleConsoleButton (b);
-        // v2.53.1: the rectangular chip + thick vector +/- (Clement's
-        // readability feedback - the default small square button read
-        // as a dim circle)
+        // v2.53.1 -> v2.53.2: the GHOST chip + thick vector +/- (the
+        // v2.53.1 solid chip was "un petit peu abusif" per Clement -
+        // invisible at rest, halo + full glyph under the cursor)
         b.setLookAndFeel (&zoomButtonLaF);
         addAndMakeVisible (b);
     }

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.53.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.53.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,20 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.53.2**
+  - **The +/− zoom controls became ghosts (Clement's verdict on
+    2.53.1: visible — good — but "un petit peu moins abusif").** At
+    rest they draw no chip and no border, just the thick vector glyph
+    at 55% alpha — as quiet as the scale numbers beside them. Under
+    the cursor (and while pressed) a soft halo fills the button and
+    the glyph goes to full brightness: invisible until needed,
+    unmistakable at the moment of clicking. A control disabled at its
+    ladder's end rests at 25%. The 22×16 click surface and the
+    clear-band placement are unchanged.
+  - **The axis click stays retired** (Clement weighed both: the
+    buttons are discoverable and intentional — no hidden control, no
+    accidental silent zoom — and the ghost styling answers the
+    visual-weight concern better than removing them would).
 - **2.53.1**
   - **Readability pass on the analyser's scale controls (Clement's
     feedback on 2.53.0: the +/− chips were too small and not legible

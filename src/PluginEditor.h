@@ -13,46 +13,57 @@
 // readability feedback on v2.53.0: "pas suffisamment lisible - la
 // bulle pourrait etre plus grande et un peu plus rectangulaire").
 // The default LookAndFeel's TextButton shape at 14 x 14 read as a dim
-// little near-circle with a small grey +/- glyph. This class draws a
+// little near-circle with a small grey +/- glyph, so v2.53.1 drew a
 // clearly RECTANGULAR chip - a 2 px corner-radius body with a visible
 // border, brightening on hover and press - and the +/- as THICK
 // VECTOR STROKES (two crossing bars for the "+", one bar for the "-"),
-// the same minimal-icon language as the preset buttons (v2.26.1):
-// full-strength console text colour, always crisp because the glyph
-// scales with the button instead of following a font size. A disabled
-// chip (at its ladder's end, v2.53) dims to 40% so the state reads at
-// a glance.
+// the same minimal-icon language as the preset buttons (v2.26.1).
+//
+// v2.53.2 (Clement's verdict on 2.53.1: "plus visibles merci, mais
+// un petit peu moins abusif"): the chip became a GHOST. At rest the
+// button draws NO background and NO border - just the thick +/-
+// glyph at 55% alpha, as quiet as the scale numbers around it.
+// The chip materialises only under the cursor: on hover (and press)
+// a soft halo fills the rounded body and the glyph goes to full
+// brightness, so the button is invisible until it is needed and
+// unmistakable at the moment of clicking. A disabled chip (at its
+// ladder's end, v2.53) rests at 25% alpha. The 22 x 16 click surface
+// is unchanged - generous to aim at, invisible to look at.
 // ---------------------------------------------------------------------------
 class ZoomButtonLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     void drawButtonBackground (juce::Graphics& g, juce::Button& b,
-                                const juce::Colour& backgroundColour,
+                                const juce::Colour& /*backgroundColour*/,
                                 bool shouldDrawButtonAsHighlighted,
                                 bool shouldDrawButtonAsDown) override
     {
-        const float alpha = b.isEnabled() ? 1.0f : 0.4f;
-        juce::Colour bg = backgroundColour;
+        // v2.53.2: the ghost draws nothing at rest - no fill, no
+        // border. The soft halo appears only once the cursor is on
+        // the button (or it is being pressed), tinted with the text
+        // colour so it reads as a light glow, never as a hard box.
+        if (! (shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown))
+            return;
 
-        if (shouldDrawButtonAsDown)
-            bg = bg.brighter (0.10f);
-        else if (shouldDrawButtonAsHighlighted)
-            bg = bg.brighter (0.05f);
+        const float alpha = (b.isEnabled() ? (shouldDrawButtonAsDown ? 0.16f : 0.10f)
+                                           : 0.05f);
 
-        const auto bounds = b.getLocalBounds().toFloat();
-
-        g.setColour (bg.withMultipliedAlpha (alpha));
-        g.fillRoundedRectangle (bounds, 2.0f);
         g.setColour (b.findColour (juce::TextButton::textColourOffId)
-                         .withMultipliedAlpha (0.35f * alpha));
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
+                         .withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (b.getLocalBounds().toFloat().reduced (1.0f), 3.0f);
     }
 
     void drawButtonText (juce::Graphics& g, juce::TextButton& b,
-                        bool /*shouldDrawButtonAsHighlighted*/,
+                        bool shouldDrawButtonAsHighlighted,
                         bool shouldDrawButtonAsDown) override
     {
-        const float alpha = b.isEnabled() ? 1.0f : 0.4f;
+        // v2.53.2: 55% at rest (a quiet label next to the scale
+        // numbers), 100% under the cursor, 25% when disabled at the
+        // ladder's end.
+        const float alpha = b.isEnabled()
+            ? ((shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown) ? 1.0f
+                                                                        : 0.55f)
+            : 0.25f;
         const auto area = b.getLocalBounds().toFloat();
         const float cx = area.getCentreX();
         const float cy = area.getCentreY();
@@ -491,9 +502,9 @@ private:
     std::array<juce::TextButton, 2> anaZoomButtons; // 0 = "+", 1 = "-"
     std::array<juce::TextButton, 2> eqZoomButtons;  // 0 = "+", 1 = "-"
 
-    // v2.53.1: the zoom buttons' rectangular-chip / thick-glyph
-    // LookAndFeel (the class above) - owned here as a member so it
-    // outlives the buttons that use it.
+    // v2.53.1 -> v2.53.2: the zoom buttons' GHOST LookAndFeel (the
+    // class above) - owned here as a member so it outlives the
+    // buttons that use it.
     ZoomButtonLookAndFeel zoomButtonLaF;
 
     // v2.53: refreshes the four zoom buttons' enabled states against
