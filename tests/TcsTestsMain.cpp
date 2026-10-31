@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.51.1 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.52.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -65,6 +65,9 @@
 //     current preset disowns it)
 //   - hover readout mapping and formatting (v2.19, roadmap point 3)
 //   - state save/restore roundtrip (display options + version tag)
+//   - v2.52: the tilt / Fast-Slow buttons restore the session onto the
+//     analyser strip's own buttons (they moved out of the sidebar) and
+//     the speed value is canonicalised to exactly one of the two taus
 //   - v2.51 scale ladder: legacy 10/6 and 4/2 dB/div session values
 //     are mapped to the new 15/12/9 and 8/6/4/2 ladders on load
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -2860,8 +2863,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.51.1",
-                "saved state carries the current version tag (2.51.1)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.52.0",
+                "saved state carries the current version tag (2.52.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2872,6 +2875,50 @@ void testStateRoundtrip()
     expectTrue (! restored.getAnalyserVisible(), "analyser visibility restored");
     expectNear (restored.getSpecTau(), 0.15, 0.01, "response speed restored");
     expectNear (restored.getLufsTarget(), -37.0, 0.01, "loudness reference restored");
+}
+
+// v2.52 (point B): the tilt and response-speed buttons moved from the
+// sidebar onto the analyser strip - SpectrumPanel owns, wires and
+// RESTORES them itself now. This locks in the two guarantees the move
+// must keep: (1) a panel constructed after the session state was
+// loaded restores the persisted tilt/speed onto its own buttons (the
+// old editor-side restore moved into the panel); (2) the speed value
+// is canonicalised to exactly one of the two buttons (any legacy
+// in-between value snaps to the closest, defaulting to Slow).
+void testAnalyserStripButtons()
+{
+    beginTest ("v2.52: the strip's own tilt/speed buttons restore the session");
+
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.setTiltDb (-3.0f);
+        proc.setSpecTau (0.15f); // Fast
+
+        SpectrumPanel panel (proc);
+
+        expectTrue (panel.getTiltButton (0)->getToggleState(),
+                    "the -3 tilt button is selected on the strip");
+        expectTrue (! panel.getTiltButton (1)->getToggleState(),
+                    "the default -4.5 tilt button is not selected");
+        expectTrue (panel.getSpeedButton (0)->getToggleState(),
+                    "the Fast speed button is selected on the strip");
+        expectTrue (! panel.getSpeedButton (1)->getToggleState(),
+                    "the Slow speed button is not selected");
+    }
+
+    {
+        // the default panel: nothing saved -> -4.5 tilt, Slow speed,
+        // and the processor value canonicalised to the exact tau
+        TheChannelStripAudioProcessor proc;
+        SpectrumPanel panel (proc);
+
+        expectTrue (panel.getTiltButton (1)->getToggleState(),
+                    "a fresh panel selects the default -4.5 tilt");
+        expectTrue (panel.getSpeedButton (1)->getToggleState(),
+                    "a fresh panel selects the default Slow speed");
+        expectNear (proc.getSpecTau(), 1.0, 0.001,
+                    "the speed is canonicalised to exactly Slow's tau");
+    }
 }
 
 // v2.51.0 (Clement's analyser display rework): the scale ladder
@@ -3268,7 +3315,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.51.1"),
+    expectTrue (report.contains ("TheChannelStrip 2.52.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -4052,7 +4099,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.51.1" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.52.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -4077,6 +4124,7 @@ int main (int argc, char* argv[])
     testSilentConsoleWarning();
     testHoverReadout();
     testStateRoundtrip();
+    testAnalyserStripButtons();
     testDisplayScaleLegacyMapping();
     testLatencyForwarding();
     testCrossfadeClickFree();

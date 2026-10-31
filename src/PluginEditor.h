@@ -13,7 +13,9 @@
 // a selectable weighting tilt (-3 / -4.5 / -6 dB per octave) and analyzer
 // ballistics (v2.10: ~1 s smoothing on the IN/OUT curves, plus a 10-second
 // sliding-maximum hold trace on the output; v2.12: the time constant is
-// selectable Fast/Slow from the sidebar). v2.6 adds the measured transfer
+// selectable Fast/Slow - since v2.52 the tilt and speed buttons are children
+// of this panel itself, overlaid on its top-left corner, where the display
+// they control lives). v2.6 adds the measured transfer
 // function of the hosted plugin: OUT minus IN per bin (the tilt cancels in
 // the difference, so that curve is tilt-independent). v2.12 makes that EQ
 // curve PERSISTENT: a bin that has carried input energy keeps showing its
@@ -48,6 +50,7 @@ public:
     explicit SpectrumPanel (TheChannelStripAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
+    void resized() override; // v2.52: places the tilt / speed buttons
     // v2.19 (roadmap point 3): hovering the analyser shows a readout of
     // the frequency under the cursor plus the IN / OUT / EQ levels at
     // that frequency. mouseMove just records the cursor and repaints;
@@ -70,6 +73,17 @@ public:
     // v2.13: loudness reference of the axis (0 dB line = this many LUFS
     // absolute). Changing it re-snaps the calibration immediately.
     void setLufsTarget (float targetLufs);
+
+    // v2.52 (point B): the tilt and response-speed buttons moved from
+    // the sidebar ONTO the analyser strip - Clement's layout: the
+    // controls that only affect the display live where the display
+    // lives, which frees two rows of the left panel for the console
+    // workflow. They are children of this panel (constructed and wired
+    // in its constructor, laid out in its resized()). These accessors
+    // exist so the editor can register their interactive-help texts
+    // (the help map is the single home of every explanation, v2.31).
+    juce::TextButton* getTiltButton (int index);
+    juce::TextButton* getSpeedButton (int index);
 
     // v2.19 (roadmap point 3): hover readout helpers - STATIC and free
     // of any component state so the offline test harness (TcsTests) can
@@ -331,6 +345,25 @@ private:
     juce::Point<int> hoverPos;
     bool mouseInside = false;
 
+    // -----------------------------------------------------------------
+    // v2.52 (point B): the display controls that used to live in the
+    // sidebar's analyser section - the three tilt buttons (-3 / -4.5 /
+    // -6 dB/oct, radio group 2) and the two response-speed buttons
+    // (Fast / Slow, radio group 5). They now overlay the panel's own
+    // top-left corner: clear of the left scale column (x <= 44, whose
+    // clicks cycle the spectrum zoom), of the LUFS reference label at
+    // the 0 dB line and of the centred legend - see resized() for the
+    // exact geometry and the collision budget. TextButtons styled like
+    // the console buttons (the v2.12 lesson: all three tilt labels
+    // render at the SAME font size; the old ToggleButtons shrank the
+    // wider "-4.5"). The persisted state stays in the processor
+    // (tiltDb, specTau - saved with the session exactly as before);
+    // the panel restores and re-canonicalises both at construction.
+    // -----------------------------------------------------------------
+    juce::Label tiltCaption { {}, "tilt" };
+    std::array<juce::TextButton, 3> tiltButtons; // -3, -4.5, -6 dB/oct
+    std::array<juce::TextButton, 2> speedButtons; // Fast / Slow
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrumPanel)
 };
 
@@ -360,9 +393,6 @@ public:
 //   | [FOCUS] |                                   |
 //   | [BX N]  |                                   |
 //   | name    |                                   |
-//   | [F | S] |                                   |
-//   | TILT    |                                   |
-//   | (-3-4.5)|                                   |
 //   | GAIN    |                                   |
 //   | IN / OUT|                                   |
 //   |Add +1.8 |                                   |
@@ -370,6 +400,11 @@ public:
 //   | [Rescan]|                                   |
 //   +---------+-----------------------------------+
 //     sidebar (starts under the strip)    centre column
+//
+// v2.52 (point B): the analyser display controls (TILT -3/-4.5/-6 and
+// the Fast/Slow response speed) live ON the analyser strip itself now,
+// as a button row overlaid on its top-left corner - the sidebar's
+// analyser section keeps only the show/hide toggle.
 //
 // v2.5: the analyser strip spans the whole window width at the top; the
 // condensed sidebar and the hosted plugin column start underneath it. The
@@ -590,24 +625,22 @@ private:
     juce::Colour lastStatusColour { 0xff8f9bb0 };
 
     std::array<juce::TextButton, (size_t) TheChannelStripAudioProcessor::numConsoles> consoleButtons;
-    juce::Label tiltLabel { {}, "tilt" };
-    // v2.12: the tilt and speed buttons are TextButtons styled like the
-    // console buttons (radio behaviour via setClickingTogglesState). The
-    // old ToggleButtons auto-shrank the wider "-4.5" label to fit, which
-    // made its font visibly smaller than its neighbours.
-    std::array<juce::TextButton, 3> tiltButtons; // -3, -4.5, -6 dB/oct
 
-    // v2.12: analyser response speed - Fast/Slow IN/OUT smoothing
-    // (tau ~0.15 / 1 s, stored as specTau in the processor). The old
-    // three-speed row (Fast/Med/Slow) is back down to two buttons.
-    std::array<juce::TextButton, 2> speedButtons;
+    // v2.52 (point B): the tilt and response-speed buttons moved from
+    // this sidebar ONTO the analyser strip itself - they are children
+    // of SpectrumPanel now (see that class). The v2.12 lessons travel
+    // with them: TextButtons styled like the console buttons so all
+    // three tilt labels render at the SAME font size, and the
+    // persisted state stays in the processor (tiltDb, specTau).
 
     // v2.8: the "Display" toggle that hides or shows the analyser strip.
     // (v2.12: the SCALE dB/DIV and EQ dB/DIV button rows are gone - the
     // scales are toggled by clicking the analyser's own scale labels.)
     // v2.34.1 (Clement's suggestion): the "Display" text toggle became a
-    // wide icon button (a small spectrum glyph, tilt-button height) that
-    // sits at the top of the section, above Fast/Slow.
+    // wide icon button (a small spectrum glyph) - since v2.52 it is the
+    // ONLY control of the sidebar's analyser section (the tilt and
+    // speed rows moved onto the strip, so the freed vertical space
+    // breathes into the block gaps).
     juce::TextButton analyserToggle;          // show/hide the analyser strip
 
     SpectrumPanel spectrumPanel;

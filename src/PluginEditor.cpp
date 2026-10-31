@@ -274,7 +274,157 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     smoothEqVerite.fill (0.0f);
     eqVeriteMeasured.fill (false);
 
+    // -----------------------------------------------------------------
+    // v2.52 (point B): the tilt and response-speed buttons moved from
+    // the sidebar ONTO the analyser strip. They are children of this
+    // panel, overlaid on its top-left corner (see resized() for the
+    // geometry) - Clement's layout: the controls that only affect the
+    // display live where the display lives, and the sidebar keeps its
+    // room for the console workflow. The persisted state stays where it
+    // always was (tiltDb / specTau in the processor, saved with the
+    // session); the panel both writes it (on click) and restores it
+    // (here), so the two buttons rows' old editor wiring is gone.
+    // Same behaviour as the v2.12/v2.7.1 sidebar rows: radio-group
+    // TextButtons styled like the console buttons, the tilt canonical
+    // to -3 / -4.5 / -6 dB/oct (default -4.5) and the speed snapped to
+    // the closest of Fast ~0.15 s / Slow ~1 s (default Slow) - any
+    // legacy saved value still maps to a button.
+    // -----------------------------------------------------------------
+    {
+        tiltCaption.setText ("TILT", juce::dontSendNotification);
+        tiltCaption.setFont (juce::Font (juce::FontOptions (9.0f, juce::Font::bold)));
+        tiltCaption.setJustificationType (juce::Justification::centredRight);
+        tiltCaption.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+        addAndMakeVisible (tiltCaption);
+
+        const float tilts[3] = { -3.0f, -4.5f, -6.0f };
+        const char* const tiltNames[3] = { "-3", "-4.5", "-6" };
+
+        for (size_t j = 0; j < tiltButtons.size(); ++j)
+        {
+            auto& t = tiltButtons[j];
+
+            // v2.12 lesson: TextButtons styled like the console
+            // buttons, so all three labels render at the SAME font
+            // size (the old ToggleButtons shrank "-4.5" to fit).
+            t.setButtonText (tiltNames[j]);
+            t.setClickingTogglesState (true);
+            t.setRadioGroupId (2);
+            styleConsoleButton (t);
+            addAndMakeVisible (t);
+
+            t.onClick = [this, j, tilts]
+            {
+                if (tiltButtons[j].getToggleState())
+                {
+                    processor.setTiltDb (tilts[j]);
+                    setTilt (tilts[j]);
+                }
+            };
+        }
+
+        // v2.7.1: restore the saved tilt (the processor reloads it
+        // from the session state before the editor opens); -4.5 dB/oct
+        // is the default when nothing (or an unknown value) was saved.
+        {
+            int match = 1;
+
+            for (int j = 0; j < 3; ++j)
+                if (std::abs (tilts[j] - processor.getTiltDb()) < 0.01f)
+                    match = j;
+
+            tiltButtons[(size_t) match].setToggleState (true, juce::dontSendNotification);
+            setTilt (tilts[match]);
+        }
+
+        // the response-speed row: Fast ~0.15 s (the pre-v2.10 snappy
+        // ballistics) and Slow ~1 s (the default). The choice is saved
+        // with the session (specTau); any legacy saved value snaps to
+        // the closest of the two, and the processor value is
+        // canonicalised too so the next save stores exactly one of
+        // the two current speeds.
+        const float specTaus[2] = { 0.15f, 1.0f };
+        const char* const speedNames[2] = { "Fast", "Slow" };
+
+        for (size_t j = 0; j < speedButtons.size(); ++j)
+        {
+            auto& b = speedButtons[j];
+
+            b.setButtonText (speedNames[j]);
+            b.setClickingTogglesState (true);
+            b.setRadioGroupId (5);
+            styleConsoleButton (b);
+            addAndMakeVisible (b);
+
+            b.onClick = [this, j, specTaus]
+            {
+                if (speedButtons[j].getToggleState())
+                {
+                    processor.setSpecTau (specTaus[j]);
+                    setSpecTau (specTaus[j]);
+                }
+            };
+        }
+
+        const int match = (processor.getSpecTau() < 0.575f) ? 0 : 1;
+
+        processor.setSpecTau (specTaus[match]);
+        setSpecTau (specTaus[match]);
+
+        speedButtons[0].setToggleState (match == 0, juce::dontSendNotification);
+        speedButtons[1].setToggleState (match == 1, juce::dontSendNotification);
+    }
+
     startTimerHz (30);
+}
+
+// v2.52 (point B): the tilt / speed button row sits in the panel's
+// top-left corner, OVER the graph (like every analyser's control
+// overlay). The geometry is chosen against the panel's own click
+// zones and drawing: the row starts right of the left scale column
+// (x <= 44, whose clicks cycle the spectrum zoom), stays above the
+// LUFS reference label (drawn at x 36..190 around the 0 dB line, one
+// third of the panel height down - the row never reaches it), and
+// ends well left of the centred legend even at the minimum window
+// width (the row spans x 46..254; at the 860 px width floor the
+// legend's own left edge sits around x 320). The buttons are real
+// children, so they also consume their own clicks before the panel's
+// mouseDown - none of the three scale zones is ever covered.
+void SpectrumPanel::resized()
+{
+    const int y  = 3;
+    const int bh = 20;
+
+    tiltCaption.setBounds (46, y + 2, 26, 16);
+
+    // the tilt buttons: "-4.5" is the widest label, so it gets the
+    // wider button - all three keep the same font (v2.12 lesson)
+    const int tiltWidths[3] = { 26, 34, 26 };
+    int x = 78;
+
+    for (size_t j = 0; j < tiltButtons.size(); ++j)
+    {
+        tiltButtons[j].setBounds (x, y, tiltWidths[j], bh);
+        x += tiltWidths[j] + 2;
+    }
+
+    x += 6; // the breathing gap between the two groups
+
+    for (size_t j = 0; j < speedButtons.size(); ++j)
+    {
+        speedButtons[j].setBounds (x, y, 38, bh);
+        x += 40;
+    }
+}
+
+juce::TextButton* SpectrumPanel::getTiltButton (int index)
+{
+    return &tiltButtons[(size_t) juce::jlimit (0, 2, index)];
+}
+
+juce::TextButton* SpectrumPanel::getSpeedButton (int index)
+{
+    return &speedButtons[(size_t) juce::jlimit (0, 1, index)];
 }
 
 void SpectrumPanel::setTilt (float newTiltDbPerOct)
@@ -2007,109 +2157,25 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
 
     refreshPresetList();
 
-    // ---- v2.12: analyser response speed (IN/OUT smoothing) ----
-    // Back to two speeds: Fast ~0.15 s (close to the pre-v2.10 snappy
-    // ballistics) and Slow ~1 s (the v2.10/v2.11 default, formerly
-    // "Med"). The old 3 s Slow is gone. The choice is saved with the
-    // session (specTau in the processor); any legacy saved value snaps
-    // to the closest of the two. TextButtons styled like the console
-    // buttons (the old ToggleButtons auto-shrank longer labels).
-    {
-        const float specTaus[2] = { 0.15f, 1.0f };
-        const char* const speedNames[2] = { "Fast", "Slow" };
+    // ---- v2.52 (point B): the tilt and response-speed buttons moved
+    //      from the sidebar ONTO the analyser strip - they are created,
+    //      wired and restored inside SpectrumPanel now (it owns the
+    //      display state and already references the processor that
+    //      persists it). What stays HERE is only the help-mode texts:
+    //      the map is the single home of every explanation (v2.31,
+    //      remark 1). The texts are the same as the old sidebar
+    //      rows'. ----
+    for (int j = 0; j < 3; ++j)
+        helpTexts[spectrumPanel.getTiltButton (j)] =
+            "Analyser display tilt in dB per octave (reference 1 kHz, "
+            "SPAN convention: a negative tilt flattens a naturally "
+            "falling spectrum). The tilt only affects the drawing, "
+            "never the analysis.";
 
-        for (size_t j = 0; j < speedButtons.size(); ++j)
-        {
-            auto& b = speedButtons[j];
-
-            b.setButtonText (speedNames[j]);
-            b.setClickingTogglesState (true);
-            b.setRadioGroupId (5);
-            styleConsoleButton (b);
-            addAndMakeVisible (b);
-
-            b.onClick = [this, j, specTaus]
-            {
-                if (speedButtons[j].getToggleState())
-                {
-                    proc.setSpecTau (specTaus[j]);
-                    spectrumPanel.setSpecTau (specTaus[j]);
-                }
-            };
-
-            // v2.31 (remark 1): the speed explanation moved into the
-            // help-mode texts - no standing tooltip any more.
-            helpTexts[&b] = "Analyser response speed: the IN/OUT curves smooth "
-                            "with a time constant of ~0.15 s (Fast) or ~1 s (Slow).";
-        }
-
-        // restore the saved speed, snapped to the closest of the two
-        // (default Slow ~1 s); canonicalise the processor value too, so
-        // the next save stores exactly one of the two current speeds
-        const int match = (proc.getSpecTau() < 0.575f) ? 0 : 1;
-
-        proc.setSpecTau (specTaus[match]);
-        spectrumPanel.setSpecTau (specTaus[match]);
-
-        speedButtons[0].setToggleState (match == 0, juce::dontSendNotification);
-        speedButtons[1].setToggleState (match == 1, juce::dontSendNotification);
-    }
-
-    // ---- tilt weighting (-3 / -4.5 / -6 dB per octave) ----
-    tiltLabel.setText ("TILT dB/OCT", juce::dontSendNotification);
-    tiltLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    tiltLabel.setJustificationType (juce::Justification::centred);
-    tiltLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
-    addAndMakeVisible (tiltLabel);
-
-    const float tilts[3] = { -3.0f, -4.5f, -6.0f };
-    const char* const tiltNames[3] = { "-3", "-4.5", "-6" };
-
-    for (size_t j = 0; j < tiltButtons.size(); ++j)
-    {
-        auto& t = tiltButtons[j];
-
-        // v2.12: TextButtons styled like the console buttons, so all
-        // three labels render at the SAME font size - the old
-        // ToggleButtons used drawFittedText, which shrank "-4.5" (the
-        // widest label) to squeeze it beside the tick box, making it
-        // visibly smaller than its neighbours.
-        t.setButtonText (tiltNames[j]);
-        t.setClickingTogglesState (true);
-        t.setRadioGroupId (2);
-        styleConsoleButton (t);
-        addAndMakeVisible (t);
-
-        // v2.20: the tilt buttons got a tooltip (they were the only
-        // analyser controls without one). v2.31 (remark 1): the text
-        // moved into the help-mode texts - no standing tooltip.
-        helpTexts[&t] = "Analyser display tilt in dB per octave (reference 1 kHz, "
-                        "SPAN convention: a negative tilt flattens a naturally "
-                        "falling spectrum). The tilt only affects the drawing, "
-                        "never the analysis.";
-
-        t.onClick = [this, j, tilts]
-        {
-            if (tiltButtons[j].getToggleState())
-            {
-                proc.setTiltDb (tilts[j]);
-                spectrumPanel.setTilt (tilts[j]);
-            }
-        };
-    }
-
-    // v2.7.1: restore the saved tilt (the processor reloads it from the
-    // session state before the editor opens). -4.5 dB/octave is the
-    // default when nothing (or an unknown value) was saved.
-    {
-        int match = 1;
-        for (int j = 0; j < 3; ++j)
-            if (std::abs (tilts[j] - proc.getTiltDb()) < 0.01f)
-                match = j;
-
-        tiltButtons[(size_t) match].setToggleState (true, juce::dontSendNotification);
-        spectrumPanel.setTilt (tilts[match]);
-    }
+    for (int j = 0; j < 2; ++j)
+        helpTexts[spectrumPanel.getSpeedButton (j)] =
+            "Analyser response speed: the IN/OUT curves smooth "
+            "with a time constant of ~0.15 s (Fast) or ~1 s (Slow).";
 
     // ---- v2.12: the scale button rows are gone - the scales are
     //      cycled by clicking the analyser's own scale labels ----
@@ -2317,10 +2383,13 @@ void TheChannelStripAudioProcessorEditor::resized()
     const int alarmY  = rescanY - 42;   // 40 px zone, ends 2 px above Rescan
     const int nameY   = alarmY - 22;
 
-    // block heights: logo + analyser 173 (58 logo, 4 inner gap, 111
-    // analyser: toggle + Fast/Slow + tilt), gain staging 87 (heading +
-    // IN/OUT + correction); the leftover splits into the three gaps.
-    const int leftover = (nameY - y) - (173 + 87);
+    // ---- block heights: logo + analyser 96 (58 logo, 4 inner gap, 34
+    //      analyser toggle + its trailing gap - v2.52: the Fast/Slow
+    //      and tilt rows moved onto the analyser strip, freeing 77 px
+    //      that now breathe into the three block gaps), gain staging
+    //      87 (heading + IN/OUT + correction); the leftover splits
+    //      into the gaps. ----
+    const int leftover = (nameY - y) - (96 + 87);
     const int gap      = juce::jmax (4, leftover / 3);
 
     // ---- block 2: the frame-free monochrome logo (one click to the
@@ -2333,23 +2402,16 @@ void TheChannelStripAudioProcessorEditor::resized()
     //      design): the toggle carries the section heading - the
     //      "ANALYSER" label and the spectrum glyph share the button,
     //      saving the v2.36 heading row. Same toggle behaviour: blue
-    //      when the analyser strip is shown. ----
+    //      when the analyser strip is shown. v2.52 (point B): the
+    //      section keeps ONLY this toggle - the tilt and Fast/Slow
+    //      buttons live on the analyser strip itself now. ----
     analyserToggle.setBounds (sideX, y, sw, 26);
     y += 26 + 8;
 
-    // ---- v2.12: response-speed row (Fast/Slow), one line like the tilt ----
-    for (size_t j = 0; j < speedButtons.size(); ++j)
-        speedButtons[j].setBounds (sideX + (int) j * 68, y, 64, 22);
-    y += 22 + 8;
-
-    tiltLabel.setBounds (sideX, y, sw, 15);
-    y += 17;
-
-    // v2.8: the three tilt buttons share one row (the sidebar gained the
-    // scale/EQ/display controls and must stay compact).
-    for (size_t j = 0; j < tiltButtons.size(); ++j)
-        tiltButtons[j].setBounds (sideX + (int) j * 45, y, 41, 22);
-    y += 22 + 8;
+    // (v2.52: the Fast/Slow row and the TILT label + button row that
+    // lived here moved onto the analyser strip - SpectrumPanel's own
+    // top-left corner. The sidebar keeps the room for the console
+    // workflow, per Clement's layout.)
 
     // (v2.12: the SCALE dB/DIV and EQ dB/DIV rows are gone - those
     // scales are toggled by clicking the analyser's own scale labels.)
@@ -2472,7 +2534,9 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // v2.36.0: sidebar module re-order, same vertical budget -> 1000 / 810.
     // v2.38.0: justified sidebar + minimal margins (the middle sections
     // flex, the pinned stacks are tighter) -> 970 / 790.
-    const int newH = juce::jlimit (showStrip ? 970 : 790, 1600, targetH);
+    // v2.52 (point B): the tilt and Fast/Slow rows moved onto the
+    // analyser strip, freeing 77 px of sidebar height -> 893 / 713.
+    const int newH = juce::jlimit (showStrip ? 893 : 713, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);

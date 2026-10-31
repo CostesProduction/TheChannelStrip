@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.51.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.52.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -152,7 +152,8 @@ them in a clean, focused workflow:
   buttons pinned at the top; (2) the frame-free Costes logo (which
   opens a contact card) with the ANALYSER section right under it (its
   toggle carries the heading: "ANALYSER" and the spectrum glyph share
-  the button, followed by response speed and tilt); (3) GAIN STAGING
+  the button — since v2.52.0 it is the section's only control: the
+  tilt and response-speed buttons live on the analyser strip itself); (3) GAIN STAGING
   (LUFS/delta readouts); (4) the hosted name with its alarm zone glued
   to the Rescan / Doctor row at the bottom; the centre column is used only by the
   analyzer strip and the hosted plugin itself. The frame around
@@ -266,10 +267,12 @@ process; treat a crash there as a plugin problem, not a shell bug.
    instantiated on a background thread, then crossfaded in over 50 ms.
    Disabled buttons mean the plugin was not found on this machine.
 3. **Watch the spectrum** — the IN and OUT curves are overlaid below the
-   header. Use the tilt buttons (-3 / -4.5 / -6 dB/oct) to switch slope
-   weighting, the SCALE buttons (10 / 5 dB per division) to change the
-   vertical range and the EQ buttons (4 / 2 dB per division) to change
-   the transfer-curve range; "Display" hides or shows the whole analyzer
+   header. The **tilt** (-3 / -4.5 / -6 dB/oct) and **Fast / Slow**
+   response-speed buttons sit on the analyser strip's own top-left
+   corner; clicking the **left scale** cycles the spectrum zoom
+   (15 / 12 / 9 dB per division), clicking the **right green scale**
+   cycles the EQ curve's range (+/-24 / 18 / 12 / 6 dB), and the
+   ANALYSER toggle in the sidebar hides or shows the whole analyzer
    strip. All of it is remembered in the session state.
 4. **Gain-stage** — play audio; the big readout shows the smoothed
    correction (e.g. "+1.8 dB" means raise the console's output by 1.8 dB,
@@ -301,6 +304,26 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.52.0**
+  - **The analyser's tilt and response-speed controls moved onto the
+    analyser strip itself (Clement's layout request).** The three tilt
+    buttons (**-3 / -4.5 / -6 dB/oct**) and the **Fast / Slow** response
+    speed buttons now sit as a small row overlaid on the analyser's
+    top-left corner — clear of the clickable left scale column, of the
+    LUFS reference label and of the centred legend at every window
+    width. The controls that only affect the display live where the
+    display lives.
+  - **The sidebar's analyser section keeps only the show/hide toggle**,
+    and the freed rows (77 px of vertical space) now breathe into the
+    sidebar's block gaps — the left panel keeps its room for the
+    console workflow. The window's minimum height floor follows the
+    freed space (970 → 893 with the strip, 790 → 713 without).
+  - No behaviour change otherwise: the buttons are the same radio-group
+    TextButtons as before, the persisted state is the same (`tiltDb`,
+    `specTau`, saved with the session — any legacy value still snaps to
+    a button), the help mode documents them as before, and the analyser
+    measurement chain is untouched.
 
 - **2.51.1**
   - **Hotfix: crash of Studio Pro (PreSonus/Fender) 8.1.2 at session
