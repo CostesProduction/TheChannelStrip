@@ -592,6 +592,16 @@ private:
         TheChannelStripAudioProcessorEditor* owner = nullptr;
         void mouseDown (const juce::MouseEvent&) override;
     } logoMouseListener;
+
+    // v2.55.0 (roadmap C1): routes the TITLE's click to the internal
+    // Costes strip - Clement's chosen front door (no tenth console
+    // button). One click hosts the strip, another click clears it.
+    // Same MouseListener pattern as the logo: the label stays a label.
+    struct TitleMouseListener : public juce::MouseListener
+    {
+        TheChannelStripAudioProcessorEditor* owner = nullptr;
+        void mouseDown (const juce::MouseEvent&) override;
+    } titleMouseListener;
     // ---- v2.26 (roadmap point 4): named presets, sidebar section ----
     // (re)populate the preset combo box from the files on disk
     void refreshPresetList();
@@ -703,6 +713,11 @@ private:
     // v2.16.1: last latency value logged to the Terminal (change logging
     // happens on the message thread, never in processBlock).
     int lastLoggedLatency = -1;
+
+    // v2.55.0: the title's colour flips to the orange accent while the
+    // internal Costes strip is hosted; cached so the timer only touches
+    // the label on an actual change.
+    bool titleStripActiveLast = false;
 
     // v2.24 (point 7): cached colour of the status line (red on ERROR:,
     // amber on WARNING:, grey otherwise) - the label is only touched when

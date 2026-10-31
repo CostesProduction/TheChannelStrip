@@ -1907,6 +1907,11 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     titleLabel.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
     titleLabel.setJustificationType (juce::Justification::centred);
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
+    // v2.55.0 (roadmap C1): the title is the internal Costes strip's
+    // front door - same MouseListener pattern as the logo.
+    titleMouseListener.owner = this;
+    titleLabel.addMouseListener (&titleMouseListener, false);
+    titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     addAndMakeVisible (titleLabel);
 
     // v2.34.1: the readouts are back to full sidebar width (the logo
@@ -2018,6 +2023,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     helpTexts[&studioLogo] =
         "Click the logo for Clement's contact card - mixing & mastering "
         "engineer, with the mail and the website one click away.";
+
+    // v2.55.0 (roadmap C1): the title hosts the shell's OWN channel strip
+    // - the cream mini panel appears in the hosted-editor window, with
+    // trim in / low cut / high cut / trim out (the MVP; compression and
+    // saturation come with C2). One more click clears it.
+    helpTexts[&titleLabel] =
+        "Click the title to host the built-in Costes strip: trim in, "
+        "low cut, high cut, trim out. Click again to unhost it. Its "
+        "settings survive the toggle and the session, like a console's.";
 
     // v2.30: the "?" button no longer rides the logo band - it moved
     // to the presets button row (see the presets section below) and
@@ -2591,6 +2605,19 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     tryEmbedHostedEditor();
     refreshLufs();
 
+    // v2.55.0 (roadmap C1): the title flips to the orange accent while
+    // the internal Costes strip is hosted - cached so the label is only
+    // touched on an actual change.
+    const bool stripActive = proc.isCostesStripActive();
+
+    if (stripActive != titleStripActiveLast)
+    {
+        titleStripActiveLast = stripActive;
+        titleLabel.setColour (juce::Label::textColourId,
+                              stripActive ? juce::Colour (0xffe2a14f)
+                                          : juce::Colour (0xffffffff));
+    }
+
     // v2.27: keep the preset combo box in step with the hosted console
     // - its current preset's name, and the "*" that appears the
     // moment a knob moves. The drain moves the (lock-free) knob-move
@@ -2713,6 +2740,11 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
     }
 
     // v2.3: the sidebar shows the hosted console's name under the buttons.
+    // v2.55.0: the internal Costes strip has no slot button, but it is a
+    // hosted plugin like any console - it gets the same name line.
+    if (activeName.isEmpty() && proc.isCostesStripActive())
+        activeName = "Costes Strip";
+
     hostedNameLabel.setText (activeName.isEmpty() ? juce::String ("--") : activeName,
                              juce::dontSendNotification);
 }
@@ -3641,6 +3673,17 @@ void TheChannelStripAudioProcessorEditor::LogoMouseListener::mouseDown (
         owner->showContactCard();
 }
 
+// v2.55.0 (roadmap C1): the title's click - the internal Costes strip's
+// front door. The toggle lives on the processor side so the leave-behind
+// rules of the consoles (per-ident settings memory, preset "*" fold)
+// apply unchanged.
+void TheChannelStripAudioProcessorEditor::TitleMouseListener::mouseDown (
+    const juce::MouseEvent&)
+{
+    if (owner != nullptr)
+        owner->proc.toggleCostesStrip();
+}
+
 // ---------------------------------------------------------------------------
 // v2.40.0: the editor's destructor lives HERE now (it used to sit right
 // after the constructor): the contact card's desktop window is defined
@@ -3677,6 +3720,7 @@ TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
     }
     // v2.33: the Doctor listener must go before the members fall apart.
     studioLogo.removeMouseListener (&logoMouseListener);
+    titleLabel.removeMouseListener (&titleMouseListener);
     embeddedHostedEditor.reset(); // detach the hosted editor before anything else
     hostedViewport.setViewedComponent (nullptr, false);
 }

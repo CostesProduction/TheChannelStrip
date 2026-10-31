@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.54.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.55.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,24 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.55.0**
+  - **Roadmap C1: the Costes channel strip.** The shell now carries its
+    OWN strip — trim in, a 12 dB/oct low cut, a 12 dB/oct high cut and
+    trim out — compiled into the plugin and hosted on the very same
+    hosting path as the consoles, so it inherits the click-free 50 ms
+    crossfade, the per-ident settings memory, the preset tracking, the
+    session save/restore and the parameter relay without a single new
+    wire. Two RBJ biquads per channel with per-block coefficient
+    refresh and per-sample smoothed trims; no allocation ever happens
+    on the audio thread.
+  - **The title is the front door.** Click **THE CHANNEL STRIP** title
+    to host the built-in strip; click again to unhost it. The title
+    flips to the orange accent while the strip is active. No tenth
+    console button — the nine-slot row stays exactly as it is.
+  - **The cream mini panel.** The strip's editor is a cream SSL-style
+    module embedded through the standard hosted-editor window: four
+    knobs (TRIM IN, LOW CUT, HIGH CUT, TRIM OUT) under the
+    COSTES CHANNEL STRIP name plate.
 - **2.54.0**
   - **Roadmap point A: the "EQ @ max" machinery is retired.** The
     5-second and 2-second sliding maxima that the v2.48 blend read as

@@ -152,6 +152,7 @@
 
 #include "../src/PluginProcessor.h"
 #include "../src/PluginEditor.h"   // v2.19: SpectrumPanel readout statics
+#include "../src/CostesStrip.h"    // v2.55.0: the internal strip's API
 
 // The plugin entry point is defined in PluginProcessor.cpp but not declared
 // in any header (the wrapper targets pick it up from
@@ -4490,6 +4491,238 @@ void testRelayThreadSafety()
                 "no console is hosted after the final clear");
 }
 
+// ---------------------------------------------------------------------------
+// v2.55.0 (roadmap C1): the internal Costes strip. It is hosted on the very
+// same HostedStrip as the consoles, so the checks mirror the console tests:
+// host/unhost through the title's toggle, ident, relay, latency, the audio
+// response of the MVP path (trim in / low cut / high cut / trim out), the
+// per-ident knob memory, and the full session roundtrip on a FRESH
+// processor (the maybeRestoreHosted branch that re-hosts the internal strip
+// without going through the KnownPluginList).
+// ---------------------------------------------------------------------------
+
+void testCostesStripBasics()
+{
+    beginTest ("v2.55.0: the Costes strip - title-toggle host/unhost, ident, memory");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    expectTrue (proc.getCurrentPluginIdent().isEmpty(),
+                "a fresh shell hosts nothing");
+    expectTrue (! proc.isCostesStripActive(),
+                "a fresh shell does not report the internal strip");
+
+    proc.toggleCostesStrip();
+
+    auto* hosted = proc.getHostedStrip().getActivePlugin();
+    expectTrue (hosted != nullptr, "the toggle hosts the internal strip");
+    expectTrue (hosted != nullptr && hosted->getName() == "Costes Strip",
+                "the hosted plugin is the Costes strip");
+    expectTrue (proc.getCurrentPluginIdent() == CostesStrip::shellIdent(),
+                "the internal ident is published");
+    expectTrue (proc.isCostesStripActive(),
+                "the shell reports the internal strip as active");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 4,
+                "the strip's four parameters are relayed");
+    expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
+                "the strip reports zero latency");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 4,
+                "the strip exposes exactly four parameters");
+
+    // the parked defaults (trims at 0 dB, cuts at 20 Hz / 20 kHz) are unity:
+    // run past the 50 ms crossfade, then compare one processed block with
+    // its own reference
+    {
+        juce::AudioBuffer<float> block (2, 512);
+        juce::AudioBuffer<float> reference;
+        SineSource src (1000.0, 48000.0, 0.5f);
+
+        for (int i = 0; i < 12; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        reference.makeCopyOf (block);
+        proc.processBlock (block, noMidi);
+
+        double refPeak = 0.0, outPeak = 0.0;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < block.getNumSamples(); ++i)
+            {
+                refPeak = juce::jmax (refPeak, (double) std::abs (reference.getSample (ch, i)));
+                outPeak = juce::jmax (outPeak, (double) std::abs (block.getSample (ch, i)));
+            }
+
+        expectNear (juce::Decibels::gainToDecibels (outPeak / refPeak), 0.0, 0.5,
+                    "the parked defaults are unity at 1 kHz");
+    }
+
+    // the per-ident memory: a moved knob survives the unhost/rehost cycle,
+    // exactly like a deselected console keeps its settings
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the hosted strip is reachable as a CostesStrip");
+
+    if (strip != nullptr)
+    {
+        strip->getApvts().getParameterAsValue ("trimInDb").setValue (-6.0f);
+
+        proc.toggleCostesStrip(); // off: remembers the strip's state
+        expectTrue (proc.getHostedStrip().getActivePlugin() == nullptr,
+                    "the second toggle clears the slot");
+        expectTrue (! proc.isCostesStripActive(),
+                    "the shell does not report the strip after the clear");
+
+        proc.toggleCostesStrip(); // on again: the remembered state applies
+
+        auto* rehosted = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+        expectTrue (rehosted != nullptr, "the strip is rehosted after the toggle cycle");
+
+        if (rehosted != nullptr)
+            expectNear (rehosted->getApvts().getRawParameterValue ("trimInDb")->load(),
+                        -6.0, 0.01,
+                        "the knob memory survives the toggle cycle");
+    }
+}
+
+void testCostesStripAudio()
+{
+    beginTest ("v2.55.0: the Costes strip audio - trims, cuts, flat midband");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    // steady-state peak of a fresh block after ~256 ms of settling (the
+    // 50 ms crossfade plus the 20 ms trim smoothers plus the biquad rings)
+    auto measurePeak = [&proc, &noMidi] (double frequencyHz) -> double
+    {
+        SineSource src (frequencyHz, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 512);
+
+        for (int i = 0; i < 24; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double peak = 0.0;
+
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < block.getNumSamples(); ++i)
+                peak = juce::jmax (peak, (double) std::abs (block.getSample (ch, i)));
+
+        return peak;
+    };
+
+    const double unity1k = measurePeak (1000.0);
+
+    // trim in: +6 dB, then back to unity for the rest of the test
+    strip->getApvts().getParameterAsValue ("trimInDb").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (1000.0) / unity1k), 6.0, 0.3,
+                "trim in +6 dB reads +6 dB");
+    strip->getApvts().getParameterAsValue ("trimInDb").setValue (0.0f);
+
+    // trim out: -6 dB, then back to unity
+    strip->getApvts().getParameterAsValue ("trimOutDb").setValue (-6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (1000.0) / unity1k), -6.0, 0.3,
+                "trim out -6 dB reads -6 dB");
+    strip->getApvts().getParameterAsValue ("trimOutDb").setValue (0.0f);
+
+    // low cut parked at 20 Hz is flat at 60 Hz; cutting at 500 Hz puts the
+    // 60 Hz tone more than 3 octaves down the 12 dB/oct slope
+    const double flat60 = measurePeak (60.0);
+    strip->getApvts().getParameterAsValue ("lowCutHz").setValue (500.0f);
+    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -24.0,
+                "the 500 Hz low cut attenuates 60 Hz by at least 24 dB");
+    strip->getApvts().getParameterAsValue ("lowCutHz").setValue (20.0f);
+
+    // high cut parked at 20 kHz is flat at 16 kHz; cutting at 2 kHz puts
+    // the 16 kHz tone 3 octaves down the slope
+    const double flat16k = measurePeak (16000.0);
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (2000.0f);
+    expectTrue (juce::Decibels::gainToDecibels (measurePeak (16000.0) / flat16k) <= -24.0,
+                "the 2 kHz high cut attenuates 16 kHz by at least 24 dB");
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (20000.0f);
+
+    // flat midband: 125 Hz and 8 kHz within 1 dB of the 1 kHz reference
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (125.0) / unity1k), 0.0, 1.0,
+                "the midband is flat at 125 Hz");
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (8000.0) / unity1k), 0.0, 1.0,
+                "the midband is flat at 8 kHz");
+}
+
+void testCostesStripSession()
+{
+    beginTest ("v2.55.0: the Costes strip survives the session roundtrip");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted before the save");
+
+    if (strip == nullptr)
+        return;
+
+    // a recognisable knob position on every parameter
+    strip->getApvts().getParameterAsValue ("trimInDb").setValue (4.5f);
+    strip->getApvts().getParameterAsValue ("lowCutHz").setValue (120.0f);
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (8000.0f);
+    strip->getApvts().getParameterAsValue ("trimOutDb").setValue (-3.0f);
+
+    juce::MemoryBlock state;
+    proc.getStateInformation (state);
+    expectTrue (state.getSize() > 0, "the session state is non-empty");
+
+    // a FRESH processor, nothing hosted: the restore must re-host the
+    // internal strip through the maybeRestoreHosted branch (no
+    // KnownPluginList entry exists for it) and land every knob
+    TheChannelStripAudioProcessor restored;
+    restored.prepareToPlay (48000.0, 512);
+    restored.setStateInformation (state.getData(), (int) state.getSize());
+
+    expectTrue (restored.isCostesStripActive(),
+                "the restore re-hosts the internal strip");
+
+    auto* rehosted = dynamic_cast<CostesStrip*> (restored.getHostedStrip().getActivePlugin());
+    expectTrue (rehosted != nullptr, "the restored strip is reachable");
+
+    if (rehosted != nullptr)
+    {
+        expectNear (rehosted->getApvts().getRawParameterValue ("trimInDb")->load(), 4.5, 0.01,
+                    "trim in restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("lowCutHz")->load(), 120.0, 0.1,
+                    "low cut restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("highCutHz")->load(), 8000.0, 0.1,
+                    "high cut restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("trimOutDb")->load(), -3.0, 0.01,
+                    "trim out restores");
+    }
+
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 4,
+                "the restored strip's four parameters are relayed");
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -4626,6 +4859,11 @@ int main (int argc, char* argv[])
     testSupersededInstantiationGuard();
     testDuplicateRestoreSkip();
     testRelayThreadSafety();
+
+    // v2.55.0 (roadmap C1): the internal Costes strip
+    testCostesStripBasics();
+    testCostesStripAudio();
+    testCostesStripSession();
 
     if (integration)
         testIntegrationRealConsole();

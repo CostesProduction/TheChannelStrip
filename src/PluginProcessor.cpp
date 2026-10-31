@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "CostesStrip.h"
 #include <algorithm>
 #include <cstdlib>
 
@@ -858,6 +859,69 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
     }
 
     hostedStrip.clearPlugin();
+}
+
+// ---------------------------------------------------------------------------
+// v2.55.0 (roadmap C1): the internal Costes channel strip. It is hosted on
+// the very same HostedStrip as the consoles, so the crossfade, the per-ident
+// settings memory, the preset tracking, the session save/restore and the
+// parameter relay all apply to it unchanged. The only differences from a
+// console: there is no description to instantiate from (the strip is already
+// in the binary) and no gain-reduction interface to forward.
+// ---------------------------------------------------------------------------
+
+juce::String TheChannelStripAudioProcessor::costesIdent()
+{
+    // same "Format|Path|Name" shape as a scanned console's ident; the
+    // Name part must match CostesStrip::getName() (the preset loader's
+    // "hosted right now" path compares the two).
+    return CostesStrip::shellIdent();
+}
+
+bool TheChannelStripAudioProcessor::isCostesStripActive() const
+{
+    return getCurrentPluginIdent() == costesIdent();
+}
+
+void TheChannelStripAudioProcessor::toggleCostesStrip()
+{
+    if (isCostesStripActive())
+    {
+        // leaving the strip: keep its knobs in the per-ident memory so
+        // coming back restores them, exactly like a real console being
+        // deselected (the title is the strip's front door, but the
+        // leave-behind rules of the consoles still apply).
+        rememberCurrentConsoleState();
+        flushPresetDirtyIntoCurrentConsole();
+        clearHostedPlugin();
+
+        logHostStatus ("Costes strip off - the console slot is empty.");
+        return;
+    }
+
+    selectCostesStrip();
+}
+
+void TheChannelStripAudioProcessor::selectCostesStrip()
+{
+    // v2.51.1 discipline: ONE hosting change at a time. The console path
+    // launches a background thread that takes this same lock; the
+    // internal strip is built synchronously here (nothing slow happens -
+    // no plugin file to load), so the lock is held only for the swap.
+    const juce::ScopedLock instantiateLocker (instantiateGuard);
+
+    // v2.11: keep the console being left exactly as it is; v2.27: fold
+    // any pending knob-move flag into it before the ident changes.
+    rememberCurrentConsoleState();
+    flushPresetDirtyIntoCurrentConsole();
+
+    // v2.15.5: stop forwarding gain reduction BEFORE the swap - the
+    // internal strip exposes none, and the consoles' forwarder must
+    // not survive into it.
+    grForwarder.disconnect();
+
+    logHostStatus ("Instantiating 'Costes Strip'...");
+    instantiateCostesStrip (false);
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,74 +2140,85 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
     // console, right now. Ident-checked so a stale request can never
     // land on the wrong console; consumed exactly once, and it becomes
     // the console's remembered state too.
+    // v2.55.0: the body lives in applyRememberedOrQueuedState now -
+    // the internal Costes strip applies exactly the same rules.
     if (! applyPendingState)
+        applyRememberedOrQueuedState (targetIdent);
+}
+
+// v2.55.0 (roadmap C1): the settings-memory / queued-preset tail, factored
+// out of instantiateHosted unchanged so the internal Costes strip's path
+// applies the very same rules. Runs right after a swap, with the freshly
+// hosted plugin active and the ident stable (the caller holds the
+// instantiate lock and has published the ident).
+void TheChannelStripAudioProcessor::applyRememberedOrQueuedState (
+    const juce::String& targetIdent)
+{
+    if (auto* active = hostedStrip.getActivePlugin())
     {
-        if (auto* active = hostedStrip.getActivePlugin())
+        juce::MemoryBlock presetToApply;
+        juce::String presetNameToApply; // v2.27
+        juce::String presetFileToApply; // v2.30
+        bool presetMatches = false;
+
         {
-            juce::MemoryBlock presetToApply;
-            juce::String presetNameToApply; // v2.27
-            juce::String presetFileToApply; // v2.30
-            bool presetMatches = false;
+            const juce::ScopedLock lock (consoleStateLock);
+
+            if (pendingPresetState.getSize() > 0
+                && pendingPresetIdent == targetIdent)
+            {
+                presetToApply = pendingPresetState;
+                presetNameToApply = pendingPresetName; // v2.27
+                presetFileToApply = pendingPresetFile; // v2.30
+                presetMatches = true;
+
+                pendingPresetState.reset();
+                pendingPresetIdent = juce::String();
+                pendingPresetName = juce::String();
+                pendingPresetFile = juce::String();
+            }
+        }
+
+        if (presetMatches)
+        {
+            {
+                const HostedStatePushGuard guard (suppressPresetDirty);
+                active->setStateInformation (presetToApply.getData(),
+                                            (int) presetToApply.getSize());
+                presetDirtyPending.store (false, std::memory_order_relaxed);
+            }
+
+            const juce::ScopedLock lock (consoleStateLock);
+            consoleStates[targetIdent] = presetToApply;
+
+            // v2.27: the queued preset is now this console's
+            // current one, unmodified by definition. v2.30: its
+            // exact file is remembered with it.
+            consolePresetNames[targetIdent] = presetNameToApply;
+            consolePresetModified[targetIdent] = false;
+            consolePresetFiles[targetIdent] = presetFileToApply;
+        }
+        else
+        {
+            juce::MemoryBlock remembered;
 
             {
                 const juce::ScopedLock lock (consoleStateLock);
+                const auto it = consoleStates.find (targetIdent);
 
-                if (pendingPresetState.getSize() > 0
-                    && pendingPresetIdent == targetIdent)
-                {
-                    presetToApply = pendingPresetState;
-                    presetNameToApply = pendingPresetName; // v2.27
-                    presetFileToApply = pendingPresetFile; // v2.30
-                    presetMatches = true;
-
-                    pendingPresetState.reset();
-                    pendingPresetIdent = juce::String();
-                    pendingPresetName = juce::String();
-                    pendingPresetFile = juce::String();
-                }
+                if (it != consoleStates.end())
+                    remembered = it->second;
             }
 
-            if (presetMatches)
+            if (remembered.getSize() > 0)
             {
-                {
-                    const HostedStatePushGuard guard (suppressPresetDirty);
-                    active->setStateInformation (presetToApply.getData(),
-                                                (int) presetToApply.getSize());
-                    presetDirtyPending.store (false, std::memory_order_relaxed);
-                }
-
-                const juce::ScopedLock lock (consoleStateLock);
-                consoleStates[targetIdent] = presetToApply;
-
-                // v2.27: the queued preset is now this console's
-                // current one, unmodified by definition. v2.30: its
-                // exact file is remembered with it.
-                consolePresetNames[targetIdent] = presetNameToApply;
-                consolePresetModified[targetIdent] = false;
-                consolePresetFiles[targetIdent] = presetFileToApply;
-            }
-            else
-            {
-                juce::MemoryBlock remembered;
-
-                {
-                    const juce::ScopedLock lock (consoleStateLock);
-                    const auto it = consoleStates.find (targetIdent);
-
-                    if (it != consoleStates.end())
-                        remembered = it->second;
-                }
-
-                if (remembered.getSize() > 0)
-                {
-                    // v2.27: the remembered state is a shell push too
-                    // (switching back to a console whose state came
-                    // from a preset must not raise "*").
-                    const HostedStatePushGuard guard (suppressPresetDirty);
-                    active->setStateInformation (remembered.getData(),
-                                                 (int) remembered.getSize());
-                    presetDirtyPending.store (false, std::memory_order_relaxed);
-                }
+                // v2.27: the remembered state is a shell push too
+                // (switching back to a console whose state came
+                // from a preset must not raise "*").
+                const HostedStatePushGuard guard (suppressPresetDirty);
+                active->setStateInformation (remembered.getData(),
+                                             (int) remembered.getSize());
+                presetDirtyPending.store (false, std::memory_order_relaxed);
             }
         }
     }
@@ -2157,6 +2232,17 @@ void TheChannelStripAudioProcessor::maybeRestoreHosted()
 
     if (! pendingRestore.load (std::memory_order_relaxed) || ident.isEmpty())
         return;
+
+    // v2.55.0: the internal Costes strip never appears in the
+    // KnownPluginList (there is no file to scan), so the description
+    // lookup below would silently wait forever for a scan that can
+    // never find it. Its ident is recognised here and hosted directly,
+    // with the pending session blob applied.
+    if (ident == costesIdent())
+    {
+        instantiateCostesStrip (true);
+        return;
+    }
 
     juce::PluginDescription desc;
     {
@@ -2177,6 +2263,101 @@ void TheChannelStripAudioProcessor::maybeRestoreHosted()
         return; // plugin not scanned yet: retry after the next scan
 
     instantiateHosted (desc, true);
+}
+
+// v2.55.0 (roadmap C1): hosts the internal Costes strip. The console path
+// (instantiateHosted) builds an instance from a scanned description on a
+// background thread; here there is nothing to load, so the strip is built
+// and swapped in synchronously on the CALLER's thread, under the same
+// instantiateGuard (selectCostesStrip on the message thread, the session
+// restore's maybeRestoreHosted during setStateInformation). The v2.51.1
+// superseded checkpoints are not needed: the guard is already held for the
+// whole body, so no other hosting path can interleave.
+void TheChannelStripAudioProcessor::instantiateCostesStrip (bool applyPendingState)
+{
+    const juce::String targetIdent = costesIdent();
+
+    // v2.51.1 duplicate-restore rule, verbatim: a restore with nothing
+    // left to apply while a console is already hosted is the launch-time
+    // duplicate (the editor's selection and the session restore
+    // converging on the same target).
+    if (applyPendingState && savedHostedStateForRestore.getSize() == 0
+        && hostedStrip.getActivePlugin() != nullptr)
+    {
+        pendingRestore.store (false, std::memory_order_relaxed);
+        return;
+    }
+
+    // the ident is published BEFORE the build, like selectConsole's
+    // launch - a concurrent console selection wins over this request.
+    setCurrentPluginIdent (targetIdent);
+
+    auto plugin = std::make_unique<CostesStrip>();
+
+    // v2.14: match the fresh instance to the track's current format -
+    // native mono on a mono track (the strip accepts it), the proven
+    // stereo layout otherwise.
+    bool mono = false;
+
+    if (getTotalNumInputChannels() == 1)
+        mono = tryApplyMonoLayout (*plugin);
+
+    if (! mono)
+        restoreStereoLayout (*plugin);
+
+    hostedMonoMode.store (mono, std::memory_order_relaxed);
+
+    hostedStrip.setPlugin (std::move (plugin)); // prepares + crossfades
+
+    // v2.51.1: clearHostedPlugin can run on the message thread at any
+    // moment - never dereference the active slot without a null check.
+    auto* active = hostedStrip.getActivePlugin();
+
+    if (active == nullptr)
+        return;
+
+    // v2.27: watch the strip's parameters so a knob move can flag its
+    // current preset as modified ("*"), exactly like a console's.
+    for (auto* p : active->getParameters())
+        p->addListener (this);
+
+    juce::String message = "Hosted 'Costes Strip' ready (latency "
+                          + juce::String (active->getLatencySamples())
+                          + " samples, " + juce::String ((int) active->getParameters().size())
+                          + " parameters"
+                          + (mono ? ", native mono layout" : "") + ").";
+    logHostStatus (message);
+
+    // the internal strip is not an AudioPluginInstance: there is no
+    // PreSonus::IGainReductionInfo to forward, nothing to connect.
+
+    // the session-restore branch of instantiateHosted, verbatim: the
+    // pending blob is applied under the HostedStatePushGuard (it is
+    // ours, not the user's - it must not raise "*"), and it becomes
+    // the strip's remembered state.
+    if (applyPendingState && ! savedHostedStateForRestore.isEmpty())
+    {
+        if (auto* restored = hostedStrip.getActivePlugin())
+        {
+            const HostedStatePushGuard guard (suppressPresetDirty);
+            restored->setStateInformation (savedHostedStateForRestore.getData(),
+                                          (int) savedHostedStateForRestore.getSize());
+            presetDirtyPending.store (false, std::memory_order_relaxed);
+
+            const juce::ScopedLock lock (consoleStateLock);
+            consoleStates[targetIdent] = savedHostedStateForRestore;
+        }
+
+        savedHostedStateForRestore.reset();
+        pendingRestore.store (false, std::memory_order_relaxed);
+    }
+
+    // v2.11 + v2.26: the per-ident settings memory and the queued
+    // preset, the same rules as a console (the caller's applyPendingState
+    // is false for a hand selection, true for a session restore - the
+    // session is authoritative and must not be overridden).
+    if (! applyPendingState)
+        applyRememberedOrQueuedState (targetIdent);
 }
 
 void TheChannelStripAudioProcessor::setCurrentPluginIdent (const juce::String& ident)
@@ -2371,7 +2552,10 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
                 break;
             }
 
-        if (! isConsole)
+        // v2.55.0: the internal Costes strip is hostable too. It is not
+        // in consoleNames, so its ident is recognised explicitly; any
+        // other legacy name keeps the polite ignore below.
+        if (! isConsole && getCurrentPluginIdent() != costesIdent())
         {
             logHostStatus ("Ignoring saved hosted plugin '" + savedName
                            + "': v2 hosts the supported bx_console models only.");

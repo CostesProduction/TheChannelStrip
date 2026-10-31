@@ -142,6 +142,16 @@ public:
     void selectConsole (int consoleIndex);
     void clearHostedPlugin();
 
+    // ---- v2.55.0 (roadmap C1): the internal Costes channel strip ----
+    // A small AudioProcessor compiled into the shell, hosted on the very
+    // same HostedStrip as the consoles - it inherits the click-free
+    // crossfade, the per-ident settings memory and the session paths
+    // without a single new wire. The shell's title is its front door:
+    // one click hosts it, another click clears it (Clement's choice -
+    // no tenth console button).
+    void toggleCostesStrip();
+    bool isCostesStripActive() const;
+
     // ---- v2.26 (roadmap point 4): named presets ----
     // A preset is the HOSTED CONSOLE'S OWN STATE (its knobs), saved on
     // disk as one file per preset in the Presets folder next to the
@@ -395,6 +405,25 @@ private:
 
     void instantiateHosted (const juce::PluginDescription& desc, bool applyPendingState);
     void maybeRestoreHosted();
+
+    // v2.55.0 (roadmap C1): the internal strip's hosting path. It never
+    // goes through the KnownPluginList (there is no file to scan), so it
+    // gets its own synchronous instantiate that build+swap on the caller's
+    // thread under the same instantiateGuard. selectCostesStrip publishes
+    // the ident; the session restore (maybeRestoreHosted) recognises the
+    // ident and comes here with applyPendingState = true.
+    static juce::String costesIdent();
+    void instantiateCostesStrip (bool applyPendingState);
+
+    // v2.55.0: the per-ident settings memory + queued-preset tail of
+    // instantiateHosted, factored out so the internal strip's path
+    // applies exactly the same rules (ident-checked pending preset
+    // first, remembered state second, HostedStatePushGuard around the
+    // push so coming back cannot raise the preset's "*").
+    void applyRememberedOrQueuedState (const juce::String& targetIdent);
+
+    void selectCostesStrip();
+
     // v2.51.1: identGuard-guarded write (see the member declaration).
     void setCurrentPluginIdent (const juce::String& ident);
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.54.0 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.55.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,7 +46,8 @@ target_sources(TheChannelStrip PRIVATE
     src/LufsMeter.cpp
     src/SpectrumAnalyzer.cpp
     src/TransferAnalyzer.cpp
-    src/GRForwarder.cpp)
+    src/GRForwarder.cpp
+    src/CostesStrip.cpp)
 
 # v2.54.0: the project version is injected ONCE, here - every
 # target reads it through the TCS_VERSION macro, so the CMake version
@@ -91,7 +92,8 @@ target_sources(TcsTests PRIVATE
     src/LufsMeter.cpp
     src/SpectrumAnalyzer.cpp
     src/TransferAnalyzer.cpp
-    src/GRForwarder.cpp)
+    src/GRForwarder.cpp
+    src/CostesStrip.cpp)
 
 target_compile_definitions(TcsTests PRIVATE
     TCS_VERSION="${PROJECT_VERSION}"
