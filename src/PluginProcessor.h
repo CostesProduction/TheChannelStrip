@@ -6,6 +6,13 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "HostedStrip.h"
 #include "GRForwarder.h"
+
+// v2.54.0: the version string comes from the build system (CMakeLists
+// injects TCS_VERSION on every target). The fallback keeps the
+// processor compilable outside the CMake project.
+#ifndef TCS_VERSION
+#define TCS_VERSION "undefined"
+#endif
 #include "LufsMeter.h"
 #include "SpectrumAnalyzer.h"
 #include "TransferAnalyzer.h"

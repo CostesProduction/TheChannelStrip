@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.53.2 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.54.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -73,6 +73,14 @@
 //     pure-static ladders step one zoom per press and clamp at their
 //     ends, and the panel restores the saved zooms and mirrors the
 //     endpoints in its buttons' enabled states
+//   - v2.54 (roadmap point A): the torture batch - adversarial audio
+//     (full-scale DC, hard squares, one-sample transients, channel
+//     asymmetry, 22050 / 176400 Hz at 1 / 4096 frames, NaN input as a
+//     documented survival limit), state corner cases (hostile
+//     ATTRIBUTES in a valid container snap onto the ladders, 50
+//     rapid save / restore cycles are a byte-identical fixed point)
+//     and display stress (1000 analysis ticks over a sweep, a
+//     deterministic display-chaos sequence, degenerate panel sizes)
 //   - v2.51 scale ladder: legacy 10/6 and 4/2 dB/div session values
 //     are mapped to the new 15/12/9 and 8/6/4/2 ladders on load
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -133,6 +141,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <new>
 #include <thread>
@@ -1894,120 +1903,14 @@ void testEqLowcutCombRegression()
                 + " dB < 0.6; the v2.44-v2.49 comb measured ~2.3)");
 }
 
-// v2.46.0 (Clement's idea) -> v2.48.0 (a full member) -> v2.49.0 (off
-// the drawn curve, kept fully alive): the "EQ @ max"
-// machinery - dB MaxOut minus dB MaxIn over 5-second sliding maxima
-// of the SMOOTHED IN/OUT curves. For a linear console the max is
-// homogeneous (max (H*x) = H * max (x)) and the IN/OUT one-poles are
-// identical, so the difference is the EXACT transfer at the programme's
-// peak drive. In v2.48 this value was one of the two members of the
-// single EQ curve (mean with the 2 s window); since v2.49.0 the drawn
-// curve is the pure H1 member (Clement's A/B build), so the max
-// family is tested HERE ONLY, through its hooks - the ballistics
-// contract it must keep is unchanged and still under test: flat
-// 0 dB in passthrough, IMMEDIATE on a knob up (the max only moves up),
-// and HOLDING on a knob down (the old peak stays in the 5 s sliding
-// window).
-void testEqMaxHoldTrace()
-{
-    beginTest ("EQ @ max trace: exact, immediate up, holding down (v2.46)");
-
-    TheChannelStripAudioProcessor proc;
-    proc.prepareToPlay (48000.0, 512);
-    proc.setEditorOpen (true);
-
-    NoiseSource src (0.3f);
-    juce::AudioBuffer<float> block (2, 512);
-    juce::MidiBuffer noMidi;
-
-    auto mock = std::make_unique<MockConsole> (true);
-    MockConsole* mockPtr = mock.get();
-    proc.getHostedStrip().setPlugin (std::move (mock));
-
-    // v2.46.0 build 2 - the harness cadence lesson: the panel is driven
-    // at its REAL rate (a 30 Hz tick per ~3 audio blocks, as when the
-    // timer runs) while the audio streams. Feeding everything first and
-    // ticking afterwards leaves the analysers frozen on ONE raw frame,
-    // and the 5 s maxima then measure that single frame's per-band
-    // jitter (a few dB on noise) instead of the smoothed envelope the
-    // product computes - build 1's false 3.31 dB on this very
-    // assertion came from exactly that, not from the trace logic.
-    SpectrumPanel panel (proc);
-
-    auto drive = [&] (double seconds)
-    {
-        const int blocks = (int) (seconds * 48000.0 / 512.0);
-
-        for (int n = 0; n < blocks; ++n)
-        {
-            src.fill (block);
-            proc.processBlock (block, noMidi);
-
-            if (n % 3 == 0)
-                panel.runAnalysisTick();
-        }
-    };
-
-    // ~3 s of broadband passthrough (fills the 150-frame window with
-    // converged display values; the relative max gate wakes the band)
-    drive (3.0);
-
-    const TransferAnalyzer& ana = proc.getTransferAnalyzer();
-    auto coveringBin = [&ana] (double freq)
-    {
-        for (int b = 0; b < TransferAnalyzer::numScopeBins - 1; ++b)
-            if (ana.getBinFrequency (b) <= freq
-                && ana.getBinFrequency (b + 1) > freq)
-                return b;
-
-        return TransferAnalyzer::numScopeBins - 1;
-    };
-
-    const int bin500 = coveringBin (500.0);
-
-    // 1. the band really carried programme energy
-    expectTrue (panel.isEqMaxBinMeasured (bin500),
-                "the 500 Hz band is measured by the max trace");
-
-    // 2. passthrough: the max difference reads a flat 0 dB transfer
-    expectNear (panel.getEqMaxDbAtBin (bin500), 0.0, 1.5,
-                "the max-trace EQ reads flat 0 dB in passthrough (got "
-                + juce::String (panel.getEqMaxDbAtBin (bin500), 2) + " dB)");
-
-    // 3. knob UP (+6 dB): the max only ever moves up, so the trace
-    // reacts within ~1-2 s of display, not within an EMA settle -
-    // ~94 display ticks while the new level streams in
-    mockPtr->gain.store (2.0f);
-    drive (3.0);
-
-    expectNear (panel.getEqMaxDbAtBin (bin500), 6.0, 1.5,
-                "the max-trace EQ reacts immediately on a knob up (got "
-                + juce::String (panel.getEqMaxDbAtBin (bin500), 2)
-                + " dB, expected ~+6)");
-
-    // 4. knob DOWN: the +6 dB peak is still inside the 5 s sliding
-    // window, so the trace HOLDS its value - the documented cost
-    mockPtr->gain.store (1.0f);
-    drive (1.0);
-
-    for (int t = 0; t < 10; ++t)
-        panel.runAnalysisTick();
-
-    expectTrue (panel.getEqMaxDbAtBin (bin500) > 3.0f,
-                "the max-trace EQ holds the recent peak after a knob "
-                "down (got "
-                + juce::String (panel.getEqMaxDbAtBin (bin500), 2)
-                + " dB > +3)");
-}
 
 // v2.47.0 -> v2.49.0 (Clement's A/B call: "implémente seulement ta
 // méthode H1 optimisée, sans mon idée de Max Hold"): the
 // panel draws a SINGLE EQ curve, now the PURE optimised H1
 // cross-spectrum member - the same estimator, gates and display
 // chain the v2.48 blend read in its junk-fallback bands, with NO
-// max-hold members voting (the max windows are still computed and
-// keep their own trace test, but they no longer feed the drawn
-// curve). The contracts, exercised end to end with the REAL
+// max-hold members voting (the whole max family was retired in
+// v2.54 - roadmap point A - after never feeding the drawn curve). The contracts, exercised end to end with the REAL
 // production path at the real 30 Hz panel cadence (the build 2
 // lesson of v2.46: one tick per ~3 audio blocks, never
 // feed-then-tick):
@@ -2868,8 +2771,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.53.2",
-                "saved state carries the current version tag (2.53.2)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == TCS_VERSION,
+                "saved state carries the current version tag (" TCS_VERSION ")");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -3428,7 +3331,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.53.2"),
+    expectTrue (report.contains ("TheChannelStrip " TCS_VERSION),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -4003,6 +3906,470 @@ void testTortureHostileSessions()
 }
 
 // ---------------------------------------------------------------------------
+// v2.54.0 (roadmap point A): the display-side torture batch - three
+// new contracts that complete the v2.18 torture ideas (console storms,
+// rate churn and hostile sessions above). All of them run the REAL
+// production path with the editor open (measurement included):
+//
+//   1. adversarial AUDIO: full-scale DC (both polarities), hard
+//      squares, one-sample transients, channel asymmetry, the extreme
+//      rates / block sizes the churn test leaves out (22050 and
+//      176400 Hz, 1 and 4096 frames) and even NaN input. Nothing may
+//      crash, clean material must come out clean and bounded, and a
+//      releaseResources / prepareToPlay restart must reset the path.
+//      The NaN case is a DOCUMENTED LIMIT, not a bug: the measurement
+//      one-poles legitimately smear a NaN over their window, so the
+//      contract is survival plus a clean restart - never live
+//      decontamination;
+//   2. state corner cases: a perfectly valid XML container whose
+//      ATTRIBUTES are hostile (a bare element, empty strings, garbage
+//      / absurd / negative / fractional scale values) must keep the
+//      defaults or snap onto the ladders, and 50 rapid save / restore
+//      cycles must be a byte-identical fixed point;
+//   3. display stress: 1000 analysis ticks over an evolving sweep
+//      with every measured bin finite, a deterministic chaos sequence
+//      of display toggles interleaved with session save / loads whose
+//      final state is exactly the prescribed one, and degenerate
+//      panel sizes (0x0 and 10x10 must survive resized()).
+// ---------------------------------------------------------------------------
+void testTortureAdversarialAudio()
+{
+    beginTest ("torture: adversarial audio (DC, square, transients, NaN)");
+
+    auto allFinite = [] (const juce::AudioBuffer<float>& b)
+    {
+        for (int c = 0; c < b.getNumChannels(); ++c)
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                if (! std::isfinite (b.getSample (c, i)))
+                    return false;
+
+        return true;
+    };
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);   // the measurement path runs too
+
+    auto mock = std::make_unique<MockConsole> (false);   // gain 1: identity
+    auto* mockPtr = mock.get();
+    proc.getHostedStrip().setPlugin (std::move (mock));
+
+    juce::MidiBuffer noMidi;
+    juce::AudioBuffer<float> block (2, 512);
+
+    // 1) full-scale DC, both polarities: bounded, finite, at unity
+    for (const float dc : { 1.0f, -1.0f })
+    {
+        for (int n = 0; n < 200; ++n)   // ~2 s
+        {
+            for (int c = 0; c < block.getNumChannels(); ++c)
+                for (int i = 0; i < block.getNumSamples(); ++i)
+                    block.setSample (c, i, dc);
+
+            proc.processBlock (block, noMidi);
+        }
+
+        expectTrue (allFinite (block), "full-scale DC stays finite");
+        expectNear ((double) peakOf (block), std::abs ((double) dc), 0.01,
+                    "DC passes through at unity (no clipping, no fold)");
+    }
+
+    // 2) a hard full-scale square wave
+    for (int n = 0; n < 200; ++n)
+    {
+        for (int i = 0; i < block.getNumSamples(); ++i)
+        {
+            const float s = (((n * 512 + i) % 64) < 32) ? 1.0f : -1.0f;
+
+            block.setSample (0, i, s);
+            block.setSample (1, i, s);
+        }
+
+        proc.processBlock (block, noMidi);
+    }
+
+    expectTrue (allFinite (block), "the full-scale square stays finite");
+    expectTrue (peakOf (block) <= 1.0f, "the square never exceeds unity");
+    expectTrue (peakOf (block, 1) <= 1.0f, "channel 2 never exceeds unity");
+
+    // 3) silence right after the loud material: both the dry and the
+    //    hosted paths are linear in silence, so the output must be
+    //    exactly silent (whatever the crossfade state)
+    fillSilence (block);
+    proc.processBlock (block, noMidi);
+
+    expectTrue (peakOf (block) == 0.0f && peakOf (block, 1) == 0.0f,
+                "silence after loud material comes out exactly silent");
+
+    // 4) one-sample full-scale transients in silence
+    block.clear();
+
+    for (int burst = 0; burst < 16; ++burst)
+    {
+        for (int c = 0; c < 2; ++c)
+            block.setSample (c, burst * 31, (burst % 2 == 0) ? 1.0f : -1.0f);
+
+        proc.processBlock (block, noMidi);
+    }
+
+    expectTrue (allFinite (block), "one-sample transients stay finite");
+    expectTrue (peakOf (block) <= 1.0f, "transients never exceed unity");
+
+    // 5) asymmetric channels: a full-scale square on L, silence on R
+    for (int n = 0; n < 50; ++n)
+    {
+        for (int i = 0; i < block.getNumSamples(); ++i)
+        {
+            block.setSample (0, i, (((n * 512 + i) % 64) < 32) ? 1.0f : -1.0f);
+            block.setSample (1, i, 0.0f);
+        }
+
+        proc.processBlock (block, noMidi);
+    }
+
+    expectTrue (allFinite (block), "asymmetric material stays finite");
+    expectTrue (peakOf (block, 1) < 1e-9f, "the silent channel stays silent");
+    expectTrue (mockPtr->lastChannelCount.load() == 2,
+                "the console still sees a stereo buffer");
+
+    // 6) the extremes the churn test leaves out: 22050 and 176400 Hz
+    //    at block sizes 1 and 4096, square material
+    {
+        struct Leg { double rate; int blockSize; };
+        const Leg legs[] = { { 22050.0, 1 }, { 22050.0, 4096 },
+                             { 176400.0, 1 }, { 176400.0, 4096 } };
+
+        for (const auto& leg : legs)
+        {
+            proc.releaseResources();
+            proc.prepareToPlay (leg.rate, leg.blockSize);
+
+            juce::AudioBuffer<float> legBlock (2, leg.blockSize);
+            int phase = 0;
+
+            for (int n = 0; n < 64; ++n)
+            {
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < leg.blockSize; ++i)
+                        legBlock.setSample (c, i,
+                            ((phase++ % 64) < 32) ? 1.0f : -1.0f);
+
+                proc.processBlock (legBlock, noMidi);
+            }
+
+            const juce::String legName = juce::String (leg.rate, 0)
+                                              + " Hz / "
+                                              + juce::String (leg.blockSize)
+                                              + " frames";
+
+            expectTrue (allFinite (legBlock),
+                        "squares stay finite at " + legName);
+            expectTrue (peakOf (legBlock) <= 1.0f && peakOf (legBlock, 1) <= 1.0f,
+                        "output stays bounded at " + legName);
+        }
+    }
+
+    // 7) NaN input: a DOCUMENTED limit, not a bug. The measurement
+    //    one-poles legitimately smear the NaN, and the gain-correction
+    //    READOUT is never applied to the audio, so the only contract
+    //    is survival: no crash, the console keeps processing, and a
+    //    clean releaseResources / prepareToPlay restart resets the
+    //    audio path (the passthrough itself carries no state).
+    {
+        const float nanValue = std::numeric_limits<float>::quiet_NaN();
+
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < block.getNumSamples(); ++i)
+                block.setSample (c, i, nanValue);
+
+        const int callsBefore = mockPtr->processCallCount.load();
+
+        proc.processBlock (block, noMidi);
+        proc.processBlock (block, noMidi);
+
+        expectTrue (mockPtr->processCallCount.load() >= callsBefore + 2,
+                    "a NaN block flows through without crashing");
+
+        proc.releaseResources();
+        proc.prepareToPlay (48000.0, 512);
+
+        SineSource src (500.0, 48000.0, 0.4f);
+        processBlocks (proc, src, 100, block);
+
+        expectTrue (allFinite (block),
+                    "after a clean restart the output is finite again");
+        expectNear ((double) peakOf (block), 0.4, 0.02,
+                    "after a clean restart the signal is faithful again");
+    }
+}
+
+void testTortureStateCornerCases()
+{
+    beginTest ("torture: state corner cases (hostile attributes, fixed point)");
+
+    // a valid TCS container whose ATTRIBUTES are hostile: nullptr means
+    // the attribute is absent, an empty string means present-but-empty
+    auto loadScales = [] (const char* version, const char* ana, const char* eq)
+    {
+        auto session = std::make_unique<juce::XmlElement> ("TCS");
+
+        if (version != nullptr)
+            session->setAttribute ("version", version);
+        if (ana != nullptr)
+            session->setAttribute ("anaDbDiv", ana);
+        if (eq != nullptr)
+            session->setAttribute ("eqDbDiv", eq);
+
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (*session, block);
+
+        TheChannelStripAudioProcessor proc;
+        proc.setStateInformation (block.getData(), (int) block.getSize());
+
+        return std::pair (proc.getAnaDbDiv(), proc.getEqDbDiv());
+    };
+
+    // a bare <TCS/> element: every attribute missing, defaults intact
+    {
+        const auto s = loadScales (nullptr, nullptr, nullptr);
+
+        expectTrue (s.first == 12.0f && s.second == 4.0f,
+                    "a bare TCS element keeps the fresh scale defaults");
+    }
+
+    // empty-string attributes read as "not present" - defaults intact
+    {
+        const auto s = loadScales ("9.9.9", "", "");
+
+        expectTrue (s.first == 12.0f && s.second == 4.0f,
+                    "empty scale attributes keep the fresh defaults");
+    }
+
+    // a futuristic version is MODERN: no legacy remap, the ladder
+    // values load with their current meaning (the eq 4 = +/-12 case)
+    {
+        const auto s = loadScales ("9.9.9", "15", "4");
+
+        expectTrue (s.first == 15.0f && s.second == 4.0f,
+                    "a futuristic version keeps the modern scale meanings");
+    }
+
+    // absurd magnitudes snap onto the WIDE end of each ladder
+    {
+        const auto s = loadScales ("9.9.9", "99999", "99999");
+
+        expectTrue (s.first == 15.0f && s.second == 8.0f,
+                    "absurd scale values snap to the widest rungs");
+    }
+
+    // non-numeric strings parse to 0 and snap onto the NARROW end
+    {
+        const auto s = loadScales ("9.9.9", "abc", "abc");
+
+        expectTrue (s.first == 9.0f && s.second == 2.0f,
+                    "garbage scale strings snap to the narrow rungs");
+    }
+
+    // negative values behave like 0: the bottom rungs
+    {
+        const auto s = loadScales ("9.9.9", "-5", "-5");
+
+        expectTrue (s.first == 9.0f && s.second == 2.0f,
+                    "negative scale values snap to the bottom rungs");
+    }
+
+    // fractional off-ladder values snap by threshold, never crash
+    {
+        const auto s = loadScales ("9.9.9", "13.5", "2.6");
+
+        expectTrue (s.first == 15.0f && s.second == 2.0f,
+                    "fractional scales snap onto the ladder by threshold");
+    }
+
+    // 50 rapid save / restore cycles mid-playback: the loop must be a
+    // byte-identical fixed point (every save equals the first one) and
+    // the hosted console must keep processing throughout
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.setEditorOpen (true);
+
+        auto mock = std::make_unique<MockConsole> (false);
+        auto* mockPtr = mock.get();
+        proc.getHostedStrip().setPlugin (std::move (mock));
+
+        juce::AudioBuffer<float> block (2, 512);
+        SineSource src (500.0, 48000.0, 0.3f);
+        processBlocks (proc, src, 8, block);   // the crossfade settles
+
+        juce::MemoryBlock reference;
+        proc.getStateInformation (reference);
+
+        bool fixedPoint = true;
+
+        for (int n = 0; n < 50; ++n)
+        {
+            juce::MemoryBlock saved;
+            proc.getStateInformation (saved);
+            fixedPoint = fixedPoint && saved == reference;
+
+            proc.setStateInformation (saved.getData(), (int) saved.getSize());
+            processBlocks (proc, src, 2, block);
+        }
+
+        expectTrue (fixedPoint,
+                    "50 save / restore cycles are a byte-identical fixed point");
+        expectTrue (proc.getHostedStrip().getActivePlugin() != nullptr,
+                    "the hosted console survives the 50 cycles");
+        expectNear ((double) peakOf (block), 0.3, 0.02,
+                    "audio stays faithful through the 50 cycles");
+        // exactly 8 settling blocks + 50 x 2 cycle blocks = 108 calls:
+        // the console processed EVERY block, none was dropped
+        expectTrue (mockPtr->processCallCount.load() >= 108,
+                    "the console kept processing through the 50 cycles");
+    }
+}
+
+void testTortureDisplayStress()
+{
+    beginTest ("torture: 1000 analysis ticks, display chaos, degenerate sizes");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.setEditorOpen (true);
+
+    juce::MidiBuffer noMidi;
+    juce::AudioBuffer<float> block (2, 512);
+
+    SpectrumPanel panel (proc);
+
+    // 1) 1000 ticks over a full-range sweep (40 Hz - 20 kHz, the real
+    //    cadence of one tick per ~3 blocks): every measured EQ bin must
+    //    stay finite - no NaN, no drift
+    {
+        double phase = 0.0;
+        int measuredFinite = 0, measuredCount = 0;
+
+        for (int tick = 0; tick < 1000; ++tick)
+        {
+            const double freq = 40.0
+                * std::pow (2.0, 9.0 * (tick % 100) / 99.0);
+            const double omega = juce::MathConstants<double>::twoPi
+                                      * freq / 48000.0;
+
+            for (int n = 0; n < 3; ++n)
+            {
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < block.getNumSamples(); ++i)
+                        block.setSample (c, i,
+                            0.4f * (float) std::sin (phase + omega * i));
+
+                phase += omega * (double) block.getNumSamples();
+                proc.processBlock (block, noMidi);
+            }
+
+            panel.runAnalysisTick();
+        }
+
+        for (int b = 0; b < SpectrumAnalyzer::numScopeBins; ++b)
+        {
+            if (! panel.isEqBinMeasured (b))
+                continue;
+
+            ++measuredCount;
+
+            if (std::isfinite (panel.getEqDbAtBin (b)))
+                ++measuredFinite;
+        }
+
+        expectTrue (measuredCount > 0,
+                    "the sweep left measured EQ bins behind");
+        expectTrue (measuredFinite == measuredCount,
+                    "every measured EQ bin is finite after 1000 ticks");
+    }
+
+    // 2) a deterministic chaos sequence: display toggles and session
+    //    save / loads interleaved with audio - no crash, both scales
+    //    must stay ON their ladders, and the pinned pre-chaos session
+    //    must restore exactly
+    {
+        juce::MemoryBlock pinned;
+        proc.getStateInformation (pinned);   // the pre-chaos defaults
+
+        SineSource src (500.0, 48000.0, 0.3f);
+
+        for (int n = 0; n < 100; ++n)
+        {
+            proc.setAnalyserVisible (n % 3 == 0);
+            proc.setTiltDb ((n % 2 == 0) ? -3.0f : -6.0f);
+            proc.setAnaDbDiv ((n % 2 == 0)
+                                  ? SpectrumPanel::anaZoomOut (proc.getAnaDbDiv())
+                                  : SpectrumPanel::anaZoomIn (proc.getAnaDbDiv()));
+            proc.setEqDbDiv ((n % 3 == 0)
+                                 ? SpectrumPanel::eqZoomIn (proc.getEqDbDiv())
+                                 : SpectrumPanel::eqZoomOut (proc.getEqDbDiv()));
+            proc.setLufsTarget ((n % 4 == 0) ? -14.0f : -23.0f);
+
+            if (n % 10 == 0)
+            {
+                juce::MemoryBlock blob;
+                proc.getStateInformation (blob);
+                proc.setStateInformation (blob.getData(), (int) blob.getSize());
+            }
+
+            for (int k = 0; k < 3; ++k)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            panel.runAnalysisTick();
+        }
+
+        const float ana = proc.getAnaDbDiv();
+        const float eq = proc.getEqDbDiv();
+
+        expectTrue ((ana == 15.0f || ana == 12.0f || ana == 9.0f)
+                        && (eq == 8.0f || eq == 6.0f || eq == 4.0f || eq == 2.0f),
+                    "the chaos kept both scales on their ladders");
+
+        proc.setStateInformation (pinned.getData(), (int) pinned.getSize());
+
+        expectTrue (proc.getAnalyserVisible(),
+                    "the pre-chaos session restores the visible flag");
+        expectNear (proc.getTiltDb(), -4.5, 0.001,
+                    "the pre-chaos session restores the tilt");
+        expectNear (proc.getAnaDbDiv(), 12.0, 0.001,
+                    "the pre-chaos session restores the spectrum zoom");
+        expectNear (proc.getEqDbDiv(), 4.0, 0.001,
+                    "the pre-chaos session restores the EQ zoom");
+        expectNear ((double) proc.getLufsTarget(), -23.0, 0.001,
+                    "the pre-chaos session restores the LUFS reference");
+    }
+
+    // 3) degenerate sizes: resized() must survive zero and tiny bounds
+    //    (the +/- buttons land on negative coordinates - JUCE doesn't
+    //    care) and the panel must come back fully serviceable
+    {
+        panel.setSize (0, 0);
+        panel.runAnalysisTick();
+
+        panel.setSize (10, 10);
+        panel.runAnalysisTick();
+
+        panel.setSize (860, 180);
+        panel.runAnalysisTick();
+
+        expectTrue (panel.getWidth() == 860 && panel.getHeight() == 180,
+                    "the panel settles back on the real size");
+        expectNear (panel.getDbPerDiv(), 12.0, 0.001,
+                    "the panel's spectrum zoom survives the resize tour");
+        expectNear (panel.getEqDbPerDiv(), 4.0, 0.001,
+                    "the panel's EQ zoom survives the resize tour");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // v2.51.1 hotfix tests (the Studio Pro 8.1.2 crash). The abort was a
 // POINTER_BEING_FREED_WAS_NOT_ALLOCATED in operator delete from
 // instantiateHosted: two overlapping instantiation runs raced the
@@ -4212,7 +4579,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.53.2" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v" TCS_VERSION << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -4229,7 +4596,6 @@ int main (int argc, char* argv[])
     testEqUncorrelatedConsoleNoise();
     testEqCurveSmoothing();
     testEqLowcutCombRegression();
-    testEqMaxHoldTrace();
     testEqVeriteCurve();
     testConsoleSlotStatus();
     testPresetManager();
@@ -4252,6 +4618,9 @@ int main (int argc, char* argv[])
     testTortureConsoleSwapStorm();
     testTortureFormatAndRateChurn();
     testTortureHostileSessions();
+    testTortureAdversarialAudio();
+    testTortureStateCornerCases();
+    testTortureDisplayStress();
 
     // v2.51.1 hotfix (the Studio Pro crash): the guarded instantiation
     testSupersededInstantiationGuard();

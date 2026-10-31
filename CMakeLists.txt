@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.53.2 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.54.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,7 +48,11 @@ target_sources(TheChannelStrip PRIVATE
     src/TransferAnalyzer.cpp
     src/GRForwarder.cpp)
 
+# v2.54.0: the project version is injected ONCE, here - every
+# target reads it through the TCS_VERSION macro, so the CMake version
+# is the single source of truth (no more per-file literals to bump).
 target_compile_definitions(TheChannelStrip PUBLIC
+    TCS_VERSION="${PROJECT_VERSION}"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_MODAL_LOOPS_PERMITTED=0
@@ -90,6 +94,7 @@ target_sources(TcsTests PRIVATE
     src/GRForwarder.cpp)
 
 target_compile_definitions(TcsTests PRIVATE
+    TCS_VERSION="${PROJECT_VERSION}"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_MODAL_LOOPS_PERMITTED=0

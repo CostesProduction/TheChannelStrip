@@ -235,12 +235,9 @@ public:
     float getEqDbAtBin (int bin) const;
     bool isEqBinMeasured (int bin) const;
 
-    // v2.46 -> v2.49: the "EQ @ max" machinery still runs with its
-    // own gates - Clement's idea, kept fully alive and directly
-    // testable through these hooks - but since v2.49.0 it does NOT
-    // vote on the drawn curve (the pure-H1 A/B build).
-    float getEqMaxDbAtBin (int bin) const;
-    bool isEqMaxBinMeasured (int bin) const;
+    // v2.54 (roadmap point A): the v2.46-v2.48 "EQ @ max" hooks are
+    // GONE - the machinery was retired with its members (see the
+    // note below).
 
     // v2.41: forget every smoothed trace (curves, EQ diff, max-hold
     // ring). Called when the analyser strip is hidden so a re-show
@@ -347,10 +344,10 @@ private:
     // persistence and the relative input + coherence gates. The
     // light final one-pole (tau ~0.3 s) keeps the display continuous.
     //
-    // The max-hold members are still computed (their gates and
-    // harness hooks intact, their trace test unchanged) but they no
-    // longer vote on this curve - going back to the blend family is
-    // a one-block change in updateBallistics. Honest trade, for the
+    // v2.54 (roadmap point A): the max-hold members were retired
+    // with their whole machinery (see the note near maxHoldFrames);
+    // if the blend family must ever come back, git reverts v2.54.
+    // Honest trade, for the
     // A/B: a knob DOWN now converges down in ~1 s (no max to hold
     // it), junk is rejected everywhere by construction (no
     // raw-coherence routing), and on a saturating console the H1
@@ -384,74 +381,15 @@ private:
     int maxRingIndex = 0;
 
     // -----------------------------------------------------------------
-    // v2.46.0 (Clement's idea) -> v2.49.0: the "EQ @
-    // max" machinery - dB MaxOut - dB MaxIn, computed from sliding
-    // maxima of the smoothed IN and OUT curves. The LONG window (5 s,
-    // 150 frames at 30 Hz) is the v2.46 trace, kept one frame shorter
-    // than a knob-down needs to leave it; the SHORT window (2 s, 60
-    // frames) is the v2.48 addition.
-    //
-    // v2.49: these windows no longer vote on the drawn EQ curve (the
-    // pure-H1 A/B build) - but the machinery is kept COMPLETE and
-    // testable (its own gates, its hooks, its harness test), so the
-    // blend family can come back as a one-block change the day the
-    // A/B says so. Everything below therefore still runs at every
-    // display tick.
-    //
-    // Why the max is exactly right for a linear console: it is
-    // HOMOGENEOUS - max (H*x) = H * max (x) - and the IN/OUT display
-    // smoothing is affine-equivariant (the same one-pole on both
-    // curves, so smoothOut = H + smoothIn bin by bin), so the max
-    // difference is the exact transfer, measured at the programme's
-    // PEAK DRIVE of each band. That is what makes the max family the
-    // clean-shapes truth: it always reports the response AT the
-    // loudest moment of the window, a repeatable, stable operating
-    // point even on a saturating console, and transients count
-    // properly (the attack IS the max).
-    //
-    // v2.48: the two windows became the two MEMBERS of the single EQ
-    // curve (see smoothEqVerite above) - the mean of the long (the
-    // stability) and the short (the reactivity); v2.49 takes them
-    // OFF that curve for the pure-H1 A/B, without touching this
-    // machinery. Documented costs,
-    // unchanged from v2.46: on a knob DOWN the maxima HOLD the old
-    // value until the loud passage that carries them exits the window
-    // (5 s / 2 s), which reads as the curve gliding down; and no
-    // cross-spectrum junk rejection - where a console lowpass sinks
-    // the signal under the console's own floor the held max Out
-    // eventually reads the floor (the v2.21.1 artifact) - which is
-    // exactly why the blend's raw-coherence fallback reads the H1
-    // member in those bands instead. A relative input gate (maxIn
-    // within 45 dB of the strongest max band, floor -75 dB) keeps
-    // both windows to bands that really carried programme energy, and
-    // the same Savitzky-Golay pass as the transfer curve smooths the
-    // differences for visual consistency. Display-side (UI thread,
-    // 30 Hz, zero audio-thread cost).
+    // v2.54 (roadmap point A, Clement's call): the v2.46-v2.48
+    // "EQ @ max" machinery (the 5 s and 2 s sliding-max windows,
+    // their gates, rings and measured flags) is RETIRED. Since the
+    // v2.49 pure-H1 A/B call it was computed at every display tick
+    // but never drawn - ~210 jmax/bin/tick of pure waste. Git keeps
+    // it: reverting to the blend family is a revert of v2.54, not a
+    // rewrite. The v2.10 OUTPUT max-hold (maxOut, maxRing, 300
+    // frames) stays - it IS drawn.
     // -----------------------------------------------------------------
-    static constexpr int maxEqFrames = 150;
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn {};
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqOut {};
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqDiff {};
-    std::vector<float> maxEqInRing;
-    std::vector<float> maxEqOutRing;
-    int maxEqRingIndex = 0;
-    std::array<bool, SpectrumAnalyzer::numScopeBins> eqMaxMeasured {};
-
-    // v2.48.0: the SHORT window of the pair - the identical machinery
-    // over a 2-second ring (60 frames at 30 Hz), Clement's pick of the
-    // three simulated candidates (5 s; 1 s) / (5 s; 2 s) / (5 s; 300 ms)
-    // - see smoothEqVerite above for the A/B story and the header of
-    // the 5 s block above for the shared story. Like the 5 s window,
-    // since v2.49.0 it stays computed and tested but off the drawn
-    // curve.
-    static constexpr int maxEqFrames2 = 60;
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqIn2 {};
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqOut2 {};
-    std::array<float, SpectrumAnalyzer::numScopeBins> maxEqDiff2 {};
-    std::vector<float> maxEqIn2Ring;
-    std::vector<float> maxEqOut2Ring;
-    int maxEqRingIndex2 = 0;
-    std::array<bool, SpectrumAnalyzer::numScopeBins> eqMax2Measured {};
 
     // v2.11: selectable IN/OUT smoothing time constant; v2.12 keeps two
     // speeds (Fast ~0.15 s, Slow ~1 s, the default).

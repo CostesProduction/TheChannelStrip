@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.53.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.54.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,40 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.54.0**
+  - **Roadmap point A: the "EQ @ max" machinery is retired.** The
+    5-second and 2-second sliding maxima that the v2.48 blend read as
+    its anchor third have been dead weight since the v2.49 A/B build
+    chose the pure H1 curve: never drawn, never read, but still
+    computed at every display tick (~1.26 M ops/s of pure waste on
+    the analysis path). Both windows, their gates, their members and
+    their harness hooks are gone; the max-hold that IS drawn - the
+    v2.10 output trace - stays untouched. If the blend family must
+    ever come back, `git revert` the v2.54 commit: the machinery is
+    removed, not redesigned.
+  - **One version, one source.** The project version now lives in the
+    CMakeLists `project()` line alone; both targets (the plugin and
+    the offline test harness) receive it through the `TCS_VERSION`
+    compile definition, and every place that used to hard-code the
+    string - the doctor report, the three saved-state version tags,
+    the harness banner and its roundtrip assertions - reads the
+    macro instead. Bumping a version is now a one-line change.
+  - **The torture batch (roadmap point A).** Three new harness tests
+    that complete the v2.18 torture ideas: adversarial audio
+    (full-scale DC both polarities, hard squares, one-sample
+    transients, channel asymmetry, 22050 / 176400 Hz at 1 / 4096
+    frames, and NaN input - a documented survival contract: no
+    crash, then a clean `releaseResources` / `prepareToPlay`
+    restart), state corner cases (a bare `<TCS/>` element,
+    present-but-empty attributes, futuristic versions, garbage /
+    absurd / negative / fractional scale values that must snap onto
+    the ladders, and 50 rapid save / restore cycles that must be a
+    byte-identical fixed point) and display stress (1000 analysis
+    ticks over a full-range sweep with every measured bin finite, a
+    deterministic display-chaos sequence whose final state must be
+    exactly the prescribed one, and degenerate 0x0 / 10x10 panel
+    sizes that must survive `resized()`). The retired max-trace test
+    left with its machinery.
 - **2.53.2**
   - **The +/− zoom controls became ghosts (Clement's verdict on
     2.53.1: visible — good — but "un petit peu moins abusif").** At
