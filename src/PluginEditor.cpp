@@ -402,12 +402,17 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
     for (auto& b : anaZoomButtons)
     {
         styleConsoleButton (b);
+        // v2.53.1: the rectangular chip + thick vector +/- (Clement's
+        // readability feedback - the default small square button read
+        // as a dim circle)
+        b.setLookAndFeel (&zoomButtonLaF);
         addAndMakeVisible (b);
     }
 
     for (auto& b : eqZoomButtons)
     {
         styleConsoleButton (b);
+        b.setLookAndFeel (&zoomButtonLaF);
         addAndMakeVisible (b);
     }
 
@@ -469,20 +474,19 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
 // shown (top = 2, bottom = -4 divisions), so the first division above
 // is always the 1/6 line and the first below the 1/2 line - which is
 // also the EQ's 0, whose own first divisions sit at 1/3 and 2/3.
-// Each button is 14 x 14, centred on the midpoint between the 0 line
-// and its neighbouring division line, and the written labels stay
-// untouched (Clement's "sans perturber les ecritures"):
-//
-//   left column (labels at x 4..38, 13 px tall around each line):
-//     "+"  centred at h/4  (default h = 180: y 38..52, exactly
-//          between the "+12" label box 24..37 and the "0" box 54..67);
-//     "-"  centred at 5h/12 (y 68..82, between the "0" box and the
-//          "-12" box 84..97).
-//   right column (EQ labels at x W-34..W-4, drawn ONLY at +/-range
-//   and 0 - so nothing is written at the first division lines):
-//     "+"  centred at 5h/12 (y 68..82, just above the "0" box
-//          84..96);
-//     "-"  centred at 7h/12 (y 98..112, just below it).
+// v2.53.1 (Clement's readability feedback): the chips grew from
+// 14 x 14 squares to 22 x 16 RECTANGLES - wider than tall, easier to
+// click - and stay clear of the WRITTEN GLYPHS on both scales
+// (Clement's "sans perturber les ecritures"): the left labels' 11 px
+// glyphs span [line-5, line+6], so between the "+12" glyphs (25..36)
+// and the "0" glyphs (55..66) the clear band is 37..54 - the chip
+// sits at 37..53 with a 1-2 px margin; same arithmetic below the 0
+// line and on the EQ side (whose 10 px glyphs span [line-5, line+5],
+// leaving 67..84 above its "0" and 96+ below it). Centred on each
+// label column: left x 10..32 (labels 4..38), right x W-30..W-8
+// (labels W-34..W-4, drawn ONLY at +/-range and 0). Integer division
+// rounds the exact fractions by at most one pixel at odd heights;
+// the analyser strip is 180 px tall anyway.
 void SpectrumPanel::resized()
 {
     const int h  = getHeight();
@@ -510,18 +514,18 @@ void SpectrumPanel::resized()
         x += 40;
     }
 
-    // v2.53 (point B2): the scale zoom buttons - 14 x 14, centred on
-    // each scale's label column (the left labels span x 4..38, the EQ
-    // labels W-34..W-4) and in the clear bands derived above. Integer
-    // division rounds the exact fractions by at most one pixel at odd
-    // heights; the analyser strip is 180 px tall anyway.
-    const int zb = 14;
+    // v2.53 (point B2): the scale zoom buttons, 22 x 16 since v2.53.1
+    // (see the collision budget above), centred on each scale's label
+    // column (the left labels span x 4..38, the EQ labels W-34..W-4)
+    // and in the clear bands between the written glyphs.
+    const int zw = 22;
+    const int zh = 16;
 
-    anaZoomButtons[0].setBounds (14, h / 4 - 7, zb, zb);
-    anaZoomButtons[1].setBounds (14, 5 * h / 12 - 7, zb, zb);
+    anaZoomButtons[0].setBounds (10, h / 4 - 8, zw, zh);
+    anaZoomButtons[1].setBounds (10, 5 * h / 12 - 8, zw, zh);
 
-    eqZoomButtons[0].setBounds (getWidth() - 26, 5 * h / 12 - 7, zb, zb);
-    eqZoomButtons[1].setBounds (getWidth() - 26, 7 * h / 12 - 7, zb, zb);
+    eqZoomButtons[0].setBounds (getWidth() - 30, 5 * h / 12 - 8, zw, zh);
+    eqZoomButtons[1].setBounds (getWidth() - 30, 7 * h / 12 - 8, zw, zh);
 }
 
 juce::TextButton* SpectrumPanel::getTiltButton (int index)
@@ -1488,8 +1492,12 @@ void SpectrumPanel::drawGrid (juce::Graphics& g)
     }
 
     // ---- Y labels: dB relative to the loudness reference ----
-    g.setColour (juce::Colour (0xff5c6a85));
-    g.setFont (juce::Font (juce::FontOptions (11.0f)));
+    // v2.53.1 (Clement's readability feedback): the scale numbers are
+    // BOLD and a notch brighter - they read at a glance now, but stay
+    // dimmer than the LUFS reference label above them so the
+    // hierarchy (plain numbers < the clickable reference) holds.
+    g.setColour (juce::Colour (0xff7a88a5));
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
 
     for (int k = 0; k <= 6; ++k)
     {
@@ -1735,10 +1743,12 @@ void SpectrumPanel::drawTransferCurve (juce::Graphics& g)
     // mirroring the spectrum's dB labels at the far left - so it no
     // longer shares the top-right corner with the hover readout (which
     // keeps its own clear margin, see drawHoverReadout).
-    g.setFont (juce::Font (juce::FontOptions (10.0f)));
-    // v2.23 (épurée): an explicit SOFTER green - the labels used to
-    // inherit the full-strength curve colour and competed with it
-    g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.75f));
+    // v2.53.1 (Clement's readability feedback): the EQ numbers are
+    // bold too, and the green gains alpha (0.75 -> 0.85) - still the
+    // softer member of the family (v2.23), no longer competing with
+    // thinness.
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.setColour (juce::Colour (0xff7ee08a).withAlpha (0.85f));
 
     for (float db : { range, 0.0f, -range })
     {

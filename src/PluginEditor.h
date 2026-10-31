@@ -9,6 +9,75 @@
 #include "PluginProcessor.h"
 
 // ---------------------------------------------------------------------------
+// v2.53.1: the scale zoom buttons' own LookAndFeel (Clement's
+// readability feedback on v2.53.0: "pas suffisamment lisible - la
+// bulle pourrait etre plus grande et un peu plus rectangulaire").
+// The default LookAndFeel's TextButton shape at 14 x 14 read as a dim
+// little near-circle with a small grey +/- glyph. This class draws a
+// clearly RECTANGULAR chip - a 2 px corner-radius body with a visible
+// border, brightening on hover and press - and the +/- as THICK
+// VECTOR STROKES (two crossing bars for the "+", one bar for the "-"),
+// the same minimal-icon language as the preset buttons (v2.26.1):
+// full-strength console text colour, always crisp because the glyph
+// scales with the button instead of following a font size. A disabled
+// chip (at its ladder's end, v2.53) dims to 40% so the state reads at
+// a glance.
+// ---------------------------------------------------------------------------
+class ZoomButtonLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    void drawButtonBackground (juce::Graphics& g, juce::Button& b,
+                                const juce::Colour& backgroundColour,
+                                bool shouldDrawButtonAsHighlighted,
+                                bool shouldDrawButtonAsDown) override
+    {
+        const float alpha = b.isEnabled() ? 1.0f : 0.4f;
+        juce::Colour bg = backgroundColour;
+
+        if (shouldDrawButtonAsDown)
+            bg = bg.brighter (0.10f);
+        else if (shouldDrawButtonAsHighlighted)
+            bg = bg.brighter (0.05f);
+
+        const auto bounds = b.getLocalBounds().toFloat();
+
+        g.setColour (bg.withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (bounds, 2.0f);
+        g.setColour (b.findColour (juce::TextButton::textColourOffId)
+                         .withMultipliedAlpha (0.35f * alpha));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
+    }
+
+    void drawButtonText (juce::Graphics& g, juce::TextButton& b,
+                        bool /*shouldDrawButtonAsHighlighted*/,
+                        bool shouldDrawButtonAsDown) override
+    {
+        const float alpha = b.isEnabled() ? 1.0f : 0.4f;
+        const auto area = b.getLocalBounds().toFloat();
+        const float cx = area.getCentreX();
+        const float cy = area.getCentreY();
+        // the glyph: a bar as long as ~62% of the smaller dimension and
+        // ~16% thick - thick enough to read at a glance, minimal enough
+        // to match the preset icons
+        const float arm = juce::jmin (area.getWidth(), area.getHeight()) * 0.62f;
+        const float thick = juce::jmax (area.getHeight() * 0.16f, 2.0f);
+
+        g.setColour (b.findColour (shouldDrawButtonAsDown
+                                       ? juce::TextButton::textColourOnId
+                                       : juce::TextButton::textColourOffId)
+                         .withMultipliedAlpha (alpha));
+        g.fillRect (juce::Rectangle<float> (cx - arm * 0.5f,
+                                            cy - thick * 0.5f,
+                                            arm, thick));
+
+        if (b.getButtonText() == "+")
+            g.fillRect (juce::Rectangle<float> (cx - thick * 0.5f,
+                                                cy - arm * 0.5f,
+                                                thick, arm));
+    }
+};
+
+// ---------------------------------------------------------------------------
 // SpectrumPanel: log-frequency display of the input and output spectra with
 // a selectable weighting tilt (-3 / -4.5 / -6 dB per octave) and analyzer
 // ballistics (v2.10: ~1 s smoothing on the IN/OUT curves, plus a 10-second
@@ -421,6 +490,11 @@ private:
     // -----------------------------------------------------------------
     std::array<juce::TextButton, 2> anaZoomButtons; // 0 = "+", 1 = "-"
     std::array<juce::TextButton, 2> eqZoomButtons;  // 0 = "+", 1 = "-"
+
+    // v2.53.1: the zoom buttons' rectangular-chip / thick-glyph
+    // LookAndFeel (the class above) - owned here as a member so it
+    // outlives the buttons that use it.
+    ZoomButtonLookAndFeel zoomButtonLaF;
 
     // v2.53: refreshes the four zoom buttons' enabled states against
     // the current scales (a button at its ladder's end is disabled).

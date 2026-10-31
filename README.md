@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.53.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.53.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,22 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.53.1**
+  - **Readability pass on the analyser's scale controls (Clement's
+    feedback on 2.53.0: the +/− chips were too small and not legible
+    enough).** The zoom chips grew from 14×14 squares to **22×16
+    rectangles** — wider than tall, easier to click — and get their
+    own LookAndFeel: a clearly rectangular chip (2 px corner radius,
+    visible border, brighter on hover and press) instead of the
+    default's near-circular dim button, with the **+ and − drawn as
+    thick vector strokes** (the preset-buttons' icon language)
+    instead of small font glyphs; a chip disabled at its ladder's
+    end dims to 40% so the state reads at a glance.
+  - **The dB numbers of both scales are bold** — and the spectrum's
+    left column is a notch brighter, the EQ's green gains alpha —
+    the numbers read at a glance now. The labels' positions and the
+    chips' clear bands between the written numbers are unchanged
+    (still no disturbance of the écritures).
 - **2.53.0**
   - **The scale zooms are now small + and − buttons, one step per
     press (Clement's point B2).** The v2.51 click-to-cycle on the scale
