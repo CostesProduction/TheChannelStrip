@@ -482,8 +482,8 @@ private:
     std::atomic<bool> suppressPresetDirty { false };
     std::atomic<bool> presetDirtyPending { false };
     // v2.8: display options + editor-open gate (see the editor API above).
-    std::atomic<float> anaDbDiv { 15.0f }; // v2.51: 15/12/9 dB/div
-    std::atomic<float> eqDbDiv { 6.0f };   // v2.51: 8/6/4/2 dB/div
+    std::atomic<float> anaDbDiv { 12.0f }; // v2.53 default: 15/12/9 dB/div
+    std::atomic<float> eqDbDiv { 4.0f };   // v2.53 default: 8/6/4/2 dB/div
     std::atomic<bool> analyserVisible { true };
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).

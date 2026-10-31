@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// tests/TcsTestsMain.cpp - v2.52.0 offline test harness (roadmap point 8)
+// tests/TcsTestsMain.cpp - v2.53.0 offline test harness (roadmap point 8)
 //
 // A zero-dependency console executable that exercises the processor end to
 // end with synthetic material and MOCK hosted plugins (no third-party
@@ -68,6 +68,11 @@
 //   - v2.52: the tilt / Fast-Slow buttons restore the session onto the
 //     analyser strip's own buttons (they moved out of the sidebar) and
 //     the speed value is canonicalised to exactly one of the two taus
+//   - v2.53: the scale +/- ZOOM buttons - the click-to-cycle is gone;
+//     the fresh defaults are 12 dB/div spectra / 4 dB/div EQ, the
+//     pure-static ladders step one zoom per press and clamp at their
+//     ends, and the panel restores the saved zooms and mirrors the
+//     endpoints in its buttons' enabled states
 //   - v2.51 scale ladder: legacy 10/6 and 4/2 dB/div session values
 //     are mapped to the new 15/12/9 and 8/6/4/2 ladders on load
 //   - latency forwarding, static AND runtime changes (the v2.16.1 chain)
@@ -2863,8 +2868,8 @@ void testStateRoundtrip()
                                                                 (int) saved.getSize());
     expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
                 "saved state parses as TCS xml");
-    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.52.0",
-                "saved state carries the current version tag (2.52.0)");
+    expectTrue (xml != nullptr && xml->getStringAttribute ("version") == "2.53.0",
+                "saved state carries the current version tag (2.53.0)");
 
     TheChannelStripAudioProcessor restored;
     restored.setStateInformation (saved.getData(), (int) saved.getSize());
@@ -2918,6 +2923,114 @@ void testAnalyserStripButtons()
                     "a fresh panel selects the default Slow speed");
         expectNear (proc.getSpecTau(), 1.0, 0.001,
                     "the speed is canonicalised to exactly Slow's tau");
+    }
+}
+
+// v2.53 (point B2): the scale zoom buttons. The v2.51-v2.52
+// click-to-cycle is gone: each scale column now carries its own "+"
+// and "-", children of SpectrumPanel (the v2.52 tilt/speed pattern).
+// This locks in the four guarantees of the move: (1) a fresh
+// processor carries the NEW defaults (12 dB/div spectra = Clement's
+// [+24;-48] starting point, 4 dB/div EQ = +/-12 dB); (2) the
+// ladders - pure statics since v2.53 - step exactly one zoom per
+// press and CLAMP at their ends ("+" cannot magnify past 9 / 2
+// dB/div, "-" cannot widen past 15 / 8); (3) a panel constructed
+// after the session state was loaded restores the persisted zooms
+// onto itself; (4) the buttons mirror the ladders' endpoints -
+// disabled at the rung they cannot leave, alive everywhere else.
+void testAnalyserZoomButtons()
+{
+    beginTest ("v2.53: the scale +/- zoom buttons");
+
+    // (1) the new defaults - a fresh processor, nothing saved
+    {
+        TheChannelStripAudioProcessor proc;
+
+        expectNear (proc.getAnaDbDiv(), 12.0, 0.001,
+                    "the fresh analyser default is 12 dB/div ([+24;-48])");
+        expectNear (proc.getEqDbDiv(), 4.0, 0.001,
+                    "the fresh EQ default is 4 dB/div (+/-12 dB)");
+    }
+
+    // (2) the ladders: one zoom per step, clamped at both ends
+    {
+        // "+" magnifies: 15 -> 12 -> 9, then stays
+        expectNear (SpectrumPanel::anaZoomIn (15.0f), 12.0, 0.001,
+                    "spectrum +: 15 -> 12 dB/div");
+        expectNear (SpectrumPanel::anaZoomIn (12.0f), 9.0, 0.001,
+                    "spectrum +: 12 -> 9 dB/div");
+        expectNear (SpectrumPanel::anaZoomIn (9.0f), 9.0, 0.001,
+                    "spectrum + clamps at 9 dB/div");
+
+        // "-" widens: 9 -> 12 -> 15, then stays
+        expectNear (SpectrumPanel::anaZoomOut (9.0f), 12.0, 0.001,
+                    "spectrum -: 9 -> 12 dB/div");
+        expectNear (SpectrumPanel::anaZoomOut (12.0f), 15.0, 0.001,
+                    "spectrum -: 12 -> 15 dB/div");
+        expectNear (SpectrumPanel::anaZoomOut (15.0f), 15.0, 0.001,
+                    "spectrum - clamps at 15 dB/div");
+
+        // EQ "+": 8 -> 6 -> 4 -> 2, then stays
+        expectNear (SpectrumPanel::eqZoomIn (8.0f), 6.0, 0.001,
+                    "EQ +: 8 -> 6 dB/div");
+        expectNear (SpectrumPanel::eqZoomIn (6.0f), 4.0, 0.001,
+                    "EQ +: 6 -> 4 dB/div");
+        expectNear (SpectrumPanel::eqZoomIn (4.0f), 2.0, 0.001,
+                    "EQ +: 4 -> 2 dB/div");
+        expectNear (SpectrumPanel::eqZoomIn (2.0f), 2.0, 0.001,
+                    "EQ + clamps at 2 dB/div");
+
+        // EQ "-": 2 -> 4 -> 6 -> 8, then stays
+        expectNear (SpectrumPanel::eqZoomOut (2.0f), 4.0, 0.001,
+                    "EQ -: 2 -> 4 dB/div");
+        expectNear (SpectrumPanel::eqZoomOut (4.0f), 6.0, 0.001,
+                    "EQ -: 4 -> 6 dB/div");
+        expectNear (SpectrumPanel::eqZoomOut (6.0f), 8.0, 0.001,
+                    "EQ -: 6 -> 8 dB/div");
+        expectNear (SpectrumPanel::eqZoomOut (8.0f), 8.0, 0.001,
+                    "EQ - clamps at 8 dB/div");
+    }
+
+    // (3) + (4): the panel restores the session zooms and mirrors the
+    // ladders' endpoints in its buttons' enabled states
+    {
+        // the most magnified rung: "+" disabled, "-" alive
+        TheChannelStripAudioProcessor proc;
+        proc.setAnaDbDiv (9.0f);
+        proc.setEqDbDiv (2.0f);
+
+        SpectrumPanel panel (proc);
+
+        expectNear (panel.getDbPerDiv(), 9.0, 0.001,
+                    "the panel restores the saved 9 dB/div spectrum zoom");
+        expectNear (panel.getEqDbPerDiv(), 2.0, 0.001,
+                    "the panel restores the saved 2 dB/div EQ zoom");
+        expectTrue (! panel.getAnaZoomButton (0)->isEnabled(),
+                    "spectrum + is disabled at 9 dB/div");
+        expectTrue (panel.getAnaZoomButton (1)->isEnabled(),
+                    "spectrum - is alive at 9 dB/div");
+        expectTrue (! panel.getEqZoomButton (0)->isEnabled(),
+                    "EQ + is disabled at 2 dB/div");
+        expectTrue (panel.getEqZoomButton (1)->isEnabled(),
+                    "EQ - is alive at 2 dB/div");
+    }
+
+    {
+        // the widest rung: "+" alive, "-" disabled
+        TheChannelStripAudioProcessor proc;
+        proc.setAnaDbDiv (15.0f);
+        proc.setEqDbDiv (8.0f);
+
+        SpectrumPanel panel (proc);
+
+        expectTrue (panel.getAnaZoomButton (0)->isEnabled(),
+                    "spectrum + is alive at 15 dB/div");
+        expectTrue (! panel.getAnaZoomButton (1)->isEnabled(),
+                    "spectrum - is disabled at 15 dB/div");
+        expectTrue (panel.getEqZoomButton (0)->isEnabled(),
+                    "EQ + is alive at 8 dB/div");
+        expectTrue (! panel.getEqZoomButton (1)->isEnabled(),
+                    "EQ - is disabled at 8 dB/div");
     }
 }
 
@@ -3315,7 +3428,7 @@ void testDoctorReport()
     proc.prepareToPlay (48000.0, 512);
 
     auto report = proc.buildDoctorReport();
-    expectTrue (report.contains ("TheChannelStrip 2.52.0"),
+    expectTrue (report.contains ("TheChannelStrip 2.53.0"),
                 "the report carries the shell version");
     expectTrue (report.contains ("wrapper: "),
                 "the report names the wrapper");
@@ -4099,7 +4212,7 @@ int main (int argc, char* argv[])
     // initialiser here sets it up and tears it down on return.
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    std::cout << "TheChannelStrip offline test harness - v2.52.0" << std::endl;
+    std::cout << "TheChannelStrip offline test harness - v2.53.0" << std::endl;
     std::cout << "---------------------------------------------" << std::endl;
 
     testProcessorBasics();
@@ -4125,6 +4238,7 @@ int main (int argc, char* argv[])
     testHoverReadout();
     testStateRoundtrip();
     testAnalyserStripButtons();
+    testAnalyserZoomButtons();
     testDisplayScaleLegacyMapping();
     testLatencyForwarding();
     testCrossfadeClickFree();

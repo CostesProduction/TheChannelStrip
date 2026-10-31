@@ -375,6 +375,78 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
         speedButtons[1].setToggleState (match == 1, juce::dontSendNotification);
     }
 
+    // -----------------------------------------------------------------
+    // v2.53 (point B2): the scale zoom buttons. The v2.51-v2.52
+    // click-to-cycle is gone: each scale column now carries its own
+    // "+" and "-" (Clement's layout - the "+" sits between the 0 line
+    // and the division above it, the "-" between the 0 line and the
+    // division below, on both sides; see resized() for how the label
+    // boxes stay untouched), so one step is one click - no more laps
+    // around the ladder. "+" MAGNIFIES (fewer dB per division, the
+    // same "zoom" vocabulary as Clement's), "-" steps back out; the
+    // ends of each ladder disable their button (9 and 15 dB/div for
+    // the spectra, 2 and 8 for the EQ). The buttons are children of
+    // this panel, real controls - they consume their own clicks and
+    // carry their own interactive-help entries. The persisted state
+    // stays in the processor (anaDbDiv / eqDbDiv, saved with the
+    // session exactly as since v2.51); the panel writes it on click
+    // and restores it here, so the old editor-side cycle lambdas and
+    // restore calls are gone (the v2.52 tilt/speed pattern, applied
+    // to the scales).
+    // -----------------------------------------------------------------
+    anaZoomButtons[0].setButtonText ("+");
+    anaZoomButtons[1].setButtonText ("-");
+    eqZoomButtons[0].setButtonText ("+");
+    eqZoomButtons[1].setButtonText ("-");
+
+    for (auto& b : anaZoomButtons)
+    {
+        styleConsoleButton (b);
+        addAndMakeVisible (b);
+    }
+
+    for (auto& b : eqZoomButtons)
+    {
+        styleConsoleButton (b);
+        addAndMakeVisible (b);
+    }
+
+    anaZoomButtons[0].onClick = [this]
+    {
+        const float v = anaZoomIn (dbPerDiv);
+        processor.setAnaDbDiv (v);
+        setDbPerDiv (v);
+    };
+
+    anaZoomButtons[1].onClick = [this]
+    {
+        const float v = anaZoomOut (dbPerDiv);
+        processor.setAnaDbDiv (v);
+        setDbPerDiv (v);
+    };
+
+    eqZoomButtons[0].onClick = [this]
+    {
+        const float v = eqZoomIn (eqDbPerDiv);
+        processor.setEqDbDiv (v);
+        setEqDbPerDiv (v);
+    };
+
+    eqZoomButtons[1].onClick = [this]
+    {
+        const float v = eqZoomOut (eqDbPerDiv);
+        processor.setEqDbDiv (v);
+        setEqDbPerDiv (v);
+    };
+
+    // restore the saved zooms (the processor reloads them from the
+    // session state before the editor opens; a fresh processor carries
+    // the v2.53 defaults, 12 dB/div spectra and 4 dB/div EQ - Clement's
+    // starting points [+24;-48] and +/-12). This also sets the four
+    // buttons' enabled states from the restored scales.
+    setDbPerDiv (processor.getAnaDbDiv());
+    setEqDbPerDiv (processor.getEqDbDiv());
+
     startTimerHz (30);
 }
 
@@ -382,16 +454,38 @@ SpectrumPanel::SpectrumPanel (TheChannelStripAudioProcessor& p)
 // top-left corner, OVER the graph (like every analyser's control
 // overlay). The geometry is chosen against the panel's own click
 // zones and drawing: the row starts right of the left scale column
-// (x <= 44, whose clicks cycle the spectrum zoom), stays above the
+// (x <= 44, display-only since v2.53), stays above the
 // LUFS reference label (drawn at x 36..190 around the 0 dB line, one
 // third of the panel height down - the row never reaches it), and
 // ends well left of the centred legend even at the minimum window
 // width (the row spans x 46..254; at the 860 px width floor the
 // legend's own left edge sits around x 320). The buttons are real
 // children, so they also consume their own clicks before the panel's
-// mouseDown - none of the three scale zones is ever covered.
+// mouseDown - none of the zone handling is ever covered.
+//
+// v2.53 (point B2): the four scale zoom buttons are placed here too.
+// The geometry is ZOOM-INDEPENDENT: on the six-division grid the 0 dB
+// line sits at exactly 1/3 of the panel height whatever dB/div is
+// shown (top = 2, bottom = -4 divisions), so the first division above
+// is always the 1/6 line and the first below the 1/2 line - which is
+// also the EQ's 0, whose own first divisions sit at 1/3 and 2/3.
+// Each button is 14 x 14, centred on the midpoint between the 0 line
+// and its neighbouring division line, and the written labels stay
+// untouched (Clement's "sans perturber les ecritures"):
+//
+//   left column (labels at x 4..38, 13 px tall around each line):
+//     "+"  centred at h/4  (default h = 180: y 38..52, exactly
+//          between the "+12" label box 24..37 and the "0" box 54..67);
+//     "-"  centred at 5h/12 (y 68..82, between the "0" box and the
+//          "-12" box 84..97).
+//   right column (EQ labels at x W-34..W-4, drawn ONLY at +/-range
+//   and 0 - so nothing is written at the first division lines):
+//     "+"  centred at 5h/12 (y 68..82, just above the "0" box
+//          84..96);
+//     "-"  centred at 7h/12 (y 98..112, just below it).
 void SpectrumPanel::resized()
 {
+    const int h  = getHeight();
     const int y  = 3;
     const int bh = 20;
 
@@ -415,6 +509,19 @@ void SpectrumPanel::resized()
         speedButtons[j].setBounds (x, y, 38, bh);
         x += 40;
     }
+
+    // v2.53 (point B2): the scale zoom buttons - 14 x 14, centred on
+    // each scale's label column (the left labels span x 4..38, the EQ
+    // labels W-34..W-4) and in the clear bands derived above. Integer
+    // division rounds the exact fractions by at most one pixel at odd
+    // heights; the analyser strip is 180 px tall anyway.
+    const int zb = 14;
+
+    anaZoomButtons[0].setBounds (14, h / 4 - 7, zb, zb);
+    anaZoomButtons[1].setBounds (14, 5 * h / 12 - 7, zb, zb);
+
+    eqZoomButtons[0].setBounds (getWidth() - 26, 5 * h / 12 - 7, zb, zb);
+    eqZoomButtons[1].setBounds (getWidth() - 26, 7 * h / 12 - 7, zb, zb);
 }
 
 juce::TextButton* SpectrumPanel::getTiltButton (int index)
@@ -427,6 +534,50 @@ juce::TextButton* SpectrumPanel::getSpeedButton (int index)
     return &speedButtons[(size_t) juce::jlimit (0, 1, index)];
 }
 
+juce::TextButton* SpectrumPanel::getAnaZoomButton (int index)
+{
+    return &anaZoomButtons[(size_t) juce::jlimit (0, 1, index)];
+}
+
+juce::TextButton* SpectrumPanel::getEqZoomButton (int index)
+{
+    return &eqZoomButtons[(size_t) juce::jlimit (0, 1, index)];
+}
+
+// v2.53 (point B2): the zoom ladders as pure statics, so the offline
+// harness can walk them without a visible editor. The ladders are the
+// v2.51 ones, unchanged - only the DEFAULT moved (12 and 4 dB/div).
+// "+" = zoom IN (fewer dB per division), "-" = zoom OUT; each clamps
+// at its ladder's end. The thresholds sit exactly between ladder
+// steps, like every ladder branch since v2.51.
+float SpectrumPanel::anaZoomIn (float cur)
+{
+    return (cur > 13.5f) ? 12.0f : 9.0f; // 15 -> 12 -> 9, 9 stays
+}
+
+float SpectrumPanel::anaZoomOut (float cur)
+{
+    return (cur < 10.5f) ? 12.0f : 15.0f; // 9 -> 12 -> 15, 15 stays
+}
+
+float SpectrumPanel::eqZoomIn (float cur)
+{
+    if (cur > 7.0f)
+        return 6.0f; // 8 -> 6
+    if (cur > 5.0f)
+        return 4.0f; // 6 -> 4
+    return 2.0f;     // 4 -> 2, 2 stays
+}
+
+float SpectrumPanel::eqZoomOut (float cur)
+{
+    if (cur < 3.0f)
+        return 4.0f; // 2 -> 4
+    if (cur < 5.0f)
+        return 6.0f; // 4 -> 6
+    return 8.0f;     // 6 -> 8, 8 stays
+}
+
 void SpectrumPanel::setTilt (float newTiltDbPerOct)
 {
     tilt = newTiltDbPerOct;
@@ -435,11 +586,29 @@ void SpectrumPanel::setTilt (float newTiltDbPerOct)
 void SpectrumPanel::setDbPerDiv (float dbPerDivision)
 {
     dbPerDiv = juce::jmax (1.0f, dbPerDivision);
+    // v2.53: keep the two spectrum zoom buttons in step with the scale
+    // (a button at the end of its ladder is disabled).
+    refreshZoomButtons();
 }
 
 void SpectrumPanel::setEqDbPerDiv (float dbPerDivision)
 {
     eqDbPerDiv = juce::jmax (1.0f, dbPerDivision);
+    refreshZoomButtons();
+}
+
+// v2.53 (point B2): the four zoom buttons' enabled states, derived
+// from the current scales. "+" dies at the most magnified end of the
+// ladder (9 dB/div spectra, 2 dB/div EQ), "-" at the widest (15 and
+// 8) - so a step is always one honest click, never a silent no-op.
+// The thresholds sit exactly between ladder steps, like the statics
+// above.
+void SpectrumPanel::refreshZoomButtons()
+{
+    anaZoomButtons[0].setEnabled (dbPerDiv > 10.5f);  // "+" off at 9
+    anaZoomButtons[1].setEnabled (dbPerDiv < 13.5f);  // "-" off at 15
+    eqZoomButtons[0].setEnabled (eqDbPerDiv > 3.0f);  // "+" off at 2
+    eqZoomButtons[1].setEnabled (eqDbPerDiv < 7.0f);  // "-" off at 8
 }
 
 // v2.13: the loudness reference of the axis (0 dB line = lufsTargetDb
@@ -466,15 +635,19 @@ juce::String SpectrumPanel::lufsTargetLabel() const
     return juce::String (name) + " (" + juce::String (lufsTargetDb, 0) + " LUFS)";
 }
 
-// v2.12: the scale toggles live on the analyser itself. The left column
-// (the dB labels of the spectrum scale) cycles the three v2.51 zooms
-// (15/12/9 dB per division); the right column (the green EQ range
-// labels) cycles the four EQ zooms (+/-24/18/12/6 dB).
+// v2.51-v2.52: the scale zooms used to cycle on a click here - the
+// left column (the spectrum's dB labels) walked the 15/12/9 dB/div
+// ladder, the right one (the green EQ range labels) the 8/6/4/2 one.
+// v2.53 (point B2): the cycle is GONE - each column now carries its
+// own "+" and "-" zoom buttons, children of this panel laid out in
+// resized(), so they consume their own clicks before this handler and
+// the bare columns are display-only.
 // v2.13: the loudness-reference label at the 0 dB line
 // ("Mix (-23 LUFS)", drawn from x=40 at the zero line) cycles the
-// Record/Mix/Master presets. The editor wires the actual toggling
-// through the std::function hooks (it owns the persisted state); clicks
-// anywhere else on the panel are ignored.
+// Record/Mix/Master presets; it remains the panel's one clickable
+// label. The editor wires it through the onLufsTargetClicked hook (it
+// owns the persisted state); clicks anywhere else on the panel are
+// ignored.
 void SpectrumPanel::mouseDown (const juce::MouseEvent& e)
 {
     // v2.13: the reference-label zone comes first - it overlaps the
@@ -492,25 +665,22 @@ void SpectrumPanel::mouseDown (const juce::MouseEvent& e)
     }
 
     // the left labels are drawn at x 4..38, the right EQ labels just
-    // left of the 20 kHz frequency label; both zones get a little
-    // slack so they are comfortable to hit
-    if (e.x <= 44)
-    {
-        if (onAnalyzerScaleClicked)
-            onAnalyzerScaleClicked();
-    }
-    else if (e.x >= getWidth() - 56)
-    {
-        if (onEqScaleClicked)
-            onEqScaleClicked();
-    }
+    // left of the 20 kHz frequency label. v2.51-v2.52 cycled the zooms
+    // on a click in either column; v2.53 (point B2) moves the zooming
+    // to the +/- buttons laid out in resized() - the columns
+    // themselves are display-only now, so this handler has nothing
+    // left to do here (the LUFS reference above is the one remaining
+    // click zone).
 }
 
 // v2.31 (Clement's remark 2): the interactive help mode asks which
 // analyser zone a point falls in, so its bubble can document the dB
-// scales instead of the panel's generic text alone. The zones and
-// constants are the SAME as mouseDown above - the bubble always
-// says exactly what a click in that zone would do.
+// scales instead of the panel's generic text alone. The zones are the
+// panel's two label columns plus the LUFS reference at the 0 dB line.
+// Since v2.53 the scale zones document the +/- ZOOM BUTTONS that live
+// beside the labels (the zones themselves are display-only - the
+// bubble says so); the reference zone still matches the one click
+// zone of mouseDown above.
 SpectrumPanel::HelpZone SpectrumPanel::helpZoneFor (juce::Point<int> p) const
 {
     const float zeroY = yForDb (0.0f);
@@ -1482,8 +1652,8 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
 // scale instead of sharing the spectrum's. v2.51: that scale is
 // selectable, +/- 3 divisions of 8/6/4/2 dB (i.e. +/-24/18/12/6 dB
 // over the full six-division grid),
-// labelled on the right edge (v2.12: clicking those labels cycles the
-// scale).
+// labelled on the right edge (v2.53: the small +/- buttons beside the
+// labels zoom the scale).
 // v2.12: the path covers every bin that has EVER been measured
 // (since v2.47.0 that flag is the single curve's eqVeriteMeasured
 // - since v2.49.0 the curve is the pure H1 member, so the flag
@@ -2177,37 +2347,26 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
             "Analyser response speed: the IN/OUT curves smooth "
             "with a time constant of ~0.15 s (Fast) or ~1 s (Slow).";
 
-    // ---- v2.12: the scale button rows are gone - the scales are
-    //      cycled by clicking the analyser's own scale labels ----
-    // v2.51: clicking the analyser's LEFT dB scale cycles the three
-    // zooms 15 / 12 / 9 dB per division (spectrum); clicking the
-    // RIGHT green EQ scale cycles 8 / 6 / 4 / 2 dB per division.
-    // The state stays in the processor (saved
-    // with the session, exactly like the v2.8 buttons); the panel just
-    // reports which column was clicked (see SpectrumPanel::mouseDown).
-    spectrumPanel.onAnalyzerScaleClicked = [this]
-    {
-        // v2.51: three zooms now, cycled by successive clicks:
-        // 15 -> 12 -> 9 -> 15 dB per division, i.e. [+30;-60] ->
-        // [+24;-48] -> [+18;-36] (Clement's point 3).
-        const float cur = proc.getAnaDbDiv();
-        const float newDiv = (cur > 13.5f) ? 12.0f
-                          : ((cur > 10.5f) ? 9.0f : 15.0f);
-        proc.setAnaDbDiv (newDiv);
-        spectrumPanel.setDbPerDiv (newDiv);
-    };
-
-    spectrumPanel.onEqScaleClicked = [this]
-    {
-        // v2.51: four zooms now (Clement's choice): 8 -> 6 -> 4 -> 2 ->
-        // 8 dB per division, i.e. +/-24 -> +/-18 -> +/-12 -> +/-6 dB.
-        const float cur = proc.getEqDbDiv();
-        const float newDiv = (cur > 7.0f) ? 6.0f
-                          : ((cur > 5.0f) ? 4.0f
-                          : ((cur > 3.0f) ? 2.0f : 8.0f));
-        proc.setEqDbDiv (newDiv);
-        spectrumPanel.setEqDbPerDiv (newDiv);
-    };
+    // ---- v2.53 (point B2): the scale zoom buttons ----
+    // The v2.51-v2.52 click-to-cycle is gone: each scale column now
+    // carries its own "+" and "-" (children of the panel, created,
+    // wired and restored there - the v2.52 tilt/speed pattern). The
+    // state stays in the processor (saved with the session, exactly as
+    // since v2.51); the editor only registers the four buttons'
+    // interactive-help texts here - the help map is the single home of
+    // every explanation (v2.31, Clement's remark 1).
+    helpTexts[spectrumPanel.getAnaZoomButton (0)] =
+        "Spectrum dB scale, ZOOM IN button: steps 15 -> 12 -> 9 dB per "
+        "division ([+30;-60] -> [+24;-48] -> [+18;-36]).";
+    helpTexts[spectrumPanel.getAnaZoomButton (1)] =
+        "Spectrum dB scale, ZOOM OUT button: steps 9 -> 12 -> 15 dB "
+        "per division (disabled at the widest zoom).";
+    helpTexts[spectrumPanel.getEqZoomButton (0)] =
+        "EQ curve dB scale, ZOOM IN button: steps 8 -> 6 -> 4 -> 2 dB "
+        "per division (+/-24 -> +/-18 -> +/-12 -> +/-6 dB).";
+    helpTexts[spectrumPanel.getEqZoomButton (1)] =
+        "EQ curve dB scale, ZOOM OUT button: steps 2 -> 4 -> 6 -> 8 dB "
+        "per division (disabled at the widest zoom).";
 
     // v2.13: clicking the loudness-reference label at the 0 dB line
     // cycles Record -37 -> Mix -23 -> Master -14 -> Record. The choice
@@ -2237,16 +2396,17 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // as a bubble inside the interactive help mode only, so the
     // readout is untouched outside it.
     helpTexts[&spectrumPanel] =
-        "IN and OUT spectra overlaid. The dB scales and the LUFS reference"
-        " at 0 dB are clickable; hovering reads the exact level.";
+        "IN and OUT spectra overlaid. The + / - buttons on each dB scale"
+        " zoom it; the LUFS reference at 0 dB is clickable; hovering"
+        " reads the exact level.";
 
-    // restore the saved scales (v2.51 defaults: 15 dB and 6 dB per
-    // division). Legacy 10/6 and 4/2 values are mapped to the new
-    // scale ladder processor-side in setStateInformation (kept there
-    // so the mapping is covered by the offline tests), so the editor
-    // just applies what it reads.
-    spectrumPanel.setDbPerDiv (proc.getAnaDbDiv());
-    spectrumPanel.setEqDbPerDiv (proc.getEqDbDiv());
+    // v2.51-v2.52 restored the saved scales here, straight from the
+    // processor. v2.53 (point B2): the panel restores them itself now,
+    // in its own constructor, together with the +/- zoom buttons that
+    // own them (the v2.52 tilt/speed pattern). Legacy 10/6 and 4/2
+    // values are still snapped onto the scale ladder processor-side
+    // in setStateInformation (kept there so the mapping is covered by
+    // the offline tests); the editor applies nothing.
 
     // ---- v2.8: show/hide the analyser strip ----
     // v2.34.1 (Clement's suggestion): the old "Display" text toggle
@@ -2413,8 +2573,9 @@ void TheChannelStripAudioProcessorEditor::resized()
     // top-left corner. The sidebar keeps the room for the console
     // workflow, per Clement's layout.)
 
-    // (v2.12: the SCALE dB/DIV and EQ dB/DIV rows are gone - those
-    // scales are toggled by clicking the analyser's own scale labels.)
+    // (v2.12: the SCALE dB/DIV and EQ dB/DIV rows are gone - since
+    // v2.53 the scales are zoomed by the +/- buttons on the
+    // analyser's own scale columns.)
 
     // ---- v2.34.1 (zone A, back by request): the gain-staging block is
     //      full-width again - IN/OUT rows, then the big single-line
@@ -2921,13 +3082,14 @@ juce::String TheChannelStripAudioProcessorEditor::helpTextFor (juce::Component* 
                        " Master -14 LUFS. Click it to cycle the reference.";
 
             if (zone == SpectrumPanel::HelpZone::analyzerScale)
-                return "Left scale: the IN/OUT spectra's display scale. Click it to"
-                       " cycle the zoom: 15, 12 then 9 dB per division"
-                       " (+30/-60, +24/-48, +18/-36).";
+                return "Left scale: the IN/OUT spectra's display scale. The + and -"
+                       " buttons beside it zoom it, 15 / 12 / 9 dB per division"
+                       " ([+30;-60], [+24;-48], [+18;-36]).";
 
             if (zone == SpectrumPanel::HelpZone::eqScale)
-                return "Right scale: the EQ (OUT vs IN) curve's own scale. Click it"
-                       " to cycle the zoom: +/-24, +/-18, +/-12 then +/-6 dB.";
+                return "Right scale: the EQ (OUT vs IN) curve's own scale. The + and"
+                       " - buttons beside it zoom it, +/-24 / +/-18 / +/-12 /"
+                       " +/-6 dB.";
         }
 
         const auto entry = helpTexts.find (c);

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.52.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.53.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -46,7 +46,8 @@ them in a clean, focused workflow:
   preset-button row) enters a **help mode**: the interface dims
   slightly, and **hovering any documented control shows a small
   contextual bubble** — a few words each, including the hidden
-  clickables (the dB scales, the LUFS reference at 0 dB). A
+  clickables (the scale +/− zoom buttons, the LUFS reference at
+  0 dB). A
   highlighted outline marks the target under the mouse. **Any
   click, or Esc, leaves the mode** — a click never triggers the
   control underneath. The old all-text help window is gone.
@@ -70,10 +71,12 @@ them in a clean, focused workflow:
   and Master (-14 LUFS).**
   **v2.51: the scale is six divisions deep (seven lines) with the top
   at 2 x dB/div, so the 0 line sits one third of the panel height from
-  the top and the panel's mid-height line is the EQ's own zero.** Cycle
-  **15, 12 or 9 dB per division** by clicking the
-  left dB scale labels
-  (+30 to -60 dB, +24 to -48 dB, +18 to -36 dB). The horizontal axis is a clean log scale
+  the top and the panel's mid-height line is the EQ's own zero.**
+  **v2.53: the small + and − buttons beside each scale zoom it** —
+  **15, 12 or 9 dB per division** on the left spectrum scale
+  (+30 to -60 dB, +24 to -48 dB, +18 to -36 dB), without disturbing
+  the written labels (each button sits between the 0 line and the
+  first division above or below it). The horizontal axis is a clean log scale
   from **16 Hz to 24 kHz** (v2.9: the data-free edges centre the useful
   band and keep the labels clear of the panel borders; no value written
   at the 16 Hz left edge) with a graduation at every 20/30/.../90,
@@ -269,9 +272,10 @@ process; treat a crash there as a plugin problem, not a shell bug.
 3. **Watch the spectrum** — the IN and OUT curves are overlaid below the
    header. The **tilt** (-3 / -4.5 / -6 dB/oct) and **Fast / Slow**
    response-speed buttons sit on the analyser strip's own top-left
-   corner; clicking the **left scale** cycles the spectrum zoom
-   (15 / 12 / 9 dB per division), clicking the **right green scale**
-   cycles the EQ curve's range (+/-24 / 18 / 12 / 6 dB), and the
+   corner; the small **+ and − buttons** beside the **left scale** zoom
+   the spectrum (15 / 12 / 9 dB per division), the ones beside the
+   **right green scale** zoom the EQ curve's range
+   (+/-24 / 18 / 12 / 6 dB), and the
    ANALYSER toggle in the sidebar hides or shows the whole analyzer
    strip. All of it is remembered in the session state.
 4. **Gain-stage** — play audio; the big readout shows the smoothed
@@ -305,6 +309,30 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.53.0**
+  - **The scale zooms are now small + and − buttons, one step per
+    press (Clement's point B2).** The v2.51 click-to-cycle on the scale
+    columns is gone: the **left spectrum scale** carries its own **+**
+    and **−** (15 / 12 / 9 dB per division) and the **right green EQ
+    scale** its own pair (8 / 6 / 4 / 2 dB per division, i.e.
+    +/-24 / 18 / 12 / 6 dB). **+ magnifies, − steps back out**; a
+    button at the end of its ladder is disabled, so a step is always
+    one honest click. The buttons sit in the clear bands **between
+    the 0 line and the first division above / below it** — the written
+    labels are untouched, and the geometry is zoom-independent (the
+    six-division grid keeps the 0 line at one third of the height
+    whatever dB/div is shown).
+  - **New starting points, Clement's choice:** the spectrum opens on
+    **[+24;−48] (12 dB per division)** and the EQ on **+/-12 dB
+    (4 dB per division)**. The ladders themselves are unchanged since
+    v2.51; only the defaults moved, and a session saved by an earlier
+    build keeps its own zooms exactly.
+  - The buttons are children of the analyser panel (the v2.52
+    tilt/speed pattern): created, wired, laid out and **restored from
+    the session in the panel itself**, disabled states included. The
+    offline harness covers the ladders end to end (14 checks), the
+    new defaults and the restore/enabled-state guarantees —
+    **26 new checks, 361 total.**
 - **2.52.0**
   - **The analyser's tilt and response-speed controls moved onto the
     analyser strip itself (Clement's layout request).** The three tilt
@@ -367,10 +395,12 @@ Delete `scanned_plugins.xml` to redo a full scan.
     lines, on two different lines**; the EQ-zero line carries a
     discrete green tint (the EQ curve's colour family) so the eye
     pairs it with the green right-hand scale.
-  - **Analyser zooms (click the left dB scale to cycle):** [+30;-60]
+  - **Analyser zooms (the + and − buttons on the left scale):**
+    [+30;-60]
     at 15 dB/div, [+24;-48] at 12 dB/div, [+18;-36] at 9 dB/div -
     the old two-scale toggle (10/6 dB per division) is gone.
-  - **EQ zooms (click the right green scale to cycle):** +/-24,
+  - **EQ zooms (the + and − buttons on the right green scale):**
+    +/-24,
     +/-18, +/-12 then +/-6 dB (8/6/4/2 dB per division over the
     full six-division grid). The old +/-9 dB scale is gone.
   - **Legacy sessions map to the same visual range on load:**

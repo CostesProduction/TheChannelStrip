@@ -30,9 +30,13 @@
 // user picks 15/12/9 dB per division (zooms [+30;-60] / [+24;-48] /
 // [+18;-36]) for the spectra and 8/6/4/2 dB per division (+/-24/18/12/6
 // dB, +/- 3 divisions) for the
-// EQ curve. v2.12: those two scales are cycled by CLICKING the
-// analyser's own scale labels (left = spectrum dB/div, right green =
-// EQ dB/div); the sidebar button rows are gone. v2.13: the loudness
+// EQ curve. v2.53: the two scales are zoomed by the panel's own +/-
+// BUTTONS, overlaid on each scale column between the 0 line and the
+// first division above / below it (v2.51-v2.52 cycled them by clicking
+// the scale labels; the v2.12-v2.50 sidebar button rows are long gone).
+// "+" magnifies - fewer dB per division - and "-" steps back out;
+// v2.53 defaults: 12 dB/div analyser (zoom [+24;-48]) and 4 dB/div EQ
+// (+/-12 dB), Clement's starting points. v2.13: the loudness
 // reference itself is clickable too - the reference label at the 0 dB
 // line cycles Record -37 / Mix -23 / Master -14 LUFS. A smoothed
 // per-panel loudness offset (lufsOffsetDb) is subtracted when drawing
@@ -50,7 +54,8 @@ public:
     explicit SpectrumPanel (TheChannelStripAudioProcessor& p);
 
     void paint (juce::Graphics& g) override;
-    void resized() override; // v2.52: places the tilt / speed buttons
+    void resized() override; // v2.52: places the tilt / speed buttons;
+                             // v2.53: places the scale +/- buttons too
     // v2.19 (roadmap point 3): hovering the analyser shows a readout of
     // the frequency under the cursor plus the IN / OUT / EQ levels at
     // that frequency. mouseMove just records the cursor and repaints;
@@ -85,6 +90,40 @@ public:
     juce::TextButton* getTiltButton (int index);
     juce::TextButton* getSpeedButton (int index);
 
+    // v2.53 (point B2): the scale zoom buttons. Four small TextButtons
+    // overlaid on the analyser's own dB scale columns - the "+" and "-"
+    // of the LEFT scale (spectrum) and of the RIGHT green scale (EQ) -
+    // placed in the clear bands between the 0 line and the first
+    // division above / below it, so the written labels stay untouched
+    // (Clement's placement: "+" between 0 and the division above, "-"
+    // between 0 and the division below, on both sides). "+" magnifies
+    // (fewer dB per division), "-" steps back out; a button at the end
+    // of its ladder is disabled. The state stays in the processor
+    // (saved with the session, as since v2.51); the panel wires the
+    // buttons in its constructor, restores them there and lays them
+    // out in resized(). These accessors exist so the editor can
+    // register their interactive-help texts and the offline harness
+    // can check the ladder's endpoints (v2.31: the help map is the
+    // single home of every explanation). Index 0 is "+", 1 is "-".
+    juce::TextButton* getAnaZoomButton (int index);
+    juce::TextButton* getEqZoomButton (int index);
+
+    // v2.53 (point B2): the zoom ladders as PURE STATIC functions, so
+    // the offline test harness can walk them without a visible editor.
+    // The ladders themselves are the v2.51 ones, unchanged - only the
+    // DEFAULT moved (v2.53: 12 and 4 dB/div). "+" = zoom IN (fewer dB
+    // per division), "-" = zoom OUT; both clamp at their ladder's end.
+    static float anaZoomIn (float cur);   // 15 -> 12 -> 9 (9 stays)
+    static float anaZoomOut (float cur);  // 9 -> 12 -> 15 (15 stays)
+    static float eqZoomIn (float cur);  // 8 -> 6 -> 4 -> 2 (2 stays)
+    static float eqZoomOut (float cur); // 2 -> 4 -> 6 -> 8 (8 stays)
+
+    // v2.53: read access to the panel's two display scales - so the
+    // harness can verify that a panel constructed after the session
+    // state was loaded restored the persisted zooms onto itself.
+    float getDbPerDiv() const { return dbPerDiv; }
+    float getEqDbPerDiv() const { return eqDbPerDiv; }
+
     // v2.19 (roadmap point 3): hover readout helpers - STATIC and free
     // of any component state so the offline test harness (TcsTests) can
     // exercise the frequency mapping and the value formatting without a
@@ -96,8 +135,9 @@ public:
 
     // v2.12: scale toggle hooks (called when the user clicks one of the
     // two scale columns; see mouseDown).
-    std::function<void()> onAnalyzerScaleClicked;
-    std::function<void()> onEqScaleClicked;
+    // v2.53: GONE - the click-to-cycle is replaced by the panel's own
+    // +/- zoom buttons (see getAnaZoomButton / getEqZoomButton); the
+    // remaining scale-column click action is the LUFS reference only.
 
     // v2.13: called when the user clicks the loudness-reference label
     // at the 0 dB line (cycles Record/Mix/Master).
@@ -172,10 +212,14 @@ private:
     float tilt = -4.5f; // dB/oct, SPAN convention: negative flattens a falling spectrum
 
     // v2.8: selectable scales (see setDbPerDiv / setEqDbPerDiv).
-    // v2.51 defaults: 15 dB/div analyser (zoom [+30;-60]) and 6 dB/div
-    // EQ (+/-18 dB) - the same visual defaults as the old 10 and 4.
-    float dbPerDiv = 15.0f;
-    float eqDbPerDiv = 6.0f;
+    // v2.53 defaults (Clement's starting points): 12 dB/div analyser
+    // (zoom [+24;-48]) and 4 dB/div EQ (+/-12 dB). The ladders are
+    // unchanged since v2.51 (15/12/9 and 8/6/4/2); only the default
+    // moved, and a session saved by any earlier build keeps its own
+    // explicit values (the processor only defaults when nothing was
+    // saved).
+    float dbPerDiv = 12.0f;
+    float eqDbPerDiv = 4.0f;
     // v2.8.1: calibrated offset between the FFT bins' own scale and the
     // display's loudness-referenced axis (0 dB = -23 LUFS): the measured
     // gap between the spectrum's energy-weighted mean and (LUFS + 23).
@@ -363,6 +407,24 @@ private:
     juce::Label tiltCaption { {}, "tilt" };
     std::array<juce::TextButton, 3> tiltButtons; // -3, -4.5, -6 dB/oct
     std::array<juce::TextButton, 2> speedButtons; // Fast / Slow
+
+    // -----------------------------------------------------------------
+    // v2.53 (point B2): the scale zoom buttons - "+" and "-" for the
+    // LEFT spectrum scale and for the RIGHT EQ scale. Children of the
+    // panel like the v2.52 tilt/speed row, but placed along the two
+    // scale columns: each button sits in the clear band between the
+    // 0 line and the first division above / below it (band heights are
+    // zoom-independent constants of the six-division grid, so the
+    // geometry holds for every ladder value - see resized() for the
+    // exact collision budget against the label boxes). TextButtons
+    // styled like the console buttons, disabled at their ladder's end.
+    // -----------------------------------------------------------------
+    std::array<juce::TextButton, 2> anaZoomButtons; // 0 = "+", 1 = "-"
+    std::array<juce::TextButton, 2> eqZoomButtons;  // 0 = "+", 1 = "-"
+
+    // v2.53: refreshes the four zoom buttons' enabled states against
+    // the current scales (a button at its ladder's end is disabled).
+    void refreshZoomButtons();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrumPanel)
 };
