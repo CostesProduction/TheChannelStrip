@@ -4526,7 +4526,7 @@ void testRelayThreadSafety()
 
 void testCostesStripBasics()
 {
-    beginTest ("v2.55.0: the Costes strip - title-toggle host/unhost, ident, memory");
+    beginTest ("v2.58.0: the Costes strip - title-toggle host/unhost, ident, memory");
 
     juce::MidiBuffer noMidi;
 
@@ -4548,16 +4548,16 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 6,
-                "the strip's six parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 8,
+                "the strip's eight parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 6,
-                "the strip exposes exactly six parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 8,
+                "the strip exposes exactly eight parameters");
 
-    // the parked defaults (trims at 0 dB, cuts at 20 Hz / 20 kHz) are unity:
-    // run past the 50 ms crossfade, then compare one processed block with
-    // its own reference
+    // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
+    // drive at 0 dB) are unity: run past the 50 ms crossfade, then compare
+    // one processed block with its own reference
     {
         juce::AudioBuffer<float> block (2, 512);
         juce::AudioBuffer<float> reference;
@@ -4615,7 +4615,7 @@ void testCostesStripBasics()
 
 void testCostesStripAudio()
 {
-    beginTest ("v2.57.0: the Costes strip audio - trim, cuts, full-band tilt, drive, oversampling");
+    beginTest ("v2.58.1: the Costes strip audio - trim, selectable Butterworth cuts, full-band tilt, drive, oversampling");
 
     juce::MidiBuffer noMidi;
 
@@ -4739,21 +4739,64 @@ void testCostesStripAudio()
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.3,
                 "back at zero the tilt cascade is exactly unity");
 
-    // low cut parked at 20 Hz is flat at 60 Hz; cutting at 500 Hz puts the
-    // 60 Hz tone more than 3 octaves down the 12 dB/oct slope
+    // the cuts, v2.58.0: parked wide open (16 Hz / 24 kHz, order 2), probed
+    // through the new Butterworth order selector. Expected values are the
+    // float64 simulation of the exact cascades measured the harness way:
+    // a first-order 500 Hz cut kills 60 Hz by 18.5 dB, order 4 by 73.7;
+    // the 2 kHz high cut kills 16 kHz by 22.4 dB at order 1 (the bilinear
+    // prewarp at 8x the corner is steeper than the analog 18 dB), by
+    // 44.7 dB at order 2 and by 89.5 dB at order 4.
+    // The 60 Hz probes keep the peak instrument: the grid there is dense
+    // (800 samples per cycle) and the readings sit far above every
+    // artefact. The 16 kHz probes moved to the lock-in in v2.58.1: the
+    // low cut (16 Hz, order 2) runs poles hugging DC in float32 (radius
+    // 0.99852 at 48 kHz, DC loop gain 1 / (1 + a1 + a2) ~ 228000), so the
+    // biquad's own rounding bias settles as a DC offset around -70 dB at
+    // its output. The high cut sections are low-passes: DC passes at
+    // unity, so once the true 16 kHz residue falls below roughly -70 dB
+    // (order 4) the peak instrument reads the offset, not the filter -
+    // the v2.58.0 build failed its own 24 dB/oct check that way while
+    // the DSP was right. The lock-in correlates against the probe over
+    // exactly 160 whole cycles per 480-sample block, and a constant
+    // offset contributes exactly zero to that correlation - the reading
+    // is the true 16 kHz bin whatever rides underneath.
     const double flat60 = measurePeak (60.0);
     strip->getApvts().getParameterAsValue ("lowCutHz").setValue (500.0f);
-    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -24.0,
-                "the 500 Hz low cut attenuates 60 Hz by at least 24 dB");
-    strip->getApvts().getParameterAsValue ("lowCutHz").setValue (20.0f);
 
-    // high cut parked at 20 kHz is flat at 16 kHz; cutting at 2 kHz puts
-    // the 16 kHz tone 3 octaves down the slope
-    const double flat16k = measurePeak (16000.0);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (0);
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60), 0.0, 0.3,
+                "the low cut's OFF position bypasses the filter");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (1);
+    expectNear (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60), -18.5, 1.5,
+                "a 6 dB/oct first-order low cut reads -18.5 dB at 60 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2);
+    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -24.0,
+                "the 12 dB/oct low cut attenuates 60 Hz by at least 24 dB");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (4);
+    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -60.0,
+                "a 24 dB/oct low cut attenuates 60 Hz by at least 60 dB");
+
+    strip->getApvts().getParameterAsValue ("lowCutHz").setValue (16.0f);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2);
+
+    const double flat16k = measureAmplitude (16000.0, 16000.0);
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (2000.0f);
-    expectTrue (juce::Decibels::gainToDecibels (measurePeak (16000.0) / flat16k) <= -24.0,
-                "the 2 kHz high cut attenuates 16 kHz by at least 24 dB");
-    strip->getApvts().getParameterAsValue ("highCutHz").setValue (20000.0f);
+
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (0);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), 0.02, 0.3,
+                "the high cut's OFF position bypasses the filter (the +0.02 is the parked reference's own 16 kHz response)");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (1);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -22.4, 0.8,
+                "a 6 dB/oct first-order high cut reads -22.4 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -44.7, 1.0,
+                "the 12 dB/oct high cut reads -44.7 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (4);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -89.5, 1.5,
+                "the 24 dB/oct high cut reads -89.5 dB at 16 kHz (the lock-in ignores the low cut's float32 DC offset)");
+
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2);
 
     // flat midband: 125 Hz and 8 kHz within 1 dB of the 1 kHz reference.
     // 125 Hz is not a whole number of cycles per 480-sample block (1.25),
@@ -4772,16 +4815,17 @@ void testCostesStripAudio()
     // has no leakage and returns the true bin amplitude.
     // ------------------------------------------------------------------
     {
-        // drive at zero: the wet/dry blend term vanishes and the strip
+        // drive at 0 dB: the wet/dry blend term vanishes and the strip
         // stays clean
-        strip->getApvts().getParameterAsValue ("driveAmount").setValue (0.0f);
+        strip->getApvts().getParameterAsValue ("driveDb").setValue (0.0f);
         const double cleanFund = measureAmplitude (1000.0, 1000.0);
         const double cleanH3 = measureAmplitude (1000.0, 3000.0);
         expectTrue (juce::Decibels::gainToDecibels (cleanH3 / cleanFund) <= -80.0,
-                    "drive at zero is clean (no third harmonic)");
+                    "drive at 0 dB is clean (no third harmonic)");
 
-        // full drive: strong odd harmonics, loudness held by the makeup
-        strip->getApvts().getParameterAsValue ("driveAmount").setValue (1.0f);
+        // full drive (+15.6 dB of input gain, the top of the v2.58 knob):
+        // strong odd harmonics, loudness held by the makeup
+        strip->getApvts().getParameterAsValue ("driveDb").setValue (15.6f);
         const double driveFund = measureAmplitude (1000.0, 1000.0);
         const double driveH3 = measureAmplitude (1000.0, 3000.0);
 
@@ -4812,14 +4856,14 @@ void testCostesStripAudio()
                     "oversampling reduces the aliasing by at least 20 dB");
 
         // back to the parked defaults
-        strip->getApvts().getParameterAsValue ("driveAmount").setValue (0.0f);
+        strip->getApvts().getParameterAsValue ("driveDb").setValue (0.0f);
         strip->getApvts().getParameterAsValue ("driveOversampled").setValue (false);
     }
 }
 
 void testCostesStripSession()
 {
-    beginTest ("v2.56.0: the Costes strip survives the session roundtrip");
+    beginTest ("v2.58.0: the Costes strip survives the session roundtrip");
 
     TheChannelStripAudioProcessor proc;
     proc.prepareToPlay (48000.0, 512);
@@ -4833,12 +4877,14 @@ void testCostesStripSession()
         return;
 
     // a recognisable knob position on every parameter, including the
-    // oversampling switch
+    // oversampling switch and the two Butterworth order selectors
     strip->getApvts().getParameterAsValue ("trimInDb").setValue (4.5f);
     strip->getApvts().getParameterAsValue ("lowCutHz").setValue (120.0f);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (5);
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (8000.0f);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (3);
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (3.0f);
-    strip->getApvts().getParameterAsValue ("driveAmount").setValue (0.4f);
+    strip->getApvts().getParameterAsValue ("driveDb").setValue (6.0f);
     strip->getApvts().getParameterAsValue ("driveOversampled").setValue (true);
 
     juce::MemoryBlock state;
@@ -4864,18 +4910,22 @@ void testCostesStripSession()
                     "trim in restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("lowCutHz")->load(), 120.0, 0.1,
                     "low cut restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("lowCutOrder")->load(), 5.0, 0.01,
+                    "the low cut's Butterworth order restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("highCutHz")->load(), 8000.0, 0.1,
                     "high cut restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("highCutOrder")->load(), 3.0, 0.01,
+                    "the high cut's Butterworth order restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("tiltDb")->load(), 3.0, 0.01,
                     "tilt restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("driveAmount")->load(), 0.4, 0.01,
+        expectNear (rehosted->getApvts().getRawParameterValue ("driveDb")->load(), 6.0, 0.01,
                     "drive restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("driveOversampled")->load(), 1.0, 0.01,
                     "the oversampling switch restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 6,
-                "the restored strip's six parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 8,
+                "the restored strip's eight parameters are relayed");
 }
 
 void testIntegrationRealConsole()

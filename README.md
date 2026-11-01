@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.57.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.58.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,50 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.58.1**
+  - **Test-harness fix, no DSP change.** The v2.58.0 offline suite failed
+    two of its own 16 kHz high-cut checks on a perfectly correct filter.
+    Both failures were measurement artefacts of the peak instrument, not
+    sound bugs. First, at 16 kHz over 48 kHz the sampling grid holds only
+    three points per cycle and never touches the crest, so the peak reads
+    0.87 to 1.0 of the true amplitude depending on phase - the "off"
+    bypass read -1.17 dB against a naive 0.0 expectation. Second, and
+    more subtle: the parked 16 Hz low cut runs its biquad poles hugging
+    DC in float32 (radius 0.99852, DC loop gain about 228000), so the
+    filter's own rounding bias settles as a small DC offset near -70 dB
+    at its output; the high-cut sections are low-passes and pass DC at
+    unity, so once the true 16 kHz residue of the order-4 cascade falls
+    below that offset the peak instrument reads the offset instead of
+    the filter. The four high-cut checks now use the harness's coherent
+    lock-in (exactly 160 whole cycles per 480-sample block at 16 kHz):
+    a constant offset contributes exactly zero to the correlation, and
+    the reading is the true 16 kHz bin to within hundredths of a dB
+    (off +0.02, order 1 -22.4, order 2 -44.7, order 4 -89.5 dB), with
+    every check now an expectNear that prints its reading on any future
+    failure. The audio DSP is untouched.
+- **2.58.0**
+  - **Selectable Butterworth order on both cuts.** Under each cut
+    frequency knob sits a horizontal slope slider: **"off"** at the far
+    left (the filter is bypassed entirely), then the order from 1 to 16,
+    read out as **6 to 96 dB/oct**. The cascade is textbook Butterworth
+    (Q 0.7071 for the single order-2 section, the exact per-section Q
+    table above that; odd orders lead with a prewarped first-order
+    stage), sits at exactly -3.01 dB at the corner for every order, and
+    the highest order's Q (5.10 at order 16) stays comfortably stable in
+    float32. Default order 2 (12 dB/oct), the sound every existing
+    session already knows.
+  - **Wider cut ranges, precision readouts.** Low cut **[16, 1600] Hz**
+    (whole Hz), high cut **[240, 24000] Hz** (0.01 kHz steps, read as
+    kHz with two decimals); trim **[-20, +10] dB**, tilt and drive in
+    **0.1 dB** steps. Every knob formats itself through its parameter's
+    own text functions, typed values included (a French decimal comma
+    is accepted too), and the knob positions snap to the legal values
+    on drag, typed entry and automation alike.
+  - **The drive knob reads in dB.** 0 (clean, bit-transparent) to
+    **+15.6 dB** of input gain into the tanh -- the top of the new knob
+    is the full 6x saturation of the old one (20 log10 (6) = 15.56
+    dB). The parameter id changed ("driveDb"), so sessions saved with
+    the old normalised knob simply park at 0 dB.
 - **2.57.0**
   - **The tilt is a full-band tilt (the FabFilter style).** A straight
     line of adjustable slope in the log(f)/dB plane replaces the two

@@ -1,15 +1,27 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.57.0 (roadmap C2)
+// src/CostesStrip.h - v2.58.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
 // consoles (TheChannelStripAudioProcessor::selectCostesStrip). Signal path:
-// trim in -> 12 dB/oct low cut -> 12 dB/oct high cut -> tilt -> drive (tanh
-// saturation with an invisible auto-makeup calibrated on a -12 dBFS sine) ->
-// optional 2x oversampling around the drive stage. Because it rides the
-// exact same hosting path as the consoles, it inherits the click-free 50 ms
-// crossfade, the per-ident settings memory, the session save/restore and
-// the parameter relay without a single extra wire.
+// trim in -> variable-order Butterworth low cut -> variable-order Butterworth
+// high cut -> tilt -> drive (tanh saturation with an invisible auto-makeup
+// calibrated on a -12 dBFS sine) -> optional 2x oversampling around the drive
+// stage. Because it rides the exact same hosting path as the consoles, it
+// inherits the click-free 50 ms crossfade, the per-ident settings memory,
+// the session save/restore and the parameter relay without a single extra
+// wire.
+//
+// v2.58.0 (Clement's remarks): the cuts are full [16, 1600] Hz and
+// [240, 24000] Hz logarithmic sweeps with a selectable Butterworth order -
+// a horizontal slope slider from "off" (no filtering at all) to 16
+// (96 dB/oct, eight cascaded second-order sections) - the trim reads
+// -20 to +10 dB, and every knob displays and accepts 0.1 dB / whole-Hz /
+// 0.01 kHz precision through the parameter's own text functions (the
+// slider attachments wire them straight into the editable readouts). The
+// drive knob moved to decibels of input gain: "driveDb", 0 (clean) to
+// +15.6 dB (the full 6x input gain of the tanh), so the old "driveAmount"
+// sessions simply park at 0 dB.
 //
 // v2.57.0 (Clement's remark 1): the tilt is now a FULL band tilt - a
 // straight line of adjustable slope in the log(f)/dB plane, the FabFilter
@@ -80,7 +92,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // The editor (and the offline harness) reach the six parameters
+    // The editor (and the offline harness) reach the eight parameters
     // through this - everything else is private DSP plumbing.
     juce::AudioProcessorValueTreeState& getApvts() { return apvts; }
 
@@ -122,14 +134,21 @@ private:
     static constexpr int numTiltShelves = 10;
     static constexpr double tiltPivotHz = 632.4555320336759;   // sqrt (20 * 20000)
 
+    // the cuts: a Butterworth order from 0 ("off") to 16 is up to eight
+    // cascaded second-order sections plus an optional first-order section
+    // (v2.58.0)
+    static constexpr int maxCutSections = 8;
+
     juce::AudioProcessorValueTreeState apvts;
 
     // raw pointers into the APVTS parameters (lock-free reads)
     std::atomic<float>* trimInDb          = nullptr;
     std::atomic<float>* lowCutHz          = nullptr;
+    std::atomic<float>* lowCutOrder       = nullptr;
     std::atomic<float>* highCutHz         = nullptr;
+    std::atomic<float>* highCutOrder      = nullptr;
     std::atomic<float>* tiltDb            = nullptr;
-    std::atomic<float>* driveAmount       = nullptr;
+    std::atomic<float>* driveDb           = nullptr;
     std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
 
     double currentSampleRate = 48000.0;
@@ -139,15 +158,21 @@ private:
     // and each block only steps the response a fraction of a dB
     juce::SmoothedValue<float> trimInGain;
 
-    Biquad lowCut[2];
-    Biquad highCut[2];
+    // the cuts: [section][channel], the first (order + 1) / 2 sections
+    // active (an odd order's first section is the first-order stage)
+    Biquad lowCut[maxCutSections][2];
+    Biquad highCut[maxCutSections][2];
+    int activeLowCutSections  = 0;
+    int activeHighCutSections = 0;
 
     // the tilt cascade: one shelf per octave around the pivot (indexed
     // [shelf][channel]) - see numTiltShelves above
     Biquad tiltShelves[numTiltShelves][2];
 
-    float lastLowCutHz  = -1.0f;
-    float lastHighCutHz = -1.0f;
+    float lastLowCutHz   = -1.0f;
+    float lastHighCutHz  = -1.0f;
+    int   lastLowCutOrder  = -1;
+    int   lastHighCutOrder = -1;
     float lastTiltDb    = -999.0f;
 
     // 2x oversampling for the drive stage: polyphase IIR halfband, built
@@ -171,6 +196,12 @@ private:
 // illuminated SSL-style plate - dim and unlit with a dark LED when off,
 // a glowing amber plate and a lit LED when on - so its state reads at a
 // glance instead of hiding in a default checkbox tick.
+//
+// v2.58.0 (Clement's remarks): under each cut frequency knob sits a
+// horizontal slope slider - "off" at the far left, then the Butterworth
+// order stepped as 6 to 96 dB/oct - and every readout formats itself
+// through its parameter's own text functions (integer Hz, 0.01 kHz,
+// 0.1 dB), typed values included.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -185,6 +216,7 @@ private:
     CostesStrip& owner;
 
     juce::Slider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
+    juce::Slider lowCutSlope, highCutSlope;
     juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
 
     // the oversampling switch: a ToggleButton that paints its own plate
@@ -199,7 +231,9 @@ private:
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutSlopeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> highCutAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> highCutSlopeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tiltAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> oversampleAttachment;

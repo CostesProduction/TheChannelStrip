@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.57.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.58.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -12,18 +12,35 @@
 
 namespace
 {
-    // Butterworth corner for both cuts: maximally flat passband, the exact
-    // textbook 12 dB/oct single-section slope the harness asserts against.
-    // The tilt shelves share it: each octave step of the cascade is a
-    // smooth, ripple-free shelf transition, and the octave spacing lets
-    // the neighbours' transitions cancel the staircase (v2.57.0).
-    constexpr double cutQ    = 0.7071067811865476;
-    constexpr float  shelfQ  = 0.7071067811865476f;
+    // Butterworth quality factors for the cascaded cut sections. An order-N
+    // Butterworth factors into second-order sections whose Q values are
+    // 1 / (2 cos ((2j - 1) pi / 2N)) when N is even and
+    // 1 / (2 cos (j pi / N)) when N is odd (one first-order section carries
+    // the odd pole); the values below are the textbook ones (N = 2: 0.7071,
+    // N = 4: 0.5412 / 1.3066, N = 16 tops at 5.1011 - comfortably stable in
+    // float32 direct form I). The cascades sit at exactly -3.01 dB at the
+    // corner for every order, the maximally-flat Butterworth property.
+    constexpr float shelfQ = 0.7071067811865476f;
 
-    // the drive: input gain g = 1 + slope * amount (up to 6x at full), a
-    // tanh soft clip, and an auto-makeup that keeps the loudness of a
-    // -12 dBFS sine untouched (the calibration reference). The blend
-    // y = x + amount * (wet - x) is exactly bit-clean at amount == 0.
+    // the Q of the second-order section with the given 0-based index in an
+    // order-N Butterworth cascade (the first-order section of an odd order
+    // is NOT one of these - it is built separately, prewarped)
+    double butterworthQ (int order, int sectionIndex)
+    {
+        const int j = sectionIndex + 1;
+        const double angle = (order % 2 == 0)
+            ? (2.0 * (double) j - 1.0) * juce::MathConstants<double>::pi / (2.0 * (double) order)
+            : (double) j * juce::MathConstants<double>::pi / (double) order;
+
+        return 1.0 / (2.0 * std::cos (angle));
+    }
+
+    // the drive: the knob is decibels of input gain into the tanh, 0 to
+    // +15.6 dB (the old normalised "amount" mapped the same sweep onto
+    // g = 1 + slope * amount, up to 6x - and 20 log10 (6) = 15.56 dB, so
+    // the top of the new knob is the top of the old one). amount below is
+    // the normalised blend the stage has always used, recovered from the
+    // dB reading: exactly 0 at 0 dB (bit-clean) and 1 at the top.
     constexpr float driveSlope    = 5.0f;
     constexpr float driveMakeupRef = 0.25f;
 
@@ -44,9 +61,13 @@ namespace
     const juce::Colour screwColour  (0xff8a7d63);
 
     // a true logarithmic sweep for the cut corners: every octave of the
-    // range spans the same knob travel (the old skew approximation was
-    // close but not exact; the roadmap asked for logarithmic)
-    juce::NormalisableRange<float> makeLogRange (float minValue, float maxValue)
+    // range spans the same knob travel, and the optional snap lambda lands
+    // every knob position on a legal value (whole Hz for the low cut, tens
+    // of Hz for the high cut - the host-facing conversion snaps on every
+    // set, drag, typed value and automation alike)
+    juce::NormalisableRange<float> makeLogRange (
+        float minValue, float maxValue,
+        juce::NormalisableRange<float>::ValueRemapFunction snapToLegalValue = {})
     {
         return juce::NormalisableRange<float> (
             minValue, maxValue,
@@ -58,7 +79,8 @@ namespace
             {
                 return std::log (juce::jmax (value, start) / start)
                        / std::log (end / start);
-            });
+            },
+            snapToLegalValue);
     }
 }
 
@@ -74,51 +96,176 @@ CostesStrip::CostesStrip()
 {
     trimInDb         = apvts.getRawParameterValue ("trimInDb");
     lowCutHz         = apvts.getRawParameterValue ("lowCutHz");
+    lowCutOrder      = apvts.getRawParameterValue ("lowCutOrder");
     highCutHz        = apvts.getRawParameterValue ("highCutHz");
+    highCutOrder     = apvts.getRawParameterValue ("highCutOrder");
     tiltDb           = apvts.getRawParameterValue ("tiltDb");
-    driveAmount      = apvts.getRawParameterValue ("driveAmount");
+    driveDb          = apvts.getRawParameterValue ("driveDb");
     driveOversampled = apvts.getRawParameterValue ("driveOversampled");
 
-    jassert (trimInDb != nullptr && lowCutHz != nullptr && highCutHz != nullptr
-             && tiltDb != nullptr && driveAmount != nullptr
-             && driveOversampled != nullptr);
+    jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
+             && highCutHz != nullptr && highCutOrder != nullptr && tiltDb != nullptr
+             && driveDb != nullptr && driveOversampled != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    // the trim: +/- 24 dB, unity at the default
+    // the shared dB text plumbing: one decimal place and a " dB" suffix on
+    // the way out, and a parser that tolerates the French decimal comma on
+    // the way in. The slider attachments wire these straight into the
+    // editable readouts, so every knob shows and accepts the same format
+    const auto dbText = [] (float value, int)
+    {
+        return juce::String (value, 1) + " dB";
+    };
+
+    const auto dbParse = [] (const juce::String& text)
+    {
+        return text.trim()
+                   .replaceCharacter (',', '.')
+                   .upToFirstOccurrenceOf (" ", false, true)
+                   .getFloatValue();
+    };
+
+    // the trim: -20 to +10 dB in 0.1 dB steps, unity at the default
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "trimInDb", 1 }, "Trim In",
-        juce::NormalisableRange<float> (-24.0f, 24.0f), 0.0f));
+        juce::NormalisableRange<float> (-20.0f, 10.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
 
-    // the cuts: parked wide open by default (20 Hz / 20 kHz), swept
-    // logarithmically so the musically useful corner region spreads
-    // evenly across the knob travel
+    // the low cut corner: [16, 1600] Hz, logarithmic, snapped to whole Hz
+    // by the range's own snap lambda (every drag position, typed value,
+    // automation point and session restore land on an integer frequency)
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "lowCutHz", 1 }, "Low Cut",
-        makeLogRange (20.0f, 500.0f), 20.0f));
+        makeLogRange (16.0f, 1600.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, std::round (v));
+                      }),
+        16.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (juce::roundToInt (value)) + " Hz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
 
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
+    // the low cut slope: a Butterworth order from 0 ("off" - the filter is
+    // bypassed entirely) to 16 (96 dB/oct, eight cascaded sections). The
+    // readout speaks in dB/oct - the number the ear knows - and accepts
+    // both it and "off"
+    layout.add (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID { "lowCutOrder", 1 }, "Low Cut Slope",
+        0, 16, 2,
+        juce::AudioParameterIntAttributes()
+            .withStringFromValueFunction ([] (int value, int)
+            {
+                return value == 0 ? juce::String ("off")
+                                  : juce::String (value * 6) + " dB/oct";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                if (text.trim().equalsIgnoreCase ("off"))
+                    return 0;
+
+                const double slope = text.trim()
+                                            .replaceCharacter (',', '.')
+                                            .upToFirstOccurrenceOf (" ", false, true)
+                                            .getDoubleValue();
+
+                return (int) juce::jlimit (0.0, 16.0, std::round (slope / 6.0));
+            })));
+
+    // the high cut corner: [240, 24000] Hz, logarithmic, snapped to whole
+    // tens of Hz (0.01 kHz); the readout is kHz with two decimals, and a
+    // typed number without a unit is read as kHz - the unit the knob
+    // itself displays
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "highCutHz", 1 }, "High Cut",
-        makeLogRange (1000.0f, 20000.0f), 20000.0f));
+        makeLogRange (240.0f, 24000.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, 10.0f * std::round (v / 10.0f));
+                      }),
+        24000.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (value * 0.001f, 2) + " kHz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+                const bool kHz = t.endsWithIgnoreCase ("khz");
+
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                const float parsed = t.replaceCharacter (',', '.').getFloatValue();
+
+                return kHz ? 1000.0f * parsed : parsed;
+            })));
+
+    // the high cut slope: the same off-to-96 dB/oct Butterworth selector
+    layout.add (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID { "highCutOrder", 1 }, "High Cut Slope",
+        0, 16, 2,
+        juce::AudioParameterIntAttributes()
+            .withStringFromValueFunction ([] (int value, int)
+            {
+                return value == 0 ? juce::String ("off")
+                                  : juce::String (value * 6) + " dB/oct";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                if (text.trim().equalsIgnoreCase ("off"))
+                    return 0;
+
+                const double slope = text.trim()
+                                            .replaceCharacter (',', '.')
+                                            .upToFirstOccurrenceOf (" ", false, true)
+                                            .getDoubleValue();
+
+                return (int) juce::jlimit (0.0, 16.0, std::round (slope / 6.0));
+            })));
 
     // the tilt (v2.57.0, Clement's remark 1): a full-band tilt, the
     // FabFilter style - a straight line of adjustable slope in the
     // log(f)/dB plane. The single knob is the +/- 12 dB gained or lost
     // BETWEEN 20 Hz AND 20 kHz; 0 dB at the default. The line pivots at
     // 632.4555 Hz, the geometric centre of the band (see
-    // refreshTiltCoefficients for how the cascade draws it)
+    // refreshTiltCoefficients for how the cascade draws it). 0.1 dB steps
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "tiltDb", 1 }, "Tilt",
-        juce::NormalisableRange<float> (-12.0f, 12.0f), 0.0f));
+        juce::NormalisableRange<float> (-12.0f, 12.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
 
-    // the drive amount: 0 (clean) to 1 (full tanh saturation), blended
-    // against the dry signal so 0 is bit-exactly transparent
+    // the drive (v2.58.0): decibels of input gain into the tanh, 0 (clean,
+    // bit-transparent) to +15.6 dB (the full 6x saturation of the old
+    // normalised knob - 20 log10 (6) = 15.56 dB), in 0.1 dB steps. A NEW
+    // parameter id: sessions saved with the old "driveAmount" simply find
+    // no value here and park at the 0 dB default
     layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "driveAmount", 1 }, "Drive",
-        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
+        juce::ParameterID { "driveDb", 1 }, "Drive",
+        juce::NormalisableRange<float> (0.0f, 15.6f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
 
     // the 2x oversampling toggle for the drive stage (polyphase IIR
     // halfband: sub-sample latency, which the strip simply keeps at
@@ -151,15 +298,19 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     trimInGain.reset (currentSampleRate, 0.02);
     trimInGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (trimInDb->load()));
 
-    lastLowCutHz  = -1.0f;
-    lastHighCutHz = -1.0f;
-    lastTiltDb    = -999.0f;
+    lastLowCutHz    = -1.0f;
+    lastHighCutHz   = -1.0f;
+    lastLowCutOrder  = -1;
+    lastHighCutOrder = -1;
+    lastTiltDb      = -999.0f;
 
-    for (auto& section : lowCut)
-        section.reset();
+    for (auto& row : lowCut)
+        for (auto& section : row)
+            section.reset();
 
-    for (auto& section : highCut)
-        section.reset();
+    for (auto& row : highCut)
+        for (auto& section : row)
+            section.reset();
 
     for (auto& row : tiltShelves)
         for (auto& section : row)
@@ -190,50 +341,107 @@ void CostesStrip::refreshCutCoefficients()
     // change must never feed the RBJ formulas an w0 at or past pi
     const float nyquistGuard = (float) (currentSampleRate * 0.45);
 
-    const float low  = juce::jlimit (20.0f,   nyquistGuard, lowCutHz->load());
-    const float high = juce::jlimit (500.0f, nyquistGuard, highCutHz->load());
+    const float low  = juce::jlimit (16.0f,   nyquistGuard, lowCutHz->load());
+    const float high = juce::jlimit (240.0f, nyquistGuard, highCutHz->load());
+
+    const int lowOrder  = juce::jlimit (0, 16, (int) lowCutOrder->load());
+    const int highOrder = juce::jlimit (0, 16, (int) highCutOrder->load());
 
     // cache guard: a step smaller than 1e-4 Hz between blocks does not
     // refresh the coefficients (a direct float compare used to trip
-    // -Wfloat-equal; the epsilon keeps the cache behaviour identical)
+    // -Wfloat-equal; the epsilon keeps the cache behaviour identical).
+    // The orders ride the cache too: an order change alone must rebuild
     if (std::abs (low - lastLowCutHz) < 1.0e-4f
-        && std::abs (high - lastHighCutHz) < 1.0e-4f)
+        && std::abs (high - lastHighCutHz) < 1.0e-4f
+        && lowOrder == lastLowCutOrder && highOrder == lastHighCutOrder)
         return;
 
-    lastLowCutHz = low;
-    lastHighCutHz = high;
+    lastLowCutHz     = low;
+    lastHighCutHz    = high;
+    lastLowCutOrder  = lowOrder;
+    lastHighCutOrder = highOrder;
 
-    // RBJ high-pass (the low cut): b0 = (1 + cos w0) / 2 ...
+    // how many sections the process loop runs: an odd order's first-order
+    // stage occupies one section slot, every remaining pole pair another
+    activeLowCutSections  = (lowOrder  + 1) / 2;
+    activeHighCutSections = (highOrder + 1) / 2;
+
+    // RBJ high-pass (the low cut): b0 = (1 + cos w0) / 2 ... For an odd
+    // order the first section is a prewarped bilinear first-order stage
+    // (t = tan (w0 / 2), |H (w0)| = 1 / sqrt (2) exactly) whose pole maps
+    // the analog corner precisely; the remaining sections are RBJ
+    // biquads with the Butterworth Q of their slot
+    for (int j = 0; j < activeLowCutSections; ++j)
     {
-        const double w0 = juce::MathConstants<double>::twoPi * (double) low / currentSampleRate;
-        const double cs = std::cos (w0);
-        const double alpha = std::sin (w0) / (2.0 * cutQ);
-        const double a0 = 1.0 + alpha;
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
 
-        const float b0 = (float) ((1.0 + cs) * 0.5 / a0);
-        const float b1 = (float) (-(1.0 + cs) / a0);
-        const float b2 = (float) ((1.0 + cs) * 0.5 / a0);
-        const float a1 = (float) (-2.0 * cs / a0);
-        const float a2 = (float) ((1.0 - alpha) / a0);
+        if (lowOrder % 2 == 1 && j == 0)
+        {
+            const double w0 = juce::MathConstants<double>::twoPi
+                                  * (double) low / currentSampleRate;
+            const double t = std::tan (w0 * 0.5);
+            const double d = 1.0 + t;
 
-        for (auto& section : lowCut)
+            b0 = (float) (1.0 / d);
+            b1 = (float) (-1.0 / d);
+            a1 = (float) ((t - 1.0) / d);
+        }
+        else
+        {
+            const double q = (lowOrder % 2 == 1) ? butterworthQ (lowOrder, j - 1)
+                                                 : butterworthQ (lowOrder, j);
+            const double w0 = juce::MathConstants<double>::twoPi
+                                  * (double) low / currentSampleRate;
+            const double cs = std::cos (w0);
+            const double alpha = std::sin (w0) / (2.0 * q);
+            const double a0 = 1.0 + alpha;
+
+            b0 = (float) ((1.0 + cs) * 0.5 / a0);
+            b1 = (float) (-(1.0 + cs) / a0);
+            b2 = (float) ((1.0 + cs) * 0.5 / a0);
+            a1 = (float) (-2.0 * cs / a0);
+            a2 = (float) ((1.0 - alpha) / a0);
+        }
+
+        for (auto& section : lowCut[j])
             section.setCoefficients (b0, b1, b2, a1, a2);
     }
 
-    // RBJ low-pass (the high cut): b0 = (1 - cos w0) / 2 ...
+    // RBJ low-pass (the high cut): b0 = (1 - cos w0) / 2 ... same odd-order
+    // first-order treatment (t = tan (w0 / 2): b0 = b1 = t / d)
+    for (int j = 0; j < activeHighCutSections; ++j)
     {
-        const double w0 = juce::MathConstants<double>::twoPi * (double) high / currentSampleRate;
-        const double cs = std::cos (w0);
-        const double alpha = std::sin (w0) / (2.0 * cutQ);
-        const double a0 = 1.0 + alpha;
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
 
-        const float b0 = (float) ((1.0 - cs) * 0.5 / a0);
-        const float b1 = (float) ((1.0 - cs) / a0);
-        const float b2 = (float) ((1.0 - cs) * 0.5 / a0);
-        const float a1 = (float) (-2.0 * cs / a0);
-        const float a2 = (float) ((1.0 - alpha) / a0);
+        if (highOrder % 2 == 1 && j == 0)
+        {
+            const double w0 = juce::MathConstants<double>::twoPi
+                                  * (double) high / currentSampleRate;
+            const double t = std::tan (w0 * 0.5);
+            const double d = 1.0 + t;
 
-        for (auto& section : highCut)
+            b0 = (float) (t / d);
+            b1 = (float) (t / d);
+            a1 = (float) ((t - 1.0) / d);
+        }
+        else
+        {
+            const double q = (highOrder % 2 == 1) ? butterworthQ (highOrder, j - 1)
+                                                  : butterworthQ (highOrder, j);
+            const double w0 = juce::MathConstants<double>::twoPi
+                                  * (double) high / currentSampleRate;
+            const double cs = std::cos (w0);
+            const double alpha = std::sin (w0) / (2.0 * q);
+            const double a0 = 1.0 + alpha;
+
+            b0 = (float) ((1.0 - cs) * 0.5 / a0);
+            b1 = (float) ((1.0 - cs) / a0);
+            b2 = (float) ((1.0 - cs) * 0.5 / a0);
+            a1 = (float) (-2.0 * cs / a0);
+            a2 = (float) ((1.0 - alpha) / a0);
+        }
+
+        for (auto& section : highCut[j])
             section.setCoefficients (b0, b1, b2, a1, a2);
     }
 }
@@ -333,9 +541,13 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const float tilt = tiltDb->load();
     const float tiltCompensation = juce::Decibels::decibelsToGain (-tilt * 0.5f);
 
-    // the drive constants, evaluated once per block: the input gain, and
-    // the auto-makeup that holds the loudness of the calibration sine
-    const float drive = driveAmount->load();
+    // the drive constants, evaluated once per block. The knob reads in dB
+    // of input gain; the normalised blend the stage has always used is
+    // recovered from it (exactly 0 at 0 dB, exactly 1 at the top)
+    const float driveDbValue = driveDb->load();
+    const float drive = juce::jlimit (
+        0.0f, 1.0f,
+        (juce::Decibels::decibelsToGain (driveDbValue) - 1.0f) / driveSlope);
     const float driveGain = 1.0f + driveSlope * drive;
     const float driveMakeup = driveMakeupRef / std::tanh (driveMakeupRef * driveGain);
 
@@ -357,8 +569,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         {
             float sample = channels[ch][i] * gainIn;
 
-            sample = lowCut[ch].processSample (sample);
-            sample = highCut[ch].processSample (sample);
+            for (int k = 0; k < activeLowCutSections; ++k)
+                sample = lowCut[k][ch].processSample (sample);
+
+            for (int k = 0; k < activeHighCutSections; ++k)
+                sample = highCut[k][ch].processSample (sample);
 
             for (int k = 0; k < numTiltShelves; ++k)
                 sample = tiltShelves[k][ch].processSample (sample);
@@ -473,10 +688,29 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     };
 
     setUpKnob (trimInKnob,  trimInLabel,  "TRIM IN",  0.0f);
-    setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  20.0f);
-    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 20000.0f);
+    setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  16.0f);
+    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f);
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
+
+    // the slope selectors under the cut knobs (v2.58.0, Clement's remark):
+    // a horizontal slider from "off" at the far left to 96 dB/oct at the
+    // far right. The readout is the parameter's own text ("off", "6 dB/oct"
+    // ... "96 dB/oct"), so the label never drifts from the DSP
+    const auto setUpSlope = [this] (juce::Slider& slope)
+    {
+        slope.setSliderStyle (juce::Slider::LinearHorizontal);
+        slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 70, 14);
+        slope.setColour (juce::Slider::trackColourId, knobBezel);
+        slope.setColour (juce::Slider::thumbColourId, valueArc);
+        slope.setColour (juce::Slider::textBoxTextColourId, engraving);
+        slope.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0x00000000));
+        slope.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0x00000000));
+        addAndMakeVisible (slope);
+    };
+
+    setUpSlope (lowCutSlope);
+    setUpSlope (highCutSlope);
 
     // the oversampling switch, an SSL-style illuminated plate under the
     // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
@@ -490,12 +724,16 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "trimInDb", trimInKnob);
     lowCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "lowCutHz", lowCutKnob);
+    lowCutSlopeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "lowCutOrder", lowCutSlope);
     highCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "highCutHz", highCutKnob);
+    highCutSlopeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "highCutOrder", highCutSlope);
     tiltAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "tiltDb", tiltKnob);
     driveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        owner.getApvts(), "driveAmount", driveKnob);
+        owner.getApvts(), "driveDb", driveKnob);
     oversampleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "driveOversampled", oversampleButton);
 
@@ -507,7 +745,9 @@ CostesStripEditor::~CostesStripEditor()
     // detach the controls before the LookAndFeel member goes away
     trimInAttachment.reset();
     lowCutAttachment.reset();
+    lowCutSlopeAttachment.reset();
     highCutAttachment.reset();
+    highCutSlopeAttachment.reset();
     tiltAttachment.reset();
     driveAttachment.reset();
     oversampleAttachment.reset();
@@ -584,8 +824,9 @@ void CostesStripEditor::resized()
     area.removeFromTop (44);   // the name plate and the section captions
     area.removeFromBottom (6);
 
-    // five equal columns: knob above, caption below; the drive column
-    // also carries the OS toggle under its caption
+    // five equal columns: knob above, caption below; the cut columns also
+    // carry their slope slider under the caption, and the drive column
+    // hosts the OS toggle under its caption
     const int columnWidth = area.getWidth() / 5;
 
     for (int i = 0; i < 5; ++i)
@@ -594,16 +835,24 @@ void CostesStripEditor::resized()
 
         auto* knob = &trimInKnob;
         auto* caption = &trimInLabel;
+        juce::Slider* slope = nullptr;
 
-        if (i == 1)      { knob = &lowCutKnob;  caption = &lowCutLabel; }
-        else if (i == 2) { knob = &highCutKnob; caption = &highCutLabel; }
+        if (i == 1)      { knob = &lowCutKnob;  caption = &lowCutLabel;  slope = &lowCutSlope; }
+        else if (i == 2) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; }
         else if (i == 3) { knob = &tiltKnob;    caption = &tiltLabel; }
         else if (i == 4) { knob = &driveKnob;   caption = &driveLabel; }
 
-        // the drive column hosts the switch below its caption
         const int knobHeight = (i == 4) ? column.getHeight() - 48
-                                       : column.getHeight() - 20;
+                             : (slope != nullptr) ? column.getHeight() - 44
+                                                  : column.getHeight() - 20;
 
+        if (slope != nullptr)
+        {
+            auto slopeBounds = column.removeFromBottom (22).reduced (6, 0);
+            slope->setBounds (slopeBounds);
+        }
+
+        // the drive column hosts the switch below its caption
         if (i == 4)
         {
             auto toggleBounds = column.removeFromBottom (26);
