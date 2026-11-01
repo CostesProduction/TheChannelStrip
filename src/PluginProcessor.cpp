@@ -477,6 +477,15 @@ void TheChannelStripAudioProcessor::prepareToPlay (double sampleRate, int sample
     analyzerOut.prepare (currentSampleRate);
     transferAnalyzer.prepare (currentSampleRate, currentBlockSize);
 
+    // v2.57.0: a fresh prepare re-arms the CPU metering window and
+    // retires the reading - the sidebar shows "--" until a new full
+    // second of audio has flowed (the old number could belong to a
+    // different console, block size or sample rate)
+    cpuWindowStart = {};
+    cpuLastBlockEnd = {};
+    cpuWork = std::chrono::nanoseconds::zero();
+    estimatedCpuLoadPercent.store (-1.0, std::memory_order_relaxed);
+
     // v2.14: re-negotiate the hosted console's own bus layout whenever the
     // track format changes (the host has released us before calling this,
     // so the hosted instance is inactive and the JUCE hosting queries the
@@ -515,6 +524,16 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const int numSamples = buffer.getNumSamples();
     if (numSamples <= 0)
         return;
+
+    // v2.57.0 (Clement's remark 3): the CPU metering window. The clock
+    // starts after the empty-block bail-out, and the work is accounted
+    // at the very end of the block - the meter sees exactly what the
+    // host pays for (the meters below, the hosted console, the bridge,
+    // the latency refresh, all of it). See the members in the header:
+    // a fresh window arms on a half-second gap or a fresh prepare.
+    const auto cpuBlockStart = std::chrono::steady_clock::now();
+    const bool cpuFreshWindow = (cpuBlockStart - cpuLastBlockEnd)
+                                    > std::chrono::milliseconds (500);
 
     // v2.8: the LUFS meters and spectrum analysers feed the editor only.
     // When no editor is open they are skipped entirely, so a session full
@@ -607,6 +626,39 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     {
         lastReportedLatency = hostedLatency;
         setLatencySamples (hostedLatency);
+    }
+
+    // v2.57.0: close the CPU metering window - the work of this block
+    // joins the accumulator, and once a full second of audio has flowed
+    // through the window the percent of real time is published (the
+    // editor refreshes its sidebar readout at most once a second, so
+    // the number moves calmly). No allocation, no lock - a steady_clock
+    // read and two integer adds per block.
+    const auto cpuBlockEnd = std::chrono::steady_clock::now();
+
+    if (cpuFreshWindow)
+    {
+        cpuWindowStart = cpuBlockStart;
+        cpuWork = std::chrono::nanoseconds::zero();
+    }
+
+    cpuWork += std::chrono::duration_cast<std::chrono::nanoseconds> (
+        cpuBlockEnd - cpuBlockStart);
+    cpuLastBlockEnd = cpuBlockEnd;
+
+    const auto cpuWindowLength = std::chrono::duration_cast<std::chrono::nanoseconds> (
+        cpuBlockEnd - cpuWindowStart);
+
+    if (cpuWindowLength >= std::chrono::seconds (1))
+    {
+        estimatedCpuLoadPercent.store (
+            juce::jlimit (0.0, 100.0,
+                          100.0 * (double) cpuWork.count()
+                              / (double) cpuWindowLength.count()),
+            std::memory_order_relaxed);
+
+        cpuWindowStart = cpuBlockEnd;
+        cpuWork = std::chrono::nanoseconds::zero();
     }
 }
 

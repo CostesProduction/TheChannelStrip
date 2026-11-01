@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.56.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.57.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -14,8 +14,9 @@ namespace
 {
     // Butterworth corner for both cuts: maximally flat passband, the exact
     // textbook 12 dB/oct single-section slope the harness asserts against.
-    // The tilt shelves share it: a smooth, symmetrical slope around the
-    // 1 kHz pivot with no ripple on either side.
+    // The tilt shelves share it: each octave step of the cascade is a
+    // smooth, ripple-free shelf transition, and the octave spacing lets
+    // the neighbours' transitions cancel the staircase (v2.57.0).
     constexpr double cutQ    = 0.7071067811865476;
     constexpr float  shelfQ  = 0.7071067811865476f;
 
@@ -103,8 +104,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         juce::ParameterID { "highCutHz", 1 }, "High Cut",
         makeLogRange (1000.0f, 20000.0f), 20000.0f));
 
-    // the tilt: +/- 12 dB around a 1 kHz pivot (two mirrored shelves in
-    // the DSP), 0 dB at the default - the tone control of the section
+    // the tilt (v2.57.0, Clement's remark 1): a full-band tilt, the
+    // FabFilter style - a straight line of adjustable slope in the
+    // log(f)/dB plane. The single knob is the +/- 12 dB gained or lost
+    // BETWEEN 20 Hz AND 20 kHz; 0 dB at the default. The line pivots at
+    // 632.4555 Hz, the geometric centre of the band (see
+    // refreshTiltCoefficients for how the cascade draws it)
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "tiltDb", 1 }, "Tilt",
         juce::NormalisableRange<float> (-12.0f, 12.0f), 0.0f));
@@ -156,11 +161,9 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto& section : highCut)
         section.reset();
 
-    for (auto& section : tiltLow)
-        section.reset();
-
-    for (auto& section : tiltHigh)
-        section.reset();
+    for (auto& row : tiltShelves)
+        for (auto& section : row)
+            section.reset();
 
     // the oversampler is built here, never on the audio thread. A
     // generous maximum (any sane host block, then some) lets the whole
@@ -245,24 +248,47 @@ void CostesStrip::refreshTiltCoefficients()
 
     lastTiltDb = tilt;
 
-    // the mirrored shelves of the tilt: a low shelf carrying +tilt and a
-    // high shelf carrying -tilt, both at the 1 kHz pivot. JUCE owns the
-    // exact shelf formulas (the arrays are { b0, b1, b2, a0, a1, a2 },
-    // normalised by a0 in setShelfCoefficients). At tilt == 0 both
-    // shelves degenerate to an exact unity biquad.
-    const float gain = juce::Decibels::decibelsToGain (tilt);
-    const float pivot = 1000.0f;
+    // v2.57.0 (Clement's remark 1): the tilt is now a straight line of
+    // adjustable slope in the log(f)/dB plane - the full FabFilter-style
+    // band tilt. A single biquad cannot draw that line: every shelf
+    // flattens outside its own corner, and a 10-octave-wide ramp needs
+    // support the whole way up. So the line is built as a staircase of
+    // ten octave-spaced high shelves, each carrying the slope (tilt/10 dB
+    // per octave), whose gradual transitions smooth each other into the
+    // line: shelf k sits at pivot * 2^(k - 4.5), a half octave off the
+    // pivot on either side, so the cascade is antisymmetric around it.
+    //
+    // The knob's meaning follows the spec: +/- 12 dB is the gain
+    // difference BETWEEN 20 Hz AND 20 kHz (1.2 dB/octave at full tilt,
+    // so about +/- 6 dB at the band edges). processBlock adds the flat
+    // -tilt/2 dB that centres the antisymmetric staircase on the pivot;
+    // together the response tracks
+    //     G(f) = (tilt / 10) * log2 (f / 632.4555)  dB
+    // to within +/- 0.25 dB from 40 Hz to 16 kHz (simulated, and pinned
+    // by the harness at four octaves of probe points).
+    //
+    // The pivot is the geometric mean of the band edges: the line's dB
+    // average over any octave-symmetric spectrum is exactly zero there,
+    // so an octave-uniform (pink-like) spectrum - most music - keeps its
+    // loudness at any tilt. JUCE owns the shelf formulas (the arrays are
+    // { b0, b1, b2, a0, a1, a2 }, normalised by a0 in setShelfCoefficients),
+    // and the corners stay under the Nyquist guard so the formulas never
+    // see an omega past pi. At tilt == 0 every shelf degenerates to an
+    // exact unity biquad, so the whole cascade is bit-transparent.
+    const float gain = juce::Decibels::decibelsToGain (tilt / 10.0f);
+    const double nyquistGuard = currentSampleRate * 0.45;
 
-    const auto lowShelf = juce::dsp::IIR::ArrayCoefficients<float>::makeLowShelf (
-        currentSampleRate, pivot, shelfQ, gain);
-    const auto highShelf = juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf (
-        currentSampleRate, pivot, shelfQ, 1.0f / gain);
+    for (int k = 0; k < numTiltShelves; ++k)
+    {
+        const float corner = (float) juce::jmin (
+            tiltPivotHz * std::pow (2.0, (double) k - 4.5), nyquistGuard);
 
-    for (auto& section : tiltLow)
-        section.setShelfCoefficients (lowShelf);
+        const auto shelf = juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf (
+            currentSampleRate, corner, shelfQ, gain);
 
-    for (auto& section : tiltHigh)
-        section.setShelfCoefficients (highShelf);
+        for (auto& section : tiltShelves[k])
+            section.setShelfCoefficients (shelf);
+    }
 }
 
 void CostesStrip::Biquad::setShelfCoefficients (const std::array<float, 6>& c)
@@ -299,6 +325,14 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     refreshCutCoefficients();
     refreshTiltCoefficients();
 
+    // the tilt's flat -tilt/2 dB companion: the shelf cascade of ten
+    // octave steps is centred on the pivot by removing its own +5-step
+    // staircase offset (see refreshTiltCoefficients). It rides the same
+    // per-block discipline as the shelves - a knob turn is a slow ramp -
+    // and is exactly unity at tilt == 0
+    const float tilt = tiltDb->load();
+    const float tiltCompensation = juce::Decibels::decibelsToGain (-tilt * 0.5f);
+
     // the drive constants, evaluated once per block: the input gain, and
     // the auto-makeup that holds the loudness of the calibration sine
     const float drive = driveAmount->load();
@@ -325,8 +359,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             sample = lowCut[ch].processSample (sample);
             sample = highCut[ch].processSample (sample);
-            sample = tiltLow[ch].processSample (sample);
-            sample = tiltHigh[ch].processSample (sample);
+
+            for (int k = 0; k < numTiltShelves; ++k)
+                sample = tiltShelves[k][ch].processSample (sample);
+
+            sample *= tiltCompensation;
 
             channels[ch][i] = sample;
         }
@@ -441,10 +478,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
 
-    // the oversampling switch, an SSL-style toggle under the drive knob
+    // the oversampling switch, an SSL-style illuminated plate under the
+    // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
+    // LED and a dim caption when off, glowing amber plate with a lit LED
+    // and the caption spelled "OS 2x ON" when on - the state reads at a
+    // glance, where the old default checkbox tick was too quiet to see
     oversampleButton.setButtonText ("OS 2x");
-    oversampleButton.setColour (juce::ToggleButton::textColourId, engraving);
-    oversampleButton.setColour (juce::ToggleButton::tickColourId, valueArc);
     addAndMakeVisible (oversampleButton);
 
     trimInAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -561,14 +600,14 @@ void CostesStripEditor::resized()
         else if (i == 3) { knob = &tiltKnob;    caption = &tiltLabel; }
         else if (i == 4) { knob = &driveKnob;   caption = &driveLabel; }
 
-        // the drive column hosts the toggle below its caption
-        const int knobHeight = (i == 4) ? column.getHeight() - 46
+        // the drive column hosts the switch below its caption
+        const int knobHeight = (i == 4) ? column.getHeight() - 48
                                        : column.getHeight() - 20;
 
         if (i == 4)
         {
-            auto toggleBounds = column.removeFromBottom (24);
-            toggleBounds = toggleBounds.withSizeKeepingCentre (juce::jmin (toggleBounds.getWidth(), 92), 24);
+            auto toggleBounds = column.removeFromBottom (26);
+            toggleBounds = toggleBounds.withSizeKeepingCentre (juce::jmin (toggleBounds.getWidth(), 130), 26);
             oversampleButton.setBounds (toggleBounds);
         }
 
@@ -577,6 +616,49 @@ void CostesStripEditor::resized()
 
         knob->setBounds (column.removeFromTop (knobHeight));
     }
+}
+
+void CostesStripEditor::OversampleToggle::paintButton (juce::Graphics& g,
+                                                       bool highlighted,
+                                                       bool /*down*/)
+{
+    const bool on = getToggleState();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    // the plate itself carries the state: lit amber when the 2x
+    // oversampling is on, dark cream-panel shadow when it is off
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
+                    : plateFill);
+    g.fillRoundedRectangle (bounds, 5.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+    // the LED: a lit amber dot with a soft glow when on, a dark socket
+    // sunk into the plate when off
+    const auto ledArea = bounds.removeFromLeft (24.0f);
+    const auto led = ledArea.withSizeKeepingCentre (9.0f, 9.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    // the caption says the state out loud: "OS 2x ON" / "OS 2x OFF",
+    // dark engraving on the lit plate, dim cream on the dark one
+    g.setColour (on ? engraving : engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    g.drawText (on ? "OS 2x ON" : "OS 2x OFF", bounds,
+                juce::Justification::centred);
 }
 
 void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,

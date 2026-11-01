@@ -1,23 +1,33 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.56.0 (roadmap C2)
+// src/CostesStrip.h - v2.57.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
 // consoles (TheChannelStripAudioProcessor::selectCostesStrip). Signal path:
-// trim in -> 12 dB/oct low cut -> 12 dB/oct high cut -> tilt (two mirrored
-// shelves around a 1 kHz pivot, +/- 12 dB) -> drive (tanh saturation with an
-// invisible auto-makeup calibrated on a -12 dBFS sine) -> optional 2x
-// oversampling around the drive stage. Because it rides the exact same
-// hosting path as the consoles, it inherits the click-free 50 ms crossfade,
-// the per-ident settings memory, the session save/restore and the parameter
-// relay without a single extra wire.
+// trim in -> 12 dB/oct low cut -> 12 dB/oct high cut -> tilt -> drive (tanh
+// saturation with an invisible auto-makeup calibrated on a -12 dBFS sine) ->
+// optional 2x oversampling around the drive stage. Because it rides the
+// exact same hosting path as the consoles, it inherits the click-free 50 ms
+// crossfade, the per-ident settings memory, the session save/restore and
+// the parameter relay without a single extra wire.
 //
-// The cut corners and the tilt are plain RBJ-style biquads (the shelves use
-// juce::dsp::ArrayCoefficients, so JUCE itself owns the shelf formulas), the
-// oversampler is juce::dsp::Oversampling's polyphase IIR halfband. The
-// polyphase IIR latency is a fraction of a sample, which a plug-in cannot
-// report: the strip stays at zero reported latency (and the harness asserts
-// it).
+// v2.57.0 (Clement's remark 1): the tilt is now a FULL band tilt - a
+// straight line of adjustable slope in the log(f)/dB plane, the FabFilter
+// style - instead of the two mirrored shelves. The single knob is the
+// +/- 12 dB gained or lost BETWEEN 20 Hz AND 20 kHz; the line pivots at
+// 632.4555 Hz, the geometric mean of the band edges, so an octave-uniform
+// (pink-like) spectrum - most music - keeps its loudness to within a
+// quarter dB even at full tilt. One biquad cannot draw that line (any
+// shelf flattens outside its corner), so it is built as a cascade of ten
+// octave-spaced high shelves smoothed by their own transitions (see
+// refreshTiltCoefficients).
+//
+// The cut corners and the tilt shelves are plain RBJ-style biquads (the
+// shelves use juce::dsp::ArrayCoefficients, so JUCE itself owns the shelf
+// formulas), the oversampler is juce::dsp::Oversampling's polyphase IIR
+// halfband. The polyphase IIR latency is a fraction of a sample, which a
+// plug-in cannot report: the strip stays at zero reported latency (and
+// the harness asserts it).
 //
 // Roadmap: C3 will add the compressor, C4 a transient designer.
 // ---------------------------------------------------------------------------
@@ -104,6 +114,14 @@ private:
     void refreshCutCoefficients();
     void refreshTiltCoefficients();
 
+    // the full-band tilt: ten octave-spaced high shelves draw the straight
+    // log(f)/dB line (v2.57.0). The knob's +/- 12 dB is the gain difference
+    // between the 20 Hz and 20 kHz band edges - 1.2 dB per octave at full -
+    // and the line pivots at the geometric band centre: an octave-uniform
+    // spectrum keeps its loudness there, whatever the slope
+    static constexpr int numTiltShelves = 10;
+    static constexpr double tiltPivotHz = 632.4555320336759;   // sqrt (20 * 20000)
+
     juce::AudioProcessorValueTreeState apvts;
 
     // raw pointers into the APVTS parameters (lock-free reads)
@@ -123,8 +141,10 @@ private:
 
     Biquad lowCut[2];
     Biquad highCut[2];
-    Biquad tiltLow[2];
-    Biquad tiltHigh[2];
+
+    // the tilt cascade: one shelf per octave around the pivot (indexed
+    // [shelf][channel]) - see numTiltShelves above
+    Biquad tiltShelves[numTiltShelves][2];
 
     float lastLowCutHz  = -1.0f;
     float lastHighCutHz = -1.0f;
@@ -140,12 +160,17 @@ private:
 // ---------------------------------------------------------------------------
 // v2.56.0: the cream SSL-style mini panel - five knobs in a row (TRIM IN,
 // LOW CUT, HIGH CUT, TILT, DRIVE) grouped under engraved section captions
-// (TRIM / FILTERS / TONE / DRIVE), an "OS 2x" toggle under the drive knob
+// (TRIM / FILTERS / TONE / DRIVE), an "OS 2x" switch under the drive knob
 // and the COSTES CHANNEL STRIP name plate. The knobs are built for the
 // mouse: horizontal-or-vertical drag, a wide 320 px travel, double-click
 // back to default, an editable readout under each cap. The shell embeds
 // the panel through the standard hosted-editor window, so nothing here
 // knows anything about the shell: it is a plain plugin editor.
+//
+// v2.57.0 (Clement's remark 2): the OS 2x switch paints itself as an
+// illuminated SSL-style plate - dim and unlit with a dark LED when off,
+// a glowing amber plate and a lit LED when on - so its state reads at a
+// glance instead of hiding in a default checkbox tick.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -161,7 +186,16 @@ private:
 
     juce::Slider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
     juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
-    juce::ToggleButton oversampleButton;
+
+    // the oversampling switch: a ToggleButton that paints its own plate
+    // (lit amber + LED when on, dark + dim LED when off) - the default
+    // checkbox tick was too quiet to read (v2.57.0, Clement's remark 2)
+    struct OversampleToggle : public juce::ToggleButton
+    {
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    OversampleToggle oversampleButton;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;

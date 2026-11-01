@@ -1937,6 +1937,23 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     gainLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
     addAndMakeVisible (gainLabel);
 
+    // v2.57.0 (Clement's remark 3): the estimated CPU load, the last row
+    // of the gain-staging block. The processor publishes the percent of
+    // real time the audio processing takes about once a second; the
+    // timer re-formats this label only when that number moved, so the
+    // readout refreshes calmly - at most once a second - while the
+    // timer itself keeps its 30 Hz for the rest of the UI.
+    cpuLabel.setText ("CPU -- %", juce::dontSendNotification);
+    cpuLabel.setFont (juce::Font (juce::FontOptions (10.0f)));
+    cpuLabel.setJustificationType (juce::Justification::centred);
+    cpuLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8f9bb0));
+    helpTexts[&cpuLabel] =
+        "Estimated average CPU load of the audio processing: the share of "
+        "the real time the host gives this instance that processBlock "
+        "actually spends working, measured over the last second of audio. "
+        "100% would mean the processing needs every sample of that time.";
+    addAndMakeVisible (cpuLabel);
+
     hostedNameLabel.setText ("--", juce::dontSendNotification);
     hostedNameLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     hostedNameLabel.setJustificationType (juce::Justification::centred);
@@ -2391,9 +2408,9 @@ void TheChannelStripAudioProcessorEditor::resized()
     //      analyser toggle + its trailing gap - v2.52: the Fast/Slow
     //      and tilt rows moved onto the analyser strip, freeing 77 px
     //      that now breathe into the three block gaps), gain staging
-    //      87 (heading + IN/OUT + correction); the leftover splits
-    //      into the gaps. ----
-    const int leftover = (nameY - y) - (96 + 87);
+    //      105 (heading + IN/OUT + correction + the v2.57.0 CPU row);
+    //      the leftover splits into the gaps. ----
+    const int leftover = (nameY - y) - (96 + 105);
     const int gap      = juce::jmax (4, leftover / 3);
 
     // ---- block 2: the frame-free monochrome logo (one click to the
@@ -2435,6 +2452,11 @@ void TheChannelStripAudioProcessorEditor::resized()
 
     correctionLabel.setBounds (sideX, y, sw, 26);
     y += 30;
+
+    // v2.57.0 (Clement's remark 3): the CPU row closes the gain-staging
+    // block, between the correction readout and the name & alarm block.
+    cpuLabel.setBounds (sideX, y, sw, 16);
+    y += 18;
 
     // ---- block 4 (v2.39.0): the console name and its alarm zone
     //      GLUED to the Rescan / Doctor row (the alarm zone ends 2 px
@@ -2541,7 +2563,8 @@ void TheChannelStripAudioProcessorEditor::fitWindowToHostedEditor()
     // flex, the pinned stacks are tighter) -> 970 / 790.
     // v2.52 (point B): the tilt and Fast/Slow rows moved onto the
     // analyser strip, freeing 77 px of sidebar height -> 893 / 713.
-    const int newH = juce::jlimit (showStrip ? 893 : 713, 1600, targetH);
+    // v2.57.0: the CPU row joins the gain-staging block -> 911 / 731.
+    const int newH = juce::jlimit (showStrip ? 911 : 731, 1600, targetH);
 
     if (newW != getWidth() || newH != getHeight())
         setSize (newW, newH);
@@ -2604,6 +2627,22 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     refreshConsoleButtons();
     tryEmbedHostedEditor();
     refreshLufs();
+
+    // v2.57.0 (Clement's remark 3): the CPU readout refreshes calmly -
+    // the processor republishes its estimate only once a second of
+    // audio, so re-formatting only on an actual change keeps this
+    // 30 Hz tick from ever touching the label faster than that.
+    // -1 means no reading yet (a fresh prepare, or the first second
+    // of audio has not flowed), shown as "--".
+    const double cpuNow = proc.getEstimatedCpuLoadPercent();
+
+    if (std::abs (cpuNow - lastCpuShown) > 1.0e-9)
+    {
+        lastCpuShown = cpuNow;
+        cpuLabel.setText (cpuNow < 0.0 ? "CPU -- %"
+                                       : "CPU " + juce::String (cpuNow, 1) + " %",
+                          juce::dontSendNotification);
+    }
 
     // v2.55.0 (roadmap C1): the title flips to the orange accent while
     // the internal Costes strip is hosted - cached so the label is only

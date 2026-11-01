@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.56.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.57.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,32 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.57.0**
+  - **The tilt is a full-band tilt (the FabFilter style).** A straight
+    line of adjustable slope in the log(f)/dB plane replaces the two
+    mirrored shelves: the single knob is the **+/- 12 dB gained or lost
+    between 20 Hz and 20 kHz** (1.2 dB per octave at full tilt), and
+    the line pivots at **632.46 Hz, the geometric centre of the band**,
+    so an octave-uniform (pink-like) spectrum -- most music -- keeps
+    its loudness to within a quarter dB even at full tilt. The line is
+    drawn by a cascade of ten octave-spaced shelves (RBJ, Q 0.707,
+    JUCE's own coefficient designers) smoothed into the line by their
+    own transitions, plus a flat -tilt/2 dB that centres the cascade on
+    the pivot; the response tracks the ideal line to within +/- 0.25 dB
+    from 40 Hz to 16 kHz. Old sessions load cleanly -- the knob's
+    meaning changed, the values carry over.
+  - **The "OS 2x" switch now shows its state.** An SSL-style illuminated
+    plate under the drive knob: dark with a dead LED and "OS 2x OFF"
+    when off, glowing amber with a lit LED and "OS 2x ON" when on --
+    the state reads at a glance, where the default checkbox tick was
+    too quiet.
+  - **Estimated CPU load in the sidebar.** The gain-staging block closes
+    with a "CPU x.x %" readout: the share of the real time the host
+    gives the instance that the audio processing actually spends
+    working, measured on the audio thread and republished about once a
+    second (the readout refreshes calmly, never faster than that). A
+    stop/restart or a fresh prepare re-arms the measurement, and the
+    row shows "--" until a full second of audio has flowed.
 - **2.56.0**
   - **Roadmap C2: the strip grows its tone stage.** The Costes strip now
     runs trim in -> low cut -> high cut -> **tilt** -> **drive**. The trim

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "HostedStrip.h"
@@ -330,6 +331,18 @@ public:
     // Doctor report keeps using untouched. Display-only, message thread.
     juce::String getSidebarStatusLines() const;
 
+    // ---- v2.57.0 (Clement's remark 3): the estimated CPU load ---------
+    // The average share of real time the audio processing itself takes,
+    // measured on the audio thread and published about once a second:
+    // 25.0 means processBlock spends a quarter of the wall clock the
+    // host gives it. Starts at -1 (no reading yet - the sidebar shows
+    // "--" until a full second of audio has flowed); the editor reads
+    // it on its timer and refreshes the readout at most once a second.
+    double getEstimatedCpuLoadPercent() const
+    {
+        return estimatedCpuLoadPercent.load (std::memory_order_relaxed);
+    }
+
     // ---- v2.33 (roadmap idea 4): the Doctor report ----
     // A plain-text snapshot of everything worth knowing when something
     // misbehaves: shell and JUCE versions, host and wrapper, sample
@@ -557,6 +570,19 @@ private:
     int currentBlockSize = 512;
     int numChannels = 2;
     int lastReportedLatency = -1;
+
+    // ---- v2.57.0 (Clement's remark 3): the CPU metering window --------
+    // Everything below except the published percent lives on the audio
+    // thread alone (single writer, no atomics needed): each block adds
+    // its wall-clock work, and once the window has seen a full second
+    // of audio the percent of real time is published for the sidebar.
+    // A gap of half a second or more between blocks re-arms the window,
+    // so a stop/restart never dilutes a fresh measurement with the old
+    // one. prepareToPlay resets the whole window and the reading.
+    std::atomic<double> estimatedCpuLoadPercent { -1.0 };
+    std::chrono::steady_clock::time_point cpuWindowStart {};
+    std::chrono::steady_clock::time_point cpuLastBlockEnd {};
+    std::chrono::nanoseconds cpuWork { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TheChannelStripAudioProcessor)
 };

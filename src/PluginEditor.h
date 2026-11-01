@@ -632,6 +632,13 @@ private:
     juce::Label titleLabel;
     juce::Label lufsInLabel, lufsOutLabel, correctionLabel;
 
+    // v2.57.0 (Clement's remark 3): the estimated CPU readout, the last
+    // row of the gain-staging block (between the correction and the
+    // name & alarm block). Fed by proc.getEstimatedCpuLoadPercent(),
+    // which the audio thread republishes about once a second - the
+    // timer only re-formats the text when that number actually moved.
+    juce::Label cpuLabel;
+
     // v2.3: right settings column heading and the hosted-plugin name
     // shown in the left sidebar (under the console buttons).
     juce::Label gainLabel;
@@ -718,6 +725,11 @@ private:
     // internal Costes strip is hosted; cached so the timer only touches
     // the label on an actual change.
     bool titleStripActiveLast = false;
+
+    // v2.57.0: the CPU value currently shown in the sidebar (the label
+    // is only re-formatted when the processor publishes a new reading,
+    // which happens at most once per second of audio).
+    double lastCpuShown = -999.0;
 
     // v2.24 (point 7): cached colour of the status line (red on ERROR:,
     // amber on WARNING:, grey otherwise) - the label is only touched when

@@ -3460,6 +3460,29 @@ void testSidebarStatusLines()
     processBlocks (proc, src, 2, block);
     expectTrue (proc.getSidebarStatusLines().contains ("sentinel: armed"),
                 "hosting a fresh console re-arms the sentinel");
+
+    // v2.57.0 (Clement's remark 3): the estimated CPU load. A fresh
+    // prepare re-arms the metering window and retires the reading
+    // (negative = the sidebar shows "--"); then a second of simulated
+    // playback - real 10 ms gaps between blocks, like a host feeding
+    // 512-sample blocks at 48 kHz - closes the window and publishes a
+    // sane percent of that real time
+    beginTest ("v2.57.0: the estimated CPU load window");
+
+    proc.prepareToPlay (48000.0, 512);
+
+    expectTrue (proc.getEstimatedCpuLoadPercent() < 0.0,
+                "no CPU reading before a full window of audio");
+
+    for (int i = 0; i < 120; ++i)
+    {
+        processBlocks (proc, src, 1, block);
+        juce::Thread::sleep (10);   // 120 blocks x ~10 ms > 1 s of real time
+    }
+
+    const double cpu = proc.getEstimatedCpuLoadPercent();
+    expectTrue (cpu >= 0.0 && cpu <= 100.0,
+                "a full window publishes a CPU percent within [0, 100]");
 }
 
 // ---------------------------------------------------------------------------
@@ -4592,7 +4615,7 @@ void testCostesStripBasics()
 
 void testCostesStripAudio()
 {
-    beginTest ("v2.56.0: the Costes strip audio - trim, cuts, tilt, drive, oversampling");
+    beginTest ("v2.57.0: the Costes strip audio - trim, cuts, full-band tilt, drive, oversampling");
 
     juce::MidiBuffer noMidi;
 
@@ -4684,24 +4707,37 @@ void testCostesStripAudio()
                 "trim in +6 dB reads +6 dB");
     strip->getApvts().getParameterAsValue ("trimInDb").setValue (0.0f);
 
-    // v2.56.0: the tilt replaces the trim out - two mirrored shelves
-    // around a 1 kHz pivot. +12 dB lifts the bass shelf and mirrors it
-    // down on the treble shelf, -12 dB does the opposite, and the pivot
-    // itself stays untouched
+    // v2.57.0 (Clement's remark 1): the tilt is a full-band tilt now - a
+    // straight line of adjustable slope in the log(f)/dB plane. The knob
+    // is the +/- 12 dB gained or lost BETWEEN 20 Hz AND 20 kHz (about
+    // +/- 6 dB at the band edges, 1.2 dB per octave at full tilt), and
+    // the line pivots at 632.4555 Hz, the geometric centre of the band,
+    // so an octave-uniform (pink-like) spectrum keeps its loudness at
+    // any tilt. Four octaves of probe points pin the line: 100 Hz, the
+    // 1 kHz midline, 8 kHz and 16 kHz. Expected values are the float64
+    // simulation of the exact cascade (ten octave-spaced shelves plus
+    // the flat -tilt/2 dB centring), parked cuts included.
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (12.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 12.0, 1.0,
-                "tilt +12 dB reads +12 dB at 100 Hz");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), -12.0, 1.0,
-                "tilt +12 dB reads -12 dB at 8 kHz");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.75,
-                "the tilt pivot at 1 kHz stays flat");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), -3.2, 0.75,
+                "tilt +12 dB reads -3.2 dB at 100 Hz (the log line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.8, 0.5,
+                "tilt +12 dB reads +0.8 dB at 1 kHz (halfway up the line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), 4.4, 0.75,
+                "tilt +12 dB reads +4.4 dB at 8 kHz (the log line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 5.5, 0.75,
+                "tilt +12 dB reads +5.5 dB at 16 kHz (toward the band edge)");
 
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (-12.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), -12.0, 1.0,
-                "tilt -12 dB reads -12 dB at 100 Hz");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), 12.0, 1.0,
-                "tilt -12 dB reads +12 dB at 8 kHz");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 3.2, 0.75,
+                "tilt -12 dB reads +3.2 dB at 100 Hz (the mirrored line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), -4.4, 0.75,
+                "tilt -12 dB reads -4.4 dB at 8 kHz (the mirrored line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), -5.9, 0.75,
+                "tilt -12 dB reads -5.9 dB at 16 kHz (toward the band edge)");
+
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (0.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.3,
+                "back at zero the tilt cascade is exactly unity");
 
     // low cut parked at 20 Hz is flat at 60 Hz; cutting at 500 Hz puts the
     // 60 Hz tone more than 3 octaves down the 12 dB/oct slope
