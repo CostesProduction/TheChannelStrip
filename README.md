@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.57.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.61.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,107 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.61.0**
+  - **A four-band SSL-style EQ on the Costes strip.** The internal Costes
+    channel strip grows an EQ section between its cuts and its tilt,
+    on a second row of the panel: **LF** (bell or low shelf, 20-600 Hz,
+    default 100 Hz), **LO MID** (bell with a variable bandwidth,
+    60-3000 Hz, default 400 Hz), **HI MID** (the same, 500 Hz-12 kHz,
+    default 1600 Hz) and **HF** (bell or high shelf, 600 Hz-18 kHz,
+    default 7200 Hz). Each band sweeps **+/- 15 dB**, the mid bells'
+    bandwidth reads in **octaves** (0.2 to 2.0, the number of octaves
+    concerned - Clement's spec), the outer bands switch bell/shelf with
+    a dedicated plate, and a global **EQ ON/OFF plate** owns the whole
+    section's bypass.
+  - **Bit-transparent at rest.** At 0 dB every band collapses to the
+    exact identity filter and the OFF plate runs zero biquads, so a
+    parked EQ changes the strip's output by not one bit. Sessions saved
+    by earlier versions load with the EQ at its defaults - nothing to
+    migrate.
+- **2.60.0**
+  - **Section icons on the Costes strip.** Every knob caption of the
+    internal Costes channel strip now carries a clean engraved glyph on
+    its left - a fader for the trim, the rising high-pass response for
+    the low cut, the falling low-pass response for the high cut, a
+    tilted line for the tilt and the soft saturation curve for the
+    drive. Five silkscreen shapes that read at a glance, no text
+    needed.
+  - **Equally spaced slope settings.** The seven legal slopes of each
+    cut (6 / 12 / 18 / 24 / 36 / 48 / 72 dB/oct) now sit at seven equal
+    positions on the slope selector - the weak slopes no longer huddle
+    at the left end of the travel. Sessions are untouched: saved slope
+    values load back exactly as they were.
+  - **Slope readout no longer clips.** The slope readout box grew to
+    the knob readouts' own 76 x 18 - "24 dB/oct" keeps its full height.
+- **2.59.0**
+  - **On/off plates on both cuts.** Each cut owns an SSL-style illuminated
+    plate beside its readouts - LED on top, ON/OFF spelled out below,
+    amber and lit when the filter processes, dark with a dead LED when
+    it is bypassed. The plate is the switch now: it replaces "off" in
+    the slope slider, and a bypassed cut is fully transparent (zero
+    sections run).
+  - **Seven legal slopes, nothing in between.** The slope selectors hold
+    only **6 / 12 / 18 / 24 / 36 / 48 / 72 dB/oct** (Butterworth orders
+    1, 2, 3, 4, 6, 8, 12). Every drag position, typed value and
+    automation point snaps to the nearest legal slope, ties resolving to
+    the gentler one - a typed "30 dB/oct" lands on 24 dB/oct.
+  - **Trim in widened to -24...+12 dB** (Clement's remark 4; the trim out
+    is unchanged).
+  - **Readouts no longer clip at the bottom** (Clement's remark 1): the
+    knob readout boxes grew from 74 x 16 to 76 x 18 and the slope boxes
+    from 70 x 14 to 72 x 16, so descenders stay inside the panel.
+  - **Session migration.** Sessions saved by v2.58.x and earlier load
+    unchanged: their plain integer orders snap to the new legal set
+    (order 5 becomes the gentler 4), and the old order 0 "off" becomes
+    a switched-OFF plate parked at the 12 dB/oct default. All cut
+    probes in the offline suite now read through the coherent lock-in
+    (the v2.58.1 lesson generalised), and the new very steep cascades
+    are pinned against the float64 simulation (a 72 dB/oct low cut
+    buries a full octave below its corner at -167.8 dB).
+- **2.58.1**
+  - **Test-harness fix, no DSP change.** The v2.58.0 offline suite failed
+    two of its own 16 kHz high-cut checks on a perfectly correct filter.
+    Both failures were measurement artefacts of the peak instrument, not
+    sound bugs. First, at 16 kHz over 48 kHz the sampling grid holds only
+    three points per cycle and never touches the crest, so the peak reads
+    0.87 to 1.0 of the true amplitude depending on phase - the "off"
+    bypass read -1.17 dB against a naive 0.0 expectation. Second, and
+    more subtle: the parked 16 Hz low cut runs its biquad poles hugging
+    DC in float32 (radius 0.99852, DC loop gain about 228000), so the
+    filter's own rounding bias settles as a small DC offset near -70 dB
+    at its output; the high-cut sections are low-passes and pass DC at
+    unity, so once the true 16 kHz residue of the order-4 cascade falls
+    below that offset the peak instrument reads the offset instead of
+    the filter. The four high-cut checks now use the harness's coherent
+    lock-in (exactly 160 whole cycles per 480-sample block at 16 kHz):
+    a constant offset contributes exactly zero to the correlation, and
+    the reading is the true 16 kHz bin to within hundredths of a dB
+    (off +0.02, order 1 -22.4, order 2 -44.7, order 4 -89.5 dB), with
+    every check now an expectNear that prints its reading on any future
+    failure. The audio DSP is untouched.
+- **2.58.0**
+  - **Selectable Butterworth order on both cuts.** Under each cut
+    frequency knob sits a horizontal slope slider: **"off"** at the far
+    left (the filter is bypassed entirely), then the order from 1 to 16,
+    read out as **6 to 96 dB/oct**. The cascade is textbook Butterworth
+    (Q 0.7071 for the single order-2 section, the exact per-section Q
+    table above that; odd orders lead with a prewarped first-order
+    stage), sits at exactly -3.01 dB at the corner for every order, and
+    the highest order's Q (5.10 at order 16) stays comfortably stable in
+    float32. Default order 2 (12 dB/oct), the sound every existing
+    session already knows.
+  - **Wider cut ranges, precision readouts.** Low cut **[16, 1600] Hz**
+    (whole Hz), high cut **[240, 24000] Hz** (0.01 kHz steps, read as
+    kHz with two decimals); trim **[-20, +10] dB**, tilt and drive in
+    **0.1 dB** steps. Every knob formats itself through its parameter's
+    own text functions, typed values included (a French decimal comma
+    is accepted too), and the knob positions snap to the legal values
+    on drag, typed entry and automation alike.
+  - **The drive knob reads in dB.** 0 (clean, bit-transparent) to
+    **+15.6 dB** of input gain into the tanh -- the top of the new knob
+    is the full 6x saturation of the old one (20 log10 (6) = 15.56
+    dB). The parameter id changed ("driveDb"), so sessions saved with
+    the old normalised knob simply park at 0 dB.
 - **2.57.0**
   - **The tilt is a full-band tilt (the FabFilter style).** A straight
     line of adjustable slope in the log(f)/dB plane replaces the two
