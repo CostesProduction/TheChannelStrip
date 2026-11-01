@@ -221,6 +221,16 @@ private:
 // moved to the new CutOnToggle plate on the left of each cut's readout
 // band, and the readout boxes grew (76 x 18 for the knobs, 72 x 16 for
 // the slopes) so no descender clips at the panel's edge again.
+//
+// v2.60.0 (Clement's remarks): every knob caption carries a clean vector
+// glyph on its left - a fader for the trim, the rising high-pass response
+// for the low cut, the falling low-pass response for the high cut, a
+// tilted line for the tilt and the soft saturation S-curve for the drive -
+// drawn in the engraved silkscreen colour so the panel reads at a glance.
+// The slope selectors are equally spaced across their seven legal
+// settings (the range maps the orders to seven equal knob positions), and
+// the slope readout box grew to the knobs' 76 x 18 so "24 dB/oct" no
+// longer clips at its bottom edge.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -231,12 +241,40 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
+    // to the left of its caption in the engraved silkscreen colour - the
+    // five shapes read at a glance without any text. Public so the offline
+    // test harness can name the types and count the instances
+    struct SectionIcon : public juce::Component
+    {
+        enum class Icon { trim, lowCut, highCut, tilt, drive };
+
+        explicit SectionIcon (Icon iconType) : type (iconType) {}
+
+        void paint (juce::Graphics& g) override;
+
+        Icon type;
+    };
+
+    // the icons in column order (trim, low cut, high cut, tilt, drive),
+    // for the offline test harness
+    std::array<SectionIcon*, 5> getSectionIcons()
+    {
+        return { &trimIcon, &lowCutIcon, &highCutIcon, &tiltIcon, &driveIcon };
+    }
+
 private:
     CostesStrip& owner;
 
     juce::Slider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
     juce::Slider lowCutSlope, highCutSlope;
     juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
+
+    SectionIcon trimIcon   { SectionIcon::Icon::trim };
+    SectionIcon lowCutIcon { SectionIcon::Icon::lowCut };
+    SectionIcon highCutIcon{ SectionIcon::Icon::highCut };
+    SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
+    SectionIcon driveIcon  { SectionIcon::Icon::drive };
 
     // the oversampling switch: a ToggleButton that paints its own plate
     // (lit amber + LED when on, dark + dim LED when off) - the default

@@ -65,6 +65,34 @@ namespace
         return best;
     }
 
+    // v2.60.0 (Clement's remark 1): the same seven legal orders as an
+    // array, shared by the parameter's equal-step range below. The
+    // index of the nearest legal order uses the same tie rule as the
+    // snap - strict < keeps the earlier (gentler) entry - so the knob
+    // normalisation and the value snap always agree
+    constexpr int numLegalCutOrders = 7;
+    const float legalCutOrders[numLegalCutOrders] =
+        { 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f };
+
+    int nearestCutOrderIndex (float v)
+    {
+        int best = 0;
+        float bestDist = std::abs (v - legalCutOrders[0]);
+
+        for (int i = 1; i < numLegalCutOrders; ++i)
+        {
+            const float d = std::abs (v - legalCutOrders[i]);
+
+            if (d < bestDist)
+            {
+                best = i;
+                bestDist = d;
+            }
+        }
+
+        return best;
+    }
+
     // the drive: the knob is decibels of input gain into the tanh, 0 to
     // +15.6 dB (the old normalised "amount" mapped the same sweep onto
     // g = 1 + slope * amount, up to 6x - and 20 log10 (6) = 15.56 dB, so
@@ -220,20 +248,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         return snapCutOrderToLegal ((float) (slope / 6.0));
     };
 
-    // a linear 1..12 range that snaps every position to a legal order:
-    // drags, typed values, automation points and session restores all
-    // land on one of the seven legal cascades
+    // v2.60.0 (Clement's remark 1): the knob's seven settings are EQUALLY
+    // SPACED. The range maps the legal orders 1, 2, 3, 4, 6, 8, 12 onto
+    // the seven equal knob positions 0, 1/6 ... 1 - a value-linear 1..12
+    // sweep used to huddle the weak slopes at the left end (1 and 2 sit
+    // a tenth of the travel apart, 8 and 12 nearly a third). Ties snap
+    // to the gentler slope exactly like the value snap, and sessions
+    // stay exact: the APVTS tree stores the DENORMALISED order, and
+    // every legal order round-trips through its normalised step with
+    // no drift (a v2.59 session holding 4.0 loads back as 4.0)
     const auto slopeRange = []
     {
         return juce::NormalisableRange<float> (
             1.0f, 12.0f,
-            [] (float start, float end, float normalised)
+            [] (float /*start*/, float /*end*/, float normalised)
             {
-                return juce::jlimit (start, end, normalised * (end - start) + start);
+                const int index = juce::jlimit (0, numLegalCutOrders - 1,
+                                                juce::roundToInt (normalised
+                                                    * (float) (numLegalCutOrders - 1)));
+                return legalCutOrders[index];
             },
-            [] (float start, float end, float value)
+            [] (float /*start*/, float /*end*/, float value)
             {
-                return juce::jlimit (0.0f, 1.0f, (value - start) / (end - start));
+                return (float) nearestCutOrderIndex (juce::jlimit (1.0f, 12.0f, value))
+                         / (float) (numLegalCutOrders - 1);
             },
             [] (float start, float end, float value)
             {
@@ -828,6 +866,15 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
 
+    // the section glyphs (v2.60.0, Clement's remark): each icon sits at
+    // the left of its caption and paints itself - nothing to add here
+    // beyond making them visible
+    addAndMakeVisible (trimIcon);
+    addAndMakeVisible (lowCutIcon);
+    addAndMakeVisible (highCutIcon);
+    addAndMakeVisible (tiltIcon);
+    addAndMakeVisible (driveIcon);
+
     // the slope selectors under the cut knobs (v2.58.0, Clement's remark;
     // v2.59.0): a horizontal slider from 6 to 72 dB/oct. "off" moved to
     // the on/off plate on the left, so the sweep holds only legal
@@ -836,7 +883,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     const auto setUpSlope = [this] (juce::Slider& slope)
     {
         slope.setSliderStyle (juce::Slider::LinearHorizontal);
-        slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 72, 16);
+        // 76 x 18 (v2.60.0, Clement's remark 3): the 72 x 16 box clipped
+        // the bottom of "24 dB/oct" - the knob readouts' own 18 px height
+        // fix, applied to the slopes too
+        slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 76, 18);
         slope.setColour (juce::Slider::trackColourId, knobBezel);
         slope.setColour (juce::Slider::thumbColourId, valueArc);
         slope.setColour (juce::Slider::textBoxTextColourId, engraving);
@@ -985,14 +1035,17 @@ void CostesStripEditor::resized()
         auto* knob = &trimInKnob;
         auto* caption = &trimInLabel;
         juce::Slider* slope = nullptr;
+        SectionIcon* icon = &trimIcon;
 
-        if (i == 1)      { knob = &lowCutKnob;  caption = &lowCutLabel;  slope = &lowCutSlope; }
-        else if (i == 2) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; }
-        else if (i == 3) { knob = &tiltKnob;    caption = &tiltLabel; }
-        else if (i == 4) { knob = &driveKnob;   caption = &driveLabel; }
+        if (i == 1)      { knob = &lowCutKnob;  caption = &lowCutLabel;  slope = &lowCutSlope;  icon = &lowCutIcon; }
+        else if (i == 2) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; icon = &highCutIcon; }
+        else if (i == 3) { knob = &tiltKnob;    caption = &tiltLabel;    icon = &tiltIcon; }
+        else if (i == 4) { knob = &driveKnob;   caption = &driveLabel;   icon = &driveIcon; }
 
+        // the slope columns give their selector a 26 px band - the 18 px
+        // readout box plus a slice of track above it (v2.60.0)
         const int knobHeight = (i == 4) ? column.getHeight() - 48
-                             : (slope != nullptr) ? column.getHeight() - 44
+                             : (slope != nullptr) ? column.getHeight() - 46
                                                   : column.getHeight() - 20;
 
         // the cut on/off plate (v2.59.0): a 34 px strip on the left of
@@ -1010,7 +1063,7 @@ void CostesStripEditor::resized()
 
         if (slope != nullptr)
         {
-            auto slopeBounds = column.removeFromBottom (24).reduced (6, 0);
+            auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
             slope->setBounds (slopeBounds);
         }
 
@@ -1024,6 +1077,13 @@ void CostesStripEditor::resized()
 
         auto captionBounds = column.removeFromBottom (18);
         caption->setBounds (captionBounds);
+
+        // the section glyph (v2.60.0): a 16 px icon hugging the caption's
+        // left edge - the caption stays centred in its column, the icon
+        // sits exactly where the text begins
+        const int textWidth = caption->getFont().getStringWidth (caption->getText());
+        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
+                         captionBounds.getY() + 1, 16, 16);
 
         knob->setBounds (column.removeFromTop (knobHeight));
     }
@@ -1115,6 +1175,84 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText (on ? "ON" : "OFF", bounds,
                 juce::Justification::centred);
+}
+
+void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
+{
+    // the five glyphs (v2.60.0, Clement's remark): clean single-stroke
+    // vector shapes in the engraved silkscreen colour, drawn on a 16 x
+    // 16 design grid scaled to the component's bounds so a degenerate
+    // resize can never divide by anything. Every shape is drawn to be
+    // read instantly: a fader for the trim, the two mirrored filter
+    // responses for the cuts, a tilted line for the tilt and the soft
+    // saturation transfer curve for the drive
+    const auto b = getLocalBounds().toFloat();
+
+    const float sx = b.getWidth() / 16.0f;
+    const float sy = b.getHeight() / 16.0f;
+    const float stroke = 1.5f * (sx + sy) * 0.5f;
+
+    const auto X = [&b, sx] (float v) { return b.getX() + v * sx; };
+    const auto Y = [&b, sy] (float v) { return b.getY() + v * sy; };
+
+    g.setColour (engraving);
+
+    juce::Path p;
+
+    switch (type)
+    {
+        // TRIM: a fader - the vertical slot, a centred thumb and two
+        // position ticks. The universal "level" reading
+        case Icon::trim:
+            p.startNewSubPath (X (8.0f), Y (2.6f));
+            p.lineTo (X (8.0f), Y (13.4f));
+            p.startNewSubPath (X (6.4f), Y (4.4f));
+            p.lineTo (X (9.6f), Y (4.4f));
+            p.startNewSubPath (X (6.4f), Y (11.6f));
+            p.lineTo (X (9.6f), Y (11.6f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            g.fillRoundedRectangle (juce::Rectangle<float> (
+                X (5.0f), Y (6.6f), 6.0f * sx, 2.8f * sy), 1.2f * stroke);
+            break;
+
+        // LOW CUT: the high-pass response - flat at the bottom, then the
+        // knee rising to the top right corner
+        case Icon::lowCut:
+            p.startNewSubPath (X (2.0f), Y (13.0f));
+            p.lineTo (X (6.0f), Y (13.0f));
+            p.quadraticTo (X (11.0f), Y (13.0f), X (14.0f), Y (3.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // HIGH CUT: the mirrored low-pass response - flat at the top,
+        // the knee falling away to the bottom right
+        case Icon::highCut:
+            p.startNewSubPath (X (2.0f), Y (3.0f));
+            p.lineTo (X (6.0f), Y (3.0f));
+            p.quadraticTo (X (11.0f), Y (3.0f), X (14.0f), Y (13.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // TILT: a straight line pivoting over its centre dot - the
+        // whole-band tilt in one stroke
+        case Icon::tilt:
+            p.startNewSubPath (X (3.0f), Y (13.0f));
+            p.lineTo (X (13.0f), Y (3.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            g.fillEllipse (juce::Rectangle<float> (X (6.6f), Y (6.6f),
+                                                   2.8f * sx, 2.8f * sy));
+            break;
+
+        // DRIVE: the soft saturation transfer curve - flat, a straight
+        // climb through the middle, flat again. The tanh the stage
+        // actually applies, drawn as its own icon
+        case Icon::drive:
+            p.startNewSubPath (X (2.0f), Y (13.6f));
+            p.cubicTo (X (7.0f), Y (13.2f), X (5.0f), Y (8.0f), X (8.0f), Y (8.0f));
+            p.cubicTo (X (11.0f), Y (8.0f), X (9.0f), Y (2.8f), X (14.0f), Y (2.4f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+    }
 }
 
 void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.59.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.60.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,21 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.60.0**
+  - **Section icons on the Costes strip.** Every knob caption of the
+    internal Costes channel strip now carries a clean engraved glyph on
+    its left - a fader for the trim, the rising high-pass response for
+    the low cut, the falling low-pass response for the high cut, a
+    tilted line for the tilt and the soft saturation curve for the
+    drive. Five silkscreen shapes that read at a glance, no text
+    needed.
+  - **Equally spaced slope settings.** The seven legal slopes of each
+    cut (6 / 12 / 18 / 24 / 36 / 48 / 72 dB/oct) now sit at seven equal
+    positions on the slope selector - the weak slopes no longer huddle
+    at the left end of the travel. Sessions are untouched: saved slope
+    values load back exactly as they were.
+  - **Slope readout no longer clips.** The slope readout box grew to
+    the knob readouts' own 76 x 18 - "24 dB/oct" keeps its full height.
 - **2.59.0**
   - **On/off plates on both cuts.** Each cut owns an SSL-style illuminated
     plate beside its readouts - LED on top, ON/OFF spelled out below,

@@ -5114,6 +5114,89 @@ void testCostesStripMigration()
                 "the migrated OFF plate survives a re-save");
 }
 
+void testCostesStripSectionIcons()
+{
+    beginTest ("v2.60.0: the five section icons and the equally spaced slope knob");
+
+    CostesStrip stripProc;
+    stripProc.prepareToPlay (48000.0, 512);
+
+    // ---- the icons ----
+    // the editor carries exactly five section glyphs, one per knob, in
+    // column order (trim, low cut, high cut, tilt, drive) - each visible
+    // and sitting inside the panel after the layout pass
+    CostesStripEditor editor (stripProc);
+
+    const auto icons = editor.getSectionIcons();
+    const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
+    {
+        CostesStripEditor::SectionIcon::Icon::trim,
+        CostesStripEditor::SectionIcon::Icon::lowCut,
+        CostesStripEditor::SectionIcon::Icon::highCut,
+        CostesStripEditor::SectionIcon::Icon::tilt,
+        CostesStripEditor::SectionIcon::Icon::drive
+    };
+
+    for (int i = 0; i < 5; ++i)
+    {
+        expectTrue (icons[(size_t) i] != nullptr,
+                    "the editor exposes a section icon for every knob");
+        expectTrue (icons[(size_t) i]->type == expectedTypes[i],
+                    "the section icons sit in column order (trim, low cut, high cut, tilt, drive)");
+        expectTrue (icons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (icons[(size_t) i]->getBounds()),
+                    "every section icon is laid out inside the panel");
+    }
+
+    // the paint itself must survive degenerate sizes: the glyphs draw
+    // against whatever bounds the layout hands them
+    {
+        const int testSizes[][2] = { { 880, 200 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+
+        for (const auto& size : testSizes)
+        {
+            editor.setSize (size[0], size[1]);
+
+            juce::Image canvas (juce::Image::ARGB, juce::jmax (1, size[0]),
+                                juce::jmax (1, size[1]), true);
+            juce::Graphics g (canvas);
+
+            for (auto* icon : editor.getSectionIcons())
+                icon->paint (g);
+
+            editor.paint (g);
+        }
+    }
+
+    editor.setSize (880, 200);
+
+    // ---- the equally spaced slope knob (Clement's remark 1) ----
+    // the seven legal orders map to the seven equal knob positions
+    // 0, 1/6 ... 1 - no value-linear huddle of the weak slopes - and
+    // every legal order round-trips through its normalised step with
+    // no drift, so sessions load exactly as they were saved
+    auto* lowOrderParam = dynamic_cast<juce::RangedAudioParameter*> (
+        stripProc.getApvts().getParameter ("lowCutOrder"));
+    expectTrue (lowOrderParam != nullptr,
+                "the low cut slope parameter is a ranged parameter");
+
+    if (lowOrderParam != nullptr)
+    {
+        const float legalOrders[] = { 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f };
+
+        for (int i = 0; i < 7; ++i)
+        {
+            stripProc.getApvts().getParameterAsValue ("lowCutOrder").setValue (legalOrders[i]);
+
+            expectNear (lowOrderParam->getValue(), (float) i / 6.0f, 0.001,
+                         "the seven legal slopes sit at seven EQUAL knob positions (spacing 1/6)");
+            expectNear (stripProc.getApvts().getRawParameterValue ("lowCutOrder")->load(),
+                        legalOrders[i], 0.0001,
+                        "every legal order round-trips through its knob step without drift");
+        }
+    }
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -5256,6 +5339,7 @@ int main (int argc, char* argv[])
     testCostesStripAudio();
     testCostesStripSession();
     testCostesStripMigration();
+    testCostesStripSectionIcons();
 
     if (integration)
         testIntegrationRealConsole();
