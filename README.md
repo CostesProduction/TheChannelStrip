@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.58.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.59.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,31 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.59.0**
+  - **On/off plates on both cuts.** Each cut owns an SSL-style illuminated
+    plate beside its readouts - LED on top, ON/OFF spelled out below,
+    amber and lit when the filter processes, dark with a dead LED when
+    it is bypassed. The plate is the switch now: it replaces "off" in
+    the slope slider, and a bypassed cut is fully transparent (zero
+    sections run).
+  - **Seven legal slopes, nothing in between.** The slope selectors hold
+    only **6 / 12 / 18 / 24 / 36 / 48 / 72 dB/oct** (Butterworth orders
+    1, 2, 3, 4, 6, 8, 12). Every drag position, typed value and
+    automation point snaps to the nearest legal slope, ties resolving to
+    the gentler one - a typed "30 dB/oct" lands on 24 dB/oct.
+  - **Trim in widened to -24...+12 dB** (Clement's remark 4; the trim out
+    is unchanged).
+  - **Readouts no longer clip at the bottom** (Clement's remark 1): the
+    knob readout boxes grew from 74 x 16 to 76 x 18 and the slope boxes
+    from 70 x 14 to 72 x 16, so descenders stay inside the panel.
+  - **Session migration.** Sessions saved by v2.58.x and earlier load
+    unchanged: their plain integer orders snap to the new legal set
+    (order 5 becomes the gentler 4), and the old order 0 "off" becomes
+    a switched-OFF plate parked at the 12 dB/oct default. All cut
+    probes in the offline suite now read through the coherent lock-in
+    (the v2.58.1 lesson generalised), and the new very steep cascades
+    are pinned against the float64 simulation (a 72 dB/oct low cut
+    buries a full octave below its corner at -167.8 dB).
 - **2.58.1**
   - **Test-harness fix, no DSP change.** The v2.58.0 offline suite failed
     two of its own 16 kHz high-cut checks on a perfectly correct filter.

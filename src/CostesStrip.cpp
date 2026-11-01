@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.58.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.59.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -33,6 +33,36 @@ namespace
             : (double) j * juce::MathConstants<double>::pi / (double) order;
 
         return 1.0 / (2.0 * std::cos (angle));
+    }
+
+    // v2.59.0: the slope knobs offer only the legal Butterworth orders
+    // 1, 2, 3, 4, 6, 8 and 12 (6/12/18/24/36/48/72 dB/oct - Clement's
+    // remark 3, nothing in between). This snaps any raw order value to
+    // the nearest legal one, ties resolving to the gentler slope. It
+    // guards both the parameter's own snap and the DSP refresh, so a
+    // stale or hand-edited session value can never build an illegal
+    // cascade.
+    float snapCutOrderToLegal (float v)
+    {
+        static const float legal[] = { 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f };
+
+        float best = legal[0];
+        float bestDist = std::abs (v - legal[0]);
+
+        for (int i = 1; i < 7; ++i)
+        {
+            const float d = std::abs (v - legal[i]);
+
+            // strict < keeps the earlier (gentler) entry on a tie:
+            // 5 -> 4, 7 -> 6, 9 and 10 -> 8, 11 -> 12
+            if (d < bestDist)
+            {
+                best = legal[i];
+                bestDist = d;
+            }
+        }
+
+        return best;
     }
 
     // the drive: the knob is decibels of input gain into the tanh, 0 to
@@ -97,15 +127,18 @@ CostesStrip::CostesStrip()
     trimInDb         = apvts.getRawParameterValue ("trimInDb");
     lowCutHz         = apvts.getRawParameterValue ("lowCutHz");
     lowCutOrder      = apvts.getRawParameterValue ("lowCutOrder");
+    lowCutOn         = apvts.getRawParameterValue ("lowCutOn");
     highCutHz        = apvts.getRawParameterValue ("highCutHz");
     highCutOrder     = apvts.getRawParameterValue ("highCutOrder");
+    highCutOn        = apvts.getRawParameterValue ("highCutOn");
     tiltDb           = apvts.getRawParameterValue ("tiltDb");
     driveDb          = apvts.getRawParameterValue ("driveDb");
     driveOversampled = apvts.getRawParameterValue ("driveOversampled");
 
     jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
-             && highCutHz != nullptr && highCutOrder != nullptr && tiltDb != nullptr
-             && driveDb != nullptr && driveOversampled != nullptr);
+             && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
+             && highCutOn != nullptr && tiltDb != nullptr && driveDb != nullptr
+             && driveOversampled != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
@@ -129,10 +162,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                    .getFloatValue();
     };
 
-    // the trim: -20 to +10 dB in 0.1 dB steps, unity at the default
+    // the trim: -24 to +12 dB in 0.1 dB steps, unity at the default
+    // (v2.59.0, Clement's remark 4: the old -20/+10 sweep widened)
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "trimInDb", 1 }, "Trim In",
-        juce::NormalisableRange<float> (-20.0f, 10.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
@@ -163,30 +197,76 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                 return t.replaceCharacter (',', '.').getFloatValue();
             })));
 
-    // the low cut slope: a Butterworth order from 0 ("off" - the filter is
-    // bypassed entirely) to 16 (96 dB/oct, eight cascaded sections). The
-    // readout speaks in dB/oct - the number the ear knows - and accepts
-    // both it and "off"
-    layout.add (std::make_unique<juce::AudioParameterInt> (
-        juce::ParameterID { "lowCutOrder", 1 }, "Low Cut Slope",
-        0, 16, 2,
-        juce::AudioParameterIntAttributes()
-            .withStringFromValueFunction ([] (int value, int)
+    // the shared slope plumbing (v2.59.0): the knob speaks and accepts
+    // dB/oct, and its legal values are only the Butterworth orders
+    // 1, 2, 3, 4, 6, 8 and 12 - Clement's remark 3, nothing in between.
+    // "off" is no longer a slope: the on/off plate owns the bypass, so a
+    // typed "off" simply parks the slope at its 12 dB/oct default
+    const auto slopeText = [] (float value, int)
+    {
+        return juce::String (juce::roundToInt (value * 6.0f)) + " dB/oct";
+    };
+
+    const auto slopeParse = [] (const juce::String& text)
+    {
+        if (text.trim().equalsIgnoreCase ("off"))
+            return 2.0f;
+
+        const double slope = text.trim()
+                                    .replaceCharacter (',', '.')
+                                    .upToFirstOccurrenceOf (" ", false, true)
+                                    .getDoubleValue();
+
+        return snapCutOrderToLegal ((float) (slope / 6.0));
+    };
+
+    // a linear 1..12 range that snaps every position to a legal order:
+    // drags, typed values, automation points and session restores all
+    // land on one of the seven legal cascades
+    const auto slopeRange = []
+    {
+        return juce::NormalisableRange<float> (
+            1.0f, 12.0f,
+            [] (float start, float end, float normalised)
             {
-                return value == 0 ? juce::String ("off")
-                                  : juce::String (value * 6) + " dB/oct";
+                return juce::jlimit (start, end, normalised * (end - start) + start);
+            },
+            [] (float start, float end, float value)
+            {
+                return juce::jlimit (0.0f, 1.0f, (value - start) / (end - start));
+            },
+            [] (float start, float end, float value)
+            {
+                return snapCutOrderToLegal (juce::jlimit (start, end, value));
+            });
+    };
+
+    // the low cut slope: a Butterworth order from 1 (6 dB/oct) to 12
+    // (72 dB/oct), default 2. Sessions saved by v2.58.x held plain integer
+    // orders here - the denormalised value matches one-to-one, so they
+    // load unchanged (the one exception, order 0 "off", is migrated by
+    // setStateInformation)
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "lowCutOrder", 1 }, "Low Cut Slope",
+        slopeRange(), 2.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (slopeText)
+            .withValueFromStringFunction (slopeParse)));
+
+    // the low cut on/off plate (v2.59.0, Clement's remark 2): true when the
+    // filter processes, false when it is fully bypassed. Default on
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "lowCutOn", 1 }, "Low Cut On", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("on") : juce::String ("off");
             })
             .withValueFromStringFunction ([] (const juce::String& text)
             {
-                if (text.trim().equalsIgnoreCase ("off"))
-                    return 0;
+                const auto t = text.trim();
 
-                const double slope = text.trim()
-                                            .replaceCharacter (',', '.')
-                                            .upToFirstOccurrenceOf (" ", false, true)
-                                            .getDoubleValue();
-
-                return (int) juce::jlimit (0.0, 16.0, std::round (slope / 6.0));
+                return ! (t.equalsIgnoreCase ("off") || t == "0");
             })));
 
     // the high cut corner: [240, 24000] Hz, logarithmic, snapped to whole
@@ -219,27 +299,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                 return kHz ? 1000.0f * parsed : parsed;
             })));
 
-    // the high cut slope: the same off-to-96 dB/oct Butterworth selector
-    layout.add (std::make_unique<juce::AudioParameterInt> (
+    // the high cut slope: the same 6 to 72 dB/oct Butterworth selector
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "highCutOrder", 1 }, "High Cut Slope",
-        0, 16, 2,
-        juce::AudioParameterIntAttributes()
-            .withStringFromValueFunction ([] (int value, int)
+        slopeRange(), 2.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (slopeText)
+            .withValueFromStringFunction (slopeParse)));
+
+    // the high cut on/off plate (v2.59.0, Clement's remark 2): default on
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "highCutOn", 1 }, "High Cut On", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
             {
-                return value == 0 ? juce::String ("off")
-                                  : juce::String (value * 6) + " dB/oct";
+                return value ? juce::String ("on") : juce::String ("off");
             })
             .withValueFromStringFunction ([] (const juce::String& text)
             {
-                if (text.trim().equalsIgnoreCase ("off"))
-                    return 0;
+                const auto t = text.trim();
 
-                const double slope = text.trim()
-                                            .replaceCharacter (',', '.')
-                                            .upToFirstOccurrenceOf (" ", false, true)
-                                            .getDoubleValue();
-
-                return (int) juce::jlimit (0.0, 16.0, std::round (slope / 6.0));
+                return ! (t.equalsIgnoreCase ("off") || t == "0");
             })));
 
     // the tilt (v2.57.0, Clement's remark 1): a full-band tilt, the
@@ -344,27 +424,38 @@ void CostesStrip::refreshCutCoefficients()
     const float low  = juce::jlimit (16.0f,   nyquistGuard, lowCutHz->load());
     const float high = juce::jlimit (240.0f, nyquistGuard, highCutHz->load());
 
-    const int lowOrder  = juce::jlimit (0, 16, (int) lowCutOrder->load());
-    const int highOrder = juce::jlimit (0, 16, (int) highCutOrder->load());
+    const int lowOrder  = (int) snapCutOrderToLegal (juce::jlimit (1.0f, 12.0f, lowCutOrder->load()));
+    const int highOrder = (int) snapCutOrderToLegal (juce::jlimit (1.0f, 12.0f, highCutOrder->load()));
+
+    // v2.59.0: the on/off plates. False parks the section count at zero,
+    // which the process loop reads as a full bypass - the filter states
+    // keep their coefficients but no sample passes through
+    const bool lowOn  = lowCutOn->load()  > 0.5f;
+    const bool highOn = highCutOn->load() > 0.5f;
 
     // cache guard: a step smaller than 1e-4 Hz between blocks does not
     // refresh the coefficients (a direct float compare used to trip
     // -Wfloat-equal; the epsilon keeps the cache behaviour identical).
-    // The orders ride the cache too: an order change alone must rebuild
+    // The orders and the on/off plates ride the cache too: a change in
+    // either alone must rebuild
     if (std::abs (low - lastLowCutHz) < 1.0e-4f
         && std::abs (high - lastHighCutHz) < 1.0e-4f
-        && lowOrder == lastLowCutOrder && highOrder == lastHighCutOrder)
+        && lowOrder == lastLowCutOrder && highOrder == lastHighCutOrder
+        && lowOn == lastLowCutOn && highOn == lastHighCutOn)
         return;
 
     lastLowCutHz     = low;
     lastHighCutHz    = high;
     lastLowCutOrder  = lowOrder;
     lastHighCutOrder = highOrder;
+    lastLowCutOn     = lowOn;
+    lastHighCutOn    = highOn;
 
     // how many sections the process loop runs: an odd order's first-order
     // stage occupies one section slot, every remaining pole pair another
-    activeLowCutSections  = (lowOrder  + 1) / 2;
-    activeHighCutSections = (highOrder + 1) / 2;
+    // (and a plate switched off runs none at all)
+    activeLowCutSections  = lowOn  ? (lowOrder  + 1) / 2 : 0;
+    activeHighCutSections = highOn ? (highOrder + 1) / 2 : 0;
 
     // RBJ high-pass (the low cut): b0 = (1 + cos w0) / 2 ... For an odd
     // order the first section is a prewarped bilinear first-order stage
@@ -640,7 +731,48 @@ void CostesStrip::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
         if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        {
+            auto tree = juce::ValueTree::fromXml (*xml);
+
+            // v2.59.0 migration: sessions saved by v2.58.x and earlier hold
+            // a plain integer cut order (0 meant "off" - the filter was
+            // bypassed) and no on/off plate children. On the new slope
+            // parameter the order range starts at 1, so a stored 0 would
+            // load as an active 6 dB/oct filter. Migrate on the raw tree,
+            // before it reaches the parameters: order 0 becomes a switched
+            // OFF plate at the 12 dB/oct default slope, any other order
+            // snaps to a legal one, and a fresh on/off child is appended
+            // (the parameter's own snap also guards the orders - this
+            // rewrites the stored values so a quick save keeps them)
+            if (! tree.getChildWithProperty ("id", "lowCutOn").isValid())
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    const bool isLow = (i == 0);
+                    const juce::Identifier orderId (isLow ? "lowCutOrder" : "highCutOrder");
+                    const juce::Identifier onId     (isLow ? "lowCutOn"     : "highCutOn");
+
+                    auto orderChild = tree.getChildWithProperty ("id", orderId.toString());
+
+                    if (! orderChild.isValid())
+                        continue;
+
+                    const float rawOrder = (float) (double) orderChild.getProperty ("value");
+                    const bool wasOff = rawOrder < 0.5f;
+                    const float migratedOrder = wasOff ? 2.0f
+                        : snapCutOrderToLegal (juce::jlimit (1.0f, 12.0f, rawOrder));
+
+                    orderChild.setProperty ("value", migratedOrder, nullptr);
+
+                    auto onChild = juce::ValueTree (orderChild.getType());
+                    onChild.setProperty ("id", onId.toString(), nullptr);
+                    onChild.setProperty ("value", wasOff ? 0.0f : 1.0f, nullptr);
+                    tree.appendChild (onChild, nullptr);
+                }
+            }
+
+            apvts.replaceState (tree);
+        }
     }
 }
 
@@ -672,7 +804,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
         knob.setMouseDragSensitivity (320);
         knob.setDoubleClickReturnValue (true, defaultValue);
-        knob.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 74, 16);
+        // 76 x 18 (v2.59.0, Clement's remark 1): the old 74 x 16 box sat
+        // its descenders on the clip - the wider, taller box keeps every
+        // readout fully inside the panel
+        knob.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 76, 18);
         knob.setColour (juce::Slider::rotarySliderFillColourId, plateText);
         knob.setColour (juce::Slider::rotarySliderOutlineColourId, knobBezel);
         knob.setColour (juce::Slider::textBoxTextColourId, engraving);
@@ -693,14 +828,15 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
 
-    // the slope selectors under the cut knobs (v2.58.0, Clement's remark):
-    // a horizontal slider from "off" at the far left to 96 dB/oct at the
-    // far right. The readout is the parameter's own text ("off", "6 dB/oct"
-    // ... "96 dB/oct"), so the label never drifts from the DSP
+    // the slope selectors under the cut knobs (v2.58.0, Clement's remark;
+    // v2.59.0): a horizontal slider from 6 to 72 dB/oct. "off" moved to
+    // the on/off plate on the left, so the sweep holds only legal
+    // Butterworth slopes - the readout is the parameter's own text
+    // ("6 dB/oct" ... "72 dB/oct"), so the label never drifts from the DSP
     const auto setUpSlope = [this] (juce::Slider& slope)
     {
         slope.setSliderStyle (juce::Slider::LinearHorizontal);
-        slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 70, 14);
+        slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 72, 16);
         slope.setColour (juce::Slider::trackColourId, knobBezel);
         slope.setColour (juce::Slider::thumbColourId, valueArc);
         slope.setColour (juce::Slider::textBoxTextColourId, engraving);
@@ -720,6 +856,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     oversampleButton.setButtonText ("OS 2x");
     addAndMakeVisible (oversampleButton);
 
+    // the cut on/off plates (v2.59.0, Clement's remark 2): the same SSL
+    // plate language as the oversampling switch, vertical, one per cut.
+    // They sit left of each cut's readout band and own the bypass - the
+    // slope sweep itself starts at 6 dB/oct
+    addAndMakeVisible (lowCutOnButton);
+    addAndMakeVisible (highCutOnButton);
+
     trimInAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "trimInDb", trimInKnob);
     lowCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -736,6 +879,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "driveDb", driveKnob);
     oversampleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "driveOversampled", oversampleButton);
+    lowCutOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "lowCutOn", lowCutOnButton);
+    highCutOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "highCutOn", highCutOnButton);
 
     setSize (880, 200);
 }
@@ -751,6 +898,8 @@ CostesStripEditor::~CostesStripEditor()
     tiltAttachment.reset();
     driveAttachment.reset();
     oversampleAttachment.reset();
+    lowCutOnAttachment.reset();
+    highCutOnAttachment.reset();
 
     setLookAndFeel (nullptr);
 }
@@ -846,9 +995,22 @@ void CostesStripEditor::resized()
                              : (slope != nullptr) ? column.getHeight() - 44
                                                   : column.getHeight() - 20;
 
+        // the cut on/off plate (v2.59.0): a 34 px strip on the left of
+        // the readout band - the knob's own frequency readout and the
+        // caption row - above the slope slider. The readout box stays
+        // centred, so the plate never collides with it
         if (slope != nullptr)
         {
-            auto slopeBounds = column.removeFromBottom (22).reduced (6, 0);
+            auto plateArea = column;
+            plateArea = plateArea.removeFromBottom (64).removeFromTop (40);
+
+            auto plate = plateArea.removeFromLeft (34).reduced (2);
+            (i == 1 ? lowCutOnButton : highCutOnButton).setBounds (plate);
+        }
+
+        if (slope != nullptr)
+        {
+            auto slopeBounds = column.removeFromBottom (24).reduced (6, 0);
             slope->setBounds (slopeBounds);
         }
 
@@ -907,6 +1069,51 @@ void CostesStripEditor::OversampleToggle::paintButton (juce::Graphics& g,
     g.setColour (on ? engraving : engravingDim);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawText (on ? "OS 2x ON" : "OS 2x OFF", bounds,
+                juce::Justification::centred);
+}
+
+void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
+                                                  bool highlighted,
+                                                  bool /*down*/)
+{
+    // the vertical sibling of the oversampling plate (v2.59.0, Clement's
+    // remark 2): an SSL-style bar beside each cut's readout - the LED on
+    // top, the state spelled out below. Amber and lit when the filter
+    // processes, dark with a dead LED when it is bypassed
+    const bool on = getToggleState();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
+                    : plateFill);
+    g.fillRoundedRectangle (bounds, 4.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
+
+    // the LED at the top: a lit amber dot with a soft glow when on, a
+    // dark socket sunk into the plate when off
+    const auto ledArea = bounds.removeFromTop (bounds.getHeight() * 0.45f);
+    const auto led = ledArea.withSizeKeepingCentre (8.0f, 8.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    // the caption spells the state: "ON" / "OFF", dark engraving on the
+    // lit plate, dim cream on the dark one
+    g.setColour (on ? engraving : engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText (on ? "ON" : "OFF", bounds,
                 juce::Justification::centred);
 }
 

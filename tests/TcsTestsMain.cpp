@@ -285,6 +285,24 @@ void expectNear (double value, double target, double tolerance,
     }
 }
 
+// a ceiling check that still prints its reading on failure - a silent
+// expectTrue (x <= y) leaves a failed build unreadable (the v2.58.0
+// lesson: the two failing checks printed no values)
+void expectAtMost (double value, double maximum,
+                   const juce::String& description)
+{
+    ++numChecks;
+
+    if (value > maximum)
+    {
+        ++numFailed;
+        std::cout << "        FAIL: " << description
+                  << " (got " << juce::String (value, 4)
+                  << ", expected at most " << juce::String (maximum, 2)
+                  << ")" << std::endl;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -4548,12 +4566,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 8,
-                "the strip's eight parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 10,
+                "the strip's ten parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 8,
-                "the strip exposes exactly eight parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 10,
+                "the strip exposes exactly ten parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB) are unity: run past the 50 ms crossfade, then compare
@@ -4615,7 +4633,7 @@ void testCostesStripBasics()
 
 void testCostesStripAudio()
 {
-    beginTest ("v2.58.1: the Costes strip audio - trim, selectable Butterworth cuts, full-band tilt, drive, oversampling");
+    beginTest ("v2.59.0: the Costes strip audio - trim, on/off cut plates, seven legal Butterworth slopes, full-band tilt, drive, oversampling");
 
     juce::MidiBuffer noMidi;
 
@@ -4705,6 +4723,15 @@ void testCostesStripAudio()
     strip->getApvts().getParameterAsValue ("trimInDb").setValue (6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 6.0, 0.3,
                 "trim in +6 dB reads +6 dB");
+
+    // v2.59.0 (Clement's remark 4): the trim in sweeps -24 to +12 dB now,
+    // and a typed value beyond either end clamps to it
+    strip->getApvts().getParameterAsValue ("trimInDb").setValue (-30.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("trimInDb")->load(), -24.0, 0.01,
+                "the trim clamps a typed -30 dB to its -24 dB floor");
+    strip->getApvts().getParameterAsValue ("trimInDb").setValue (20.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("trimInDb")->load(), 12.0, 0.01,
+                "the trim clamps a typed +20 dB to its +12 dB ceiling");
     strip->getApvts().getParameterAsValue ("trimInDb").setValue (0.0f);
 
     // v2.57.0 (Clement's remark 1): the tilt is a full-band tilt now - a
@@ -4739,64 +4766,141 @@ void testCostesStripAudio()
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.3,
                 "back at zero the tilt cascade is exactly unity");
 
-    // the cuts, v2.58.0: parked wide open (16 Hz / 24 kHz, order 2), probed
-    // through the new Butterworth order selector. Expected values are the
-    // float64 simulation of the exact cascades measured the harness way:
-    // a first-order 500 Hz cut kills 60 Hz by 18.5 dB, order 4 by 73.7;
-    // the 2 kHz high cut kills 16 kHz by 22.4 dB at order 1 (the bilinear
-    // prewarp at 8x the corner is steeper than the analog 18 dB), by
-    // 44.7 dB at order 2 and by 89.5 dB at order 4.
-    // The 60 Hz probes keep the peak instrument: the grid there is dense
-    // (800 samples per cycle) and the readings sit far above every
-    // artefact. The 16 kHz probes moved to the lock-in in v2.58.1: the
-    // low cut (16 Hz, order 2) runs poles hugging DC in float32 (radius
-    // 0.99852 at 48 kHz, DC loop gain 1 / (1 + a1 + a2) ~ 228000), so the
-    // biquad's own rounding bias settles as a DC offset around -70 dB at
-    // its output. The high cut sections are low-passes: DC passes at
-    // unity, so once the true 16 kHz residue falls below roughly -70 dB
-    // (order 4) the peak instrument reads the offset, not the filter -
-    // the v2.58.0 build failed its own 24 dB/oct check that way while
-    // the DSP was right. The lock-in correlates against the probe over
-    // exactly 160 whole cycles per 480-sample block, and a constant
-    // offset contributes exactly zero to that correlation - the reading
-    // is the true 16 kHz bin whatever rides underneath.
-    const double flat60 = measurePeak (60.0);
+    // the cuts, v2.59.0: every probe reads through the coherent lock-in -
+    // the v2.58.0 lesson generalised. The peak instrument is grid-quantised
+    // (at 16 kHz the sampling grid is 3 points per cycle and the reading
+    // swings with the filter's phase shift), and below roughly -90 dB it
+    // reads float32 rounding residue instead of the filter; the lock-in
+    // correlates against the probe over an exact integer number of cycles
+    // (100 Hz = 1 cycle and 16 kHz = 160 cycles per 480-sample block at
+    // 48 kHz), so a constant offset contributes exactly zero and the
+    // reading is the true bin amplitude whatever rides underneath.
+    //
+    // Each cut now owns an on/off plate (Clement's remark 2): false parks
+    // its section count at zero - a full bypass - and the slope sweep
+    // holds only the seven legal Butterworth slopes 6 / 12 / 18 / 24 /
+    // 36 / 48 / 72 dB/oct (Clement's remark 3, orders 1, 2, 3, 4, 6, 8,
+    // 12). Expected values are the float64 simulation of the exact
+    // cascades measured the harness way; the float32 emulation tracks
+    // them within 0.001 dB down to -180 dB.
+    //
+    // the low cut: parked reference at 100 Hz (16 Hz / order 2, high cut
+    // parked), then a 500 Hz corner probed at 100 Hz. OFF reads exactly
+    // the reference (the +0.00 dB is the parked low cut's own residual
+    // 100 Hz response); order 1 kills 100 Hz by 14.1 dB and every legal
+    // order follows the Butterworth staircase
+    // JUCE 8's gainToDecibels clamps its result at the minusInfinityDb
+    // floor - the default is -100 dB - so a reading deeper than that
+    // comes back as exactly -100.0000 and the deep cut probes below
+    // would all read the floor instead of the filter. The five checks
+    // that expect more than 100 dB of cut convert through this helper,
+    // which pushes the floor out to -400 dB, far below even the 72
+    // dB/oct float32 readings (about -249 dB)
+    auto deepDb = [] (double amplitudeRatio) -> double
+    {
+        return juce::Decibels::gainToDecibels (amplitudeRatio, -400.0);
+    };
+
+    const double flatLow100 = measureAmplitude (100.0, 100.0);
     strip->getApvts().getParameterAsValue ("lowCutHz").setValue (500.0f);
 
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (0);
-    expectNear (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60), 0.0, 0.3,
-                "the low cut's OFF position bypasses the filter");
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (1);
-    expectNear (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60), -18.5, 1.5,
-                "a 6 dB/oct first-order low cut reads -18.5 dB at 60 Hz");
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2);
-    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -24.0,
-                "the 12 dB/oct low cut attenuates 60 Hz by at least 24 dB");
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (4);
-    expectTrue (juce::Decibels::gainToDecibels (measurePeak (60.0) / flat60) <= -60.0,
-                "a 24 dB/oct low cut attenuates 60 Hz by at least 60 dB");
+    strip->getApvts().getParameterAsValue ("lowCutOn").setValue (false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), 0.0, 0.3,
+                "the low cut's OFF plate bypasses the filter");
+
+    strip->getApvts().getParameterAsValue ("lowCutOn").setValue (true);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (1.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), -14.1, 0.8,
+                "a 6 dB/oct first-order low cut reads -14.1 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), -28.0, 1.0,
+                "a 12 dB/oct low cut reads -28.0 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (3.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), -41.9, 1.0,
+                "an 18 dB/oct low cut reads -41.9 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (4.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), -55.9, 1.5,
+                "a 24 dB/oct low cut reads -55.9 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / flatLow100), -83.9, 1.5,
+                "a 36 dB/oct low cut reads -83.9 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (8.0f);
+    expectNear (deepDb (measureAmplitude (100.0, 100.0) / flatLow100), -111.9, 2.5,
+                "a 48 dB/oct low cut reads -111.9 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (12.0f);
+    expectAtMost (deepDb (measureAmplitude (100.0, 100.0) / flatLow100), -140.0,
+                  "a 72 dB/oct low cut buries 100 Hz below -140 dB (the simulation says -167.8 dB)");
+
+    // the slope parameter itself snaps to the seven legal orders
+    // (Clement's remark 3): every raw value lands on the nearest legal
+    // one, ties resolving to the gentler slope
+    {
+        const float snapRaw[]     = { 5.0f, 7.0f,  9.0f, 10.0f, 11.0f, 13.0f, 16.0f };
+        const float snapLegal[]   = { 4.0f, 6.0f,  8.0f,  8.0f, 12.0f, 12.0f, 12.0f };
+        const int   snapSlope[]   = {   24,   36,    48,    48,    72,    72,    72 };
+
+        for (int i = 0; i < 7; ++i)
+        {
+            strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (snapRaw[i]);
+            expectNear (strip->getApvts().getRawParameterValue ("lowCutOrder")->load(), snapLegal[i], 0.01,
+                        "an order of " + juce::String (snapRaw[i], 1)
+                            + " snaps to the legal " + juce::String (snapSlope[i]) + " dB/oct slope");
+        }
+
+        // a typed "30 dB/oct" parses to order 5, the tie snapping gentler
+        // to the legal 24 dB/oct (getValueForText returns normalised, so
+        // the readout comes back through convertFrom0to1)
+        auto* lowOrderParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("lowCutOrder"));
+        expectTrue (lowOrderParam != nullptr,
+                    "the low cut slope parameter is a ranged parameter");
+
+        if (lowOrderParam != nullptr)
+            expectNear (lowOrderParam->convertFrom0to1 (lowOrderParam->getValueForText ("30 dB/oct")), 4.0, 0.01,
+                        "a typed 30 dB/oct snaps to the legal 24 dB/oct");
+    }
 
     strip->getApvts().getParameterAsValue ("lowCutHz").setValue (16.0f);
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (2.0f);
+    strip->getApvts().getParameterAsValue ("lowCutOn").setValue (true);
 
+    // the high cut: parked reference at 16 kHz, then a 2 kHz corner probed
+    // at 16 kHz - 3 octaves above it. The bilinear prewarp at 8x the corner
+    // makes the digital slopes steeper than the analog ones (order 1 reads
+    // -22.4 dB, not -18); OFF reads the parked reference's own +0.02 dB
     const double flat16k = measureAmplitude (16000.0, 16000.0);
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (2000.0f);
 
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (0);
+    strip->getApvts().getParameterAsValue ("highCutOn").setValue (false);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), 0.02, 0.3,
-                "the high cut's OFF position bypasses the filter (the +0.02 is the parked reference's own 16 kHz response)");
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (1);
+                "the high cut's OFF plate bypasses the filter (the +0.02 is the parked reference's own 16 kHz response)");
+
+    strip->getApvts().getParameterAsValue ("highCutOn").setValue (true);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (1.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -22.4, 0.8,
                 "a 6 dB/oct first-order high cut reads -22.4 dB at 16 kHz");
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -44.7, 1.0,
-                "the 12 dB/oct high cut reads -44.7 dB at 16 kHz");
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (4);
+                "a 12 dB/oct high cut reads -44.7 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (3.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -67.1, 1.5,
+                "an 18 dB/oct high cut reads -67.1 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (4.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -89.5, 1.5,
-                "the 24 dB/oct high cut reads -89.5 dB at 16 kHz (the lock-in ignores the low cut's float32 DC offset)");
+                "a 24 dB/oct high cut reads -89.5 dB at 16 kHz (the lock-in ignores the low cut's float32 DC offset)");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (6.0f);
+    expectNear (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -134.3, 5.0,
+                "a 36 dB/oct high cut reads -134.3 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (8.0f);
+    expectAtMost (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -140.0,
+                  "a 48 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -179.0 dB)");
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (12.0f);
+    expectAtMost (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -140.0,
+                  "a 72 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -262 dB in float64, about -249 dB in float32)");
 
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2.0f);
+    strip->getApvts().getParameterAsValue ("highCutOn").setValue (true);
 
     // flat midband: 125 Hz and 8 kHz within 1 dB of the 1 kHz reference.
     // 125 Hz is not a whole number of cycles per 480-sample block (1.25),
@@ -4863,7 +4967,7 @@ void testCostesStripAudio()
 
 void testCostesStripSession()
 {
-    beginTest ("v2.58.0: the Costes strip survives the session roundtrip");
+    beginTest ("v2.59.0: the Costes strip survives the session roundtrip");
 
     TheChannelStripAudioProcessor proc;
     proc.prepareToPlay (48000.0, 512);
@@ -4876,13 +4980,16 @@ void testCostesStripSession()
     if (strip == nullptr)
         return;
 
-    // a recognisable knob position on every parameter, including the
-    // oversampling switch and the two Butterworth order selectors
+    // a recognisable knob position on every parameter: the trim, both
+    // cut corners, both legal slope selectors and both on/off plates,
+    // the tilt, the drive and the oversampling switch
     strip->getApvts().getParameterAsValue ("trimInDb").setValue (4.5f);
     strip->getApvts().getParameterAsValue ("lowCutHz").setValue (120.0f);
-    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (5);
+    strip->getApvts().getParameterAsValue ("lowCutOrder").setValue (6.0f);
+    strip->getApvts().getParameterAsValue ("lowCutOn").setValue (false);
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (8000.0f);
-    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (3);
+    strip->getApvts().getParameterAsValue ("highCutOrder").setValue (3.0f);
+    strip->getApvts().getParameterAsValue ("highCutOn").setValue (true);
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (3.0f);
     strip->getApvts().getParameterAsValue ("driveDb").setValue (6.0f);
     strip->getApvts().getParameterAsValue ("driveOversampled").setValue (true);
@@ -4910,12 +5017,16 @@ void testCostesStripSession()
                     "trim in restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("lowCutHz")->load(), 120.0, 0.1,
                     "low cut restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("lowCutOrder")->load(), 5.0, 0.01,
-                    "the low cut's Butterworth order restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("lowCutOrder")->load(), 6.0, 0.01,
+                    "the low cut's 36 dB/oct slope restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("lowCutOn")->load(), 0.0, 0.01,
+                    "the low cut's OFF plate restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("highCutHz")->load(), 8000.0, 0.1,
                     "high cut restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("highCutOrder")->load(), 3.0, 0.01,
-                    "the high cut's Butterworth order restores");
+                    "the high cut's 18 dB/oct slope restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("highCutOn")->load(), 1.0, 0.01,
+                    "the high cut's ON plate restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("tiltDb")->load(), 3.0, 0.01,
                     "tilt restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("driveDb")->load(), 6.0, 0.01,
@@ -4924,8 +5035,83 @@ void testCostesStripSession()
                     "the oversampling switch restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 8,
-                "the restored strip's eight parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 10,
+                "the restored strip's ten parameters are relayed");
+}
+
+void testCostesStripMigration()
+{
+    beginTest ("v2.59.0: pre-2.59 sessions migrate (an old OFF slope becomes an OFF plate)");
+
+    // a fresh strip's own state, aged back to the v2.58 format: the order
+    // children hold plain integers (0 meant "off" - the filter bypassed)
+    // and no lowCutOn / highCutOn children exist
+    CostesStrip stripProc;
+    stripProc.prepareToPlay (48000.0, 512);
+
+    juce::MemoryBlock state;
+    stripProc.getStateInformation (state);
+
+    auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+    expectTrue (xml != nullptr, "the strip state parses as XML");
+
+    if (xml == nullptr)
+        return;
+
+    for (int i = xml->getNumChildElements() - 1; i >= 0; --i)
+    {
+        const auto id = xml->getChildElement (i)->getStringAttribute ("id");
+
+        if (id == "lowCutOn" || id == "highCutOn")
+            xml->removeChildElement (xml->getChildElement (i), true);
+    }
+
+    // the v2.58 way: an illegal integer 5 on the low cut (v2.58 allowed
+    // every order up to 16) and a 0 - the old "off" - on the high cut
+    for (int i = 0; i < xml->getNumChildElements(); ++i)
+    {
+        auto* child = xml->getChildElement (i);
+        const auto id = child->getStringAttribute ("id");
+
+        if (id == "lowCutOrder")
+            child->setAttribute ("value", "5");
+        else if (id == "highCutOrder")
+            child->setAttribute ("value", "0");
+    }
+
+    juce::MemoryBlock aged;
+    juce::AudioProcessor::copyXmlToBinary (*xml, aged);
+    expectTrue (aged.getSize() > 0, "the aged session state is non-empty");
+
+    // a FRESH strip loads the aged session: the illegal order 5 snaps to
+    // the legal 4 with the plate ON, and the old high cut "off" migrates
+    // to a switched-OFF plate parked at the 12 dB/oct default slope
+    CostesStrip agedProc;
+    agedProc.prepareToPlay (48000.0, 512);
+    agedProc.setStateInformation (aged.getData(), (int) aged.getSize());
+
+    expectNear (agedProc.getApvts().getRawParameterValue ("lowCutOrder")->load(), 4.0, 0.01,
+                "the aged illegal order 5 loads as the legal 24 dB/oct (tie to the gentler slope)");
+    expectNear (agedProc.getApvts().getRawParameterValue ("lowCutOn")->load(), 1.0, 0.01,
+                "an aged session without ON plates switches the low cut ON");
+    expectNear (agedProc.getApvts().getRawParameterValue ("highCutOrder")->load(), 2.0, 0.01,
+                "the aged high cut order 0 parks at the 12 dB/oct default");
+    expectNear (agedProc.getApvts().getRawParameterValue ("highCutOn")->load(), 0.0, 0.01,
+                "the aged high cut OFF slope migrates to the OFF plate");
+
+    // the migrated state saves and reloads stable: a quick re-save keeps
+    // the plates and the snapped orders
+    juce::MemoryBlock resaved;
+    agedProc.getStateInformation (resaved);
+
+    CostesStrip reloadProc;
+    reloadProc.prepareToPlay (48000.0, 512);
+    reloadProc.setStateInformation (resaved.getData(), (int) resaved.getSize());
+
+    expectNear (reloadProc.getApvts().getRawParameterValue ("lowCutOrder")->load(), 4.0, 0.01,
+                "the migrated low cut order survives a re-save");
+    expectNear (reloadProc.getApvts().getRawParameterValue ("highCutOn")->load(), 0.0, 0.01,
+                "the migrated OFF plate survives a re-save");
 }
 
 void testIntegrationRealConsole()
@@ -5069,6 +5255,7 @@ int main (int argc, char* argv[])
     testCostesStripBasics();
     testCostesStripAudio();
     testCostesStripSession();
+    testCostesStripMigration();
 
     if (integration)
         testIntegrationRealConsole();

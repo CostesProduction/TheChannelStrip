@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.58.0 (roadmap C2)
+// src/CostesStrip.h - v2.59.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
@@ -11,6 +11,15 @@
 // inherits the click-free 50 ms crossfade, the per-ident settings memory,
 // the session save/restore and the parameter relay without a single extra
 // wire.
+//
+// v2.59.0 (Clement's remarks): each cut owns an SSL-style on/off plate
+// beside its readouts - the switch is the bypass now, so the slope slider
+// holds only the seven legal Butterworth slopes 6 / 12 / 18 / 24 / 36 /
+// 48 / 72 dB/oct (orders 1, 2, 3, 4, 6, 8, 12 - nothing in between, a
+// snapping range on the parameter itself). The trim in widened to
+// -24...+12 dB, the readout boxes grew to keep their descenders inside
+// the panel, and sessions saved by v2.58.x migrate on load (an old
+// "off" slope becomes a switched-off plate at its default 12 dB/oct).
 //
 // v2.58.0 (Clement's remarks): the cuts are full [16, 1600] Hz and
 // [240, 24000] Hz logarithmic sweeps with a selectable Butterworth order -
@@ -145,8 +154,10 @@ private:
     std::atomic<float>* trimInDb          = nullptr;
     std::atomic<float>* lowCutHz          = nullptr;
     std::atomic<float>* lowCutOrder       = nullptr;
+    std::atomic<float>* lowCutOn          = nullptr; // 0.0 / 1.0 (v2.59.0)
     std::atomic<float>* highCutHz         = nullptr;
     std::atomic<float>* highCutOrder      = nullptr;
+    std::atomic<float>* highCutOn         = nullptr; // 0.0 / 1.0 (v2.59.0)
     std::atomic<float>* tiltDb            = nullptr;
     std::atomic<float>* driveDb           = nullptr;
     std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
@@ -173,6 +184,8 @@ private:
     float lastHighCutHz  = -1.0f;
     int   lastLowCutOrder  = -1;
     int   lastHighCutOrder = -1;
+    bool  lastLowCutOn   = true;   // v2.59.0: the on/off plates ride the cache
+    bool  lastHighCutOn  = true;
     float lastTiltDb    = -999.0f;
 
     // 2x oversampling for the drive stage: polyphase IIR halfband, built
@@ -202,6 +215,12 @@ private:
 // order stepped as 6 to 96 dB/oct - and every readout formats itself
 // through its parameter's own text functions (integer Hz, 0.01 kHz,
 // 0.1 dB), typed values included.
+//
+// v2.59.0 (Clement's remarks 1-3): the slope sliders keep only the seven
+// legal slopes (6 to 72 dB/oct, snapped on the parameter), the bypass
+// moved to the new CutOnToggle plate on the left of each cut's readout
+// band, and the readout boxes grew (76 x 18 for the knobs, 72 x 16 for
+// the slopes) so no descender clips at the panel's edge again.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -229,6 +248,17 @@ private:
 
     OversampleToggle oversampleButton;
 
+    // the cut on/off plates (v2.59.0, Clement's remark 2): one ToggleButton
+    // per cut, painted like the oversampling switch but vertical - a
+    // horizontal bar with an LED at the top and an ON/OFF caption below.
+    // It replaces "off" in the slope slider, which now starts at 6 dB/oct.
+    struct CutOnToggle : public juce::ToggleButton
+    {
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    CutOnToggle lowCutOnButton, highCutOnButton;
+
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutSlopeAttachment;
@@ -237,6 +267,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tiltAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> oversampleAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lowCutOnAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> highCutOnAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
