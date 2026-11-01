@@ -1,26 +1,34 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.55.0 (roadmap C1)
+// src/CostesStrip.h - v2.56.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
-// consoles (TheChannelStripAudioProcessor::selectCostesStrip). MVP signal
-// path: trim in -> 12 dB/oct low cut -> 12 dB/oct high cut -> trim out, two
-// RBJ biquads per channel with per-block coefficient refresh and per-sample
-// smoothed trims. Because it rides the exact same hosting path as the
-// consoles, it inherits the click-free 50 ms crossfade, the per-ident
-// settings memory, the session save/restore and the parameter relay without
-// a single extra wire.
+// consoles (TheChannelStripAudioProcessor::selectCostesStrip). Signal path:
+// trim in -> 12 dB/oct low cut -> 12 dB/oct high cut -> tilt (two mirrored
+// shelves around a 1 kHz pivot, +/- 12 dB) -> drive (tanh saturation with an
+// invisible auto-makeup calibrated on a -12 dBFS sine) -> optional 2x
+// oversampling around the drive stage. Because it rides the exact same
+// hosting path as the consoles, it inherits the click-free 50 ms crossfade,
+// the per-ident settings memory, the session save/restore and the parameter
+// relay without a single extra wire.
 //
-// The editor (CostesStripEditor) is the cream SSL-style mini panel embedded
-// in the shell's window through the usual hosted-editor slot.
+// The cut corners and the tilt are plain RBJ-style biquads (the shelves use
+// juce::dsp::ArrayCoefficients, so JUCE itself owns the shelf formulas), the
+// oversampler is juce::dsp::Oversampling's polyphase IIR halfband. The
+// polyphase IIR latency is a fraction of a sample, which a plug-in cannot
+// report: the strip stays at zero reported latency (and the harness asserts
+// it).
 //
-// Roadmap: C2 will add compression and saturation, C3 a transient designer.
+// Roadmap: C3 will add the compressor, C4 a transient designer.
 // ---------------------------------------------------------------------------
 
 #pragma once
 
+#include <array>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_dsp/juce_dsp.h>
 
 class CostesStripEditor;
 
@@ -62,14 +70,14 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // The editor (and the offline harness) reach the four parameters
+    // The editor (and the offline harness) reach the six parameters
     // through this - everything else is private DSP plumbing.
     juce::AudioProcessorValueTreeState& getApvts() { return apvts; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
-    // One RBJ biquad section per channel per cut: direct form I, plain
+    // One biquad section per channel per stage: direct form I, plain
     // float state, coefficients swapped in one shot. No allocation ever
     // happens in processBlock (the shell's realtime-safety discipline
     // applies to the internal strip as much as to the shell itself).
@@ -86,39 +94,58 @@ private:
             b0 = newB0; b1 = newB1; b2 = newB2; a1 = newA1; a2 = newA2;
         }
 
+        // adopts a { b0, b1, b2, a0, a1, a2 } coefficient array from
+        // juce::dsp::ArrayCoefficients and normalises it by a0
+        void setShelfCoefficients (const std::array<float, 6>& c);
+
         float processSample (float input);
     };
 
     void refreshCutCoefficients();
+    void refreshTiltCoefficients();
 
     juce::AudioProcessorValueTreeState apvts;
 
     // raw pointers into the APVTS parameters (lock-free reads)
-    std::atomic<float>* trimInDb  = nullptr;
-    std::atomic<float>* lowCutHz  = nullptr;
-    std::atomic<float>* highCutHz = nullptr;
-    std::atomic<float>* trimOutDb = nullptr;
+    std::atomic<float>* trimInDb          = nullptr;
+    std::atomic<float>* lowCutHz          = nullptr;
+    std::atomic<float>* highCutHz         = nullptr;
+    std::atomic<float>* tiltDb            = nullptr;
+    std::atomic<float>* driveAmount       = nullptr;
+    std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
 
     double currentSampleRate = 48000.0;
 
-    // the trims move as smoothed linear gains (20 ms); the cut corners
-    // move per block - a knob turn is already a slow ramp, and each
-    // block only steps the response a fraction of a dB
+    // the trim moves as a smoothed linear gain (20 ms); the cut corners
+    // and the tilt move per block - a knob turn is already a slow ramp,
+    // and each block only steps the response a fraction of a dB
     juce::SmoothedValue<float> trimInGain;
-    juce::SmoothedValue<float> trimOutGain;
 
     Biquad lowCut[2];
     Biquad highCut[2];
+    Biquad tiltLow[2];
+    Biquad tiltHigh[2];
 
     float lastLowCutHz  = -1.0f;
     float lastHighCutHz = -1.0f;
+    float lastTiltDb    = -999.0f;
+
+    // 2x oversampling for the drive stage: polyphase IIR halfband, built
+    // in prepareToPlay (allocation stays off the audio thread) and fed
+    // sub-blocks no longer than the prepared maximum
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+    int preparedMaxSamples = 512;
 };
 
 // ---------------------------------------------------------------------------
-// v2.55.0: the cream SSL-style mini panel - four knobs in a row (TRIM IN,
-// LOW CUT, HIGH CUT, TRIM OUT) under the COSTES CHANNEL STRIP name plate.
-// The shell embeds it through the standard hosted-editor window, so nothing
-// here knows anything about the shell: it is a plain plugin editor.
+// v2.56.0: the cream SSL-style mini panel - five knobs in a row (TRIM IN,
+// LOW CUT, HIGH CUT, TILT, DRIVE) grouped under engraved section captions
+// (TRIM / FILTERS / TONE / DRIVE), an "OS 2x" toggle under the drive knob
+// and the COSTES CHANNEL STRIP name plate. The knobs are built for the
+// mouse: horizontal-or-vertical drag, a wide 320 px travel, double-click
+// back to default, an editable readout under each cap. The shell embeds
+// the panel through the standard hosted-editor window, so nothing here
+// knows anything about the shell: it is a plain plugin editor.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -132,15 +159,19 @@ public:
 private:
     CostesStrip& owner;
 
-    juce::Slider trimInKnob, lowCutKnob, highCutKnob, trimOutKnob;
-    juce::Label trimInLabel, lowCutLabel, highCutLabel, trimOutLabel;
+    juce::Slider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
+    juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
+    juce::ToggleButton oversampleButton;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> highCutAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimOutAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tiltAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> oversampleAttachment;
 
-    // SSL-style knobs: cream bezel, dark disc, white pointer line
+    // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
+    // marks around the cap and a warm value arc that shows the position
     struct StripLookAndFeel : public juce::LookAndFeel_V4
     {
         void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h,

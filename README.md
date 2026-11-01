@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.55.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.56.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,33 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.56.0**
+  - **Roadmap C2: the strip grows its tone stage.** The Costes strip now
+    runs trim in -> low cut -> high cut -> **tilt** -> **drive**. The trim
+    out is gone (per the roadmap review): five knobs and one switch.
+  - **Tilt +/-12 dB.** Two mirrored shelves around a 1 kHz pivot -- bass
+    up / treble down or the opposite, with the pivot itself staying
+    flat. The shelves come straight from JUCE's own coefficient
+    designers (RBJ cookbook, Q 0.707).
+  - **Drive with an invisible auto-makeup.** A tanh soft clip whose
+    input gain scales with the knob, blended against the dry signal so
+    that 0 is bit-exactly transparent. The auto-makeup is calibrated on
+    a -12 dBFS sine and holds the loudness steady -- no extra output
+    knob, by design.
+  - **"OS 2x" oversampling switch.** When on, the drive stage runs in
+    a 2x oversampled domain (JUCE polyphase IIR halfband) so the
+    harmonics it generates do not fold back into the audible band; the
+    strip keeps reporting zero latency (the halfband's latency is a
+    fraction of a sample).
+  - **Logarithmic sweeps.** The low cut (20-500 Hz) and high cut
+    (1-20 kHz) knobs now sweep true logarithmically: every octave spans
+    the same knob travel.
+  - **Knobs built for the mouse.** Horizontal-or-vertical rotary drag,
+    a wide 320 px travel, double-click back to default, Shift for fine
+    moves, and an editable readout under each cap.
+  - **The panel grew up.** Engraved section captions (TRIM / FILTERS /
+    TONE / DRIVE), a tick scale and a warm amber value arc around each
+    cap, corner screws -- the module reads like the console it serves.
 - **2.55.0**
   - **Roadmap C1: the Costes channel strip.** The shell now carries its
     OWN strip — trim in, a 12 dB/oct low cut, a 12 dB/oct high cut and
