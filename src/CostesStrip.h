@@ -1,16 +1,31 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.59.0 (roadmap C2)
+// src/CostesStrip.h - v2.61.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
 // consoles (TheChannelStripAudioProcessor::selectCostesStrip). Signal path:
 // trim in -> variable-order Butterworth low cut -> variable-order Butterworth
-// high cut -> tilt -> drive (tanh saturation with an invisible auto-makeup
-// calibrated on a -12 dBFS sine) -> optional 2x oversampling around the drive
-// stage. Because it rides the exact same hosting path as the consoles, it
-// inherits the click-free 50 ms crossfade, the per-ident settings memory,
-// the session save/restore and the parameter relay without a single extra
-// wire.
+// high cut -> the four-band EQ -> tilt -> drive (tanh saturation with an
+// invisible auto-makeup calibrated on a -12 dBFS sine) -> optional 2x
+// oversampling around the drive stage. Because it rides the exact same
+// hosting path as the consoles, it inherits the click-free 50 ms crossfade,
+// the per-ident settings memory, the session save/restore and the parameter
+// relay without a single extra wire.
+//
+// v2.61.0 (Clement's spec): a four-band SSL-style EQ between the cuts and
+// the tilt. Band 1 (LF): bell or low shelf, 20-600 Hz, default 100 Hz. Band
+// 2 (LO MID): bell with a variable bandwidth in octaves, 60-3000 Hz,
+// default 400 Hz. Band 3 (HI MID): the same, 500 Hz-12 kHz, default
+// 1600 Hz. Band 4 (HF): bell or high shelf, 600 Hz-18 kHz, default
+// 7200 Hz. The bells sweep +/- 15 dB; the bandwidths run 0.2 to 2.0
+// octaves (a bell reads exactly its gain at its centre, an RBJ property
+// the harness asserts), and the shelves use the RBJ Q form with
+// Q = 1/sqrt(2). At 0 dB every band collapses to the exact identity
+// (b == a coefficient-for-coefficient), so a parked EQ is bit-transparent,
+// and the global EQ plate parks the whole section at zero active
+// biquads - a true bypass, not a flat filter. Sessions saved by earlier
+// versions simply find no EQ children and load the defaults (the APVTS
+// tree stores denormalised values, so nothing to migrate).
 //
 // v2.59.0 (Clement's remarks): each cut owns an SSL-style on/off plate
 // beside its readouts - the switch is the bypass now, so the slope slider
@@ -133,6 +148,7 @@ private:
     };
 
     void refreshCutCoefficients();
+    void refreshEqCoefficients();
     void refreshTiltCoefficients();
 
     // the full-band tilt: ten octave-spaced high shelves draw the straight
@@ -162,6 +178,23 @@ private:
     std::atomic<float>* driveDb           = nullptr;
     std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
 
+    // the EQ section (v2.61.0): thirteen parameters - the global plate,
+    // then per band a corner, a gain and (band 1/4) a bell/shelf mode or
+    // (band 2/3) a bandwidth in octaves
+    std::atomic<float>* eqOn    = nullptr; // 0.0 / 1.0
+    std::atomic<float>* eq1Hz   = nullptr;
+    std::atomic<float>* eq1Gain = nullptr;
+    std::atomic<float>* eq1Bell = nullptr; // 0.0 / 1.0 (shelf / bell)
+    std::atomic<float>* eq2Hz   = nullptr;
+    std::atomic<float>* eq2Gain = nullptr;
+    std::atomic<float>* eq2Oct  = nullptr;
+    std::atomic<float>* eq3Hz   = nullptr;
+    std::atomic<float>* eq3Gain = nullptr;
+    std::atomic<float>* eq3Oct  = nullptr;
+    std::atomic<float>* eq4Hz   = nullptr;
+    std::atomic<float>* eq4Gain = nullptr;
+    std::atomic<float>* eq4Bell = nullptr; // 0.0 / 1.0 (shelf / bell)
+
     double currentSampleRate = 48000.0;
 
     // the trim moves as a smoothed linear gain (20 ms); the cut corners
@@ -179,6 +212,22 @@ private:
     // the tilt cascade: one shelf per octave around the pivot (indexed
     // [shelf][channel]) - see numTiltShelves above
     Biquad tiltShelves[numTiltShelves][2];
+
+    // the four-band EQ (v2.61.0): [band][channel], one biquad per band.
+    // The global plate parks activeEqSections at zero - the process loop
+    // then skips the whole cascade (a true bypass, not a flat filter)
+    static constexpr int numEqBands = 4;
+    Biquad eqBands[numEqBands][2];
+    int activeEqSections = 0;
+
+    // the EQ cache (v2.61.0): the corner, the gain, the bandwidth and the
+    // bell/shelf mode of every band plus the global plate all ride the
+    // same per-block cache discipline as the cuts
+    float lastEqHz[4]   = { -1.0f, -1.0f, -1.0f, -1.0f };
+    float lastEqGain[4] = { -999.0f, -999.0f, -999.0f, -999.0f };
+    float lastEqN[4]    = { -1.0f, -1.0f, -1.0f, -1.0f };
+    bool  lastEqBell[4] = { false, false, false, false };
+    int   lastEqOn      = -1;
 
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
@@ -231,6 +280,14 @@ private:
 // settings (the range maps the orders to seven equal knob positions), and
 // the slope readout box grew to the knobs' 76 x 18 so "24 dB/oct" no
 // longer clips at its bottom edge.
+//
+// v2.61.0 (Clement's spec): the panel grows a second row - the four-band
+// SSL-style EQ. An "EQ" plate on the left of the header owns the global
+// bypass, the section caption carries its own bell-curve glyph, and four
+// band columns (LF, LO MID, HI MID, HF) each hold a FREQ and a GAIN knob
+// side by side. Bands 1/4 switch between bell and shelf with a dedicated
+// BELL/SHELF plate, bands 2/3 sweep their bandwidth in octaves with the
+// same horizontal slider the cuts use for their slopes.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -247,7 +304,7 @@ public:
     // test harness can name the types and count the instances
     struct SectionIcon : public juce::Component
     {
-        enum class Icon { trim, lowCut, highCut, tilt, drive };
+        enum class Icon { trim, lowCut, highCut, tilt, drive, eq };
 
         explicit SectionIcon (Icon iconType) : type (iconType) {}
 
@@ -263,6 +320,10 @@ public:
         return { &trimIcon, &lowCutIcon, &highCutIcon, &tiltIcon, &driveIcon };
     }
 
+    // the EQ section's own bell-curve glyph (v2.61.0), beside the header
+    // caption - the harness reaches it through this
+    SectionIcon* getEqIcon() { return &eqIcon; }
+
 private:
     CostesStrip& owner;
 
@@ -275,16 +336,47 @@ private:
     SectionIcon highCutIcon{ SectionIcon::Icon::highCut };
     SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
     SectionIcon driveIcon  { SectionIcon::Icon::drive };
+    SectionIcon eqIcon    { SectionIcon::Icon::eq };   // v2.61.0
+
+    // the EQ section (v2.61.0): eight knobs (a FREQ and a GAIN per band,
+    // each with its own caption label), four band captions, two bandwidth
+    // sliders (bands 2/3) and two bell/shelf plates (bands 1/4)
+    juce::Slider eq1HzKnob,   eq1GainKnob;
+    juce::Slider eq2HzKnob,   eq2GainKnob;
+    juce::Slider eq3HzKnob,   eq3GainKnob;
+    juce::Slider eq4HzKnob,   eq4GainKnob;
+    juce::Slider eq2OctSlider, eq3OctSlider;
+
+    juce::Label eq1HzLabel, eq1GainLabel;
+    juce::Label eq2HzLabel, eq2GainLabel;
+    juce::Label eq3HzLabel, eq3GainLabel;
+    juce::Label eq4HzLabel, eq4GainLabel;
+    juce::Label eqBand1Label, eqBand2Label, eqBand3Label, eqBand4Label;
+    juce::Label eqSectionLabel;
 
     // the oversampling switch: a ToggleButton that paints its own plate
     // (lit amber + LED when on, dark + dim LED when off) - the default
-    // checkbox tick was too quiet to read (v2.57.0, Clement's remark 2)
-    struct OversampleToggle : public juce::ToggleButton
+    // checkbox tick was too quiet to read (v2.57.0, Clement's remark 2).
+    // v2.61.0: the caption is a member now, so the EQ's global on/off
+    // plate speaks the same plate language ("EQ ON" / "EQ OFF")
+    struct PlateToggle : public juce::ToggleButton
+    {
+        juce::String caption;
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    PlateToggle oversampleButton;
+    PlateToggle eqOnButton;   // v2.61.0
+
+    // the band-1/4 shape switch (v2.61.0): lit "BELL" or dark "SHELF",
+    // the same plate language as the cut on/off bars
+    struct ShelfModeToggle : public juce::ToggleButton
     {
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
     };
 
-    OversampleToggle oversampleButton;
+    ShelfModeToggle eq1ModeButton, eq4ModeButton;
 
     // the cut on/off plates (v2.59.0, Clement's remark 2): one ToggleButton
     // per cut, painted like the oversampling switch but vertical - a
@@ -307,6 +399,21 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> oversampleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lowCutOnAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> highCutOnAttachment;
+
+    // the EQ attachments (v2.61.0): thirteen controls wired to the APVTS
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eqOnAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq1HzAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq1GainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eq1ModeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq2HzAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq2GainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq2OctAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq3HzAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq3GainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq3OctAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq4HzAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq4GainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eq4ModeAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position

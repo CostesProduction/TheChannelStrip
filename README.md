@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.60.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.61.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,23 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.61.0**
+  - **A four-band SSL-style EQ on the Costes strip.** The internal Costes
+    channel strip grows an EQ section between its cuts and its tilt,
+    on a second row of the panel: **LF** (bell or low shelf, 20-600 Hz,
+    default 100 Hz), **LO MID** (bell with a variable bandwidth,
+    60-3000 Hz, default 400 Hz), **HI MID** (the same, 500 Hz-12 kHz,
+    default 1600 Hz) and **HF** (bell or high shelf, 600 Hz-18 kHz,
+    default 7200 Hz). Each band sweeps **+/- 15 dB**, the mid bells'
+    bandwidth reads in **octaves** (0.2 to 2.0, the number of octaves
+    concerned - Clement's spec), the outer bands switch bell/shelf with
+    a dedicated plate, and a global **EQ ON/OFF plate** owns the whole
+    section's bypass.
+  - **Bit-transparent at rest.** At 0 dB every band collapses to the
+    exact identity filter and the OFF plate runs zero biquads, so a
+    parked EQ changes the strip's output by not one bit. Sessions saved
+    by earlier versions load with the EQ at its defaults - nothing to
+    migrate.
 - **2.60.0**
   - **Section icons on the Costes strip.** Every knob caption of the
     internal Costes channel strip now carries a clean engraved glyph on

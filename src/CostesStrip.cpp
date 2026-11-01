@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.59.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.61.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -163,10 +163,29 @@ CostesStrip::CostesStrip()
     driveDb          = apvts.getRawParameterValue ("driveDb");
     driveOversampled = apvts.getRawParameterValue ("driveOversampled");
 
+    eqOn    = apvts.getRawParameterValue ("eqOn");
+    eq1Hz   = apvts.getRawParameterValue ("eq1Hz");
+    eq1Gain = apvts.getRawParameterValue ("eq1Gain");
+    eq1Bell = apvts.getRawParameterValue ("eq1Bell");
+    eq2Hz   = apvts.getRawParameterValue ("eq2Hz");
+    eq2Gain = apvts.getRawParameterValue ("eq2Gain");
+    eq2Oct  = apvts.getRawParameterValue ("eq2Oct");
+    eq3Hz   = apvts.getRawParameterValue ("eq3Hz");
+    eq3Gain = apvts.getRawParameterValue ("eq3Gain");
+    eq3Oct  = apvts.getRawParameterValue ("eq3Oct");
+    eq4Hz   = apvts.getRawParameterValue ("eq4Hz");
+    eq4Gain = apvts.getRawParameterValue ("eq4Gain");
+    eq4Bell = apvts.getRawParameterValue ("eq4Bell");
+
     jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
              && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
              && highCutOn != nullptr && tiltDb != nullptr && driveDb != nullptr
-             && driveOversampled != nullptr);
+             && driveOversampled != nullptr
+             && eqOn != nullptr && eq1Hz != nullptr && eq1Gain != nullptr
+             && eq1Bell != nullptr && eq2Hz != nullptr && eq2Gain != nullptr
+             && eq2Oct != nullptr && eq3Hz != nullptr && eq3Gain != nullptr
+             && eq3Oct != nullptr && eq4Hz != nullptr && eq4Gain != nullptr
+             && eq4Bell != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
@@ -360,6 +379,233 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                 return ! (t.equalsIgnoreCase ("off") || t == "0");
             })));
 
+    // -----------------------------------------------------------------------
+    // the EQ section (v2.61.0, Clement's spec): four SSL-style bands between
+    // the cuts and the tilt. Band 1 (LF): bell or low shelf, 20-600 Hz,
+    // default 100 Hz. Band 2 (LO MID): bell with a variable bandwidth in
+    // octaves, 60-3000 Hz, default 400 Hz. Band 3 (HI MID): the same,
+    // 500 Hz-12 kHz, default 1600 Hz. Band 4 (HF): bell or high shelf,
+    // 600 Hz-18 kHz, default 7200 Hz. The bells sweep +/- 15 dB and read
+    // exactly their gain at their centre; the bandwidths run 0.2 to 2.0
+    // octaves; the shelves use the RBJ Q form with Q = 1/sqrt(2)
+    // -----------------------------------------------------------------------
+
+    // the global on/off plate: the section's true bypass. Sessions saved
+    // before v2.61 find no EQ children at all and load these defaults
+    // (the tree stores denormalised values, so a default IS the value)
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "eqOn", 1 }, "EQ On", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("on") : juce::String ("off");
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                return ! (t.equalsIgnoreCase ("off") || t == "0");
+            })));
+
+    // band 1 (LF): the corner sweeps 20 to 600 Hz, logarithmic, snapped
+    // to whole Hz like the low cut; the readout speaks Hz and accepts it
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq1Hz", 1 }, "EQ 1 Frequency",
+        makeLogRange (20.0f, 600.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, std::round (v));
+                      }),
+        100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (juce::roundToInt (value)) + " Hz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq1Gain", 1 }, "EQ 1 Gain",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    // the band-1 shape: a plain bell (the default, lit plate) or the low
+    // shelf - the corner knob drives either shape
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "eq1Bell", 1 }, "EQ 1 Mode", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("bell") : juce::String ("shelf");
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                return ! (t.equalsIgnoreCase ("shelf") || t == "0");
+            })));
+
+    // band 2 (LO MID): the same whole-Hz plumbing over 60 Hz to 3 kHz
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq2Hz", 1 }, "EQ 2 Frequency",
+        makeLogRange (60.0f, 3000.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, std::round (v));
+                      }),
+        400.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (juce::roundToInt (value)) + " Hz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq2Gain", 1 }, "EQ 2 Gain",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    // the bell's bandwidth in octaves (Clement's spec: the Q is presented
+    // as the number of octaves concerned). 0.2 to 2.0, default 1.0
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq2Oct", 1 }, "EQ 2 Width",
+        juce::NormalisableRange<float> (0.2f, 2.0f, 0.05f), 1.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (value, 2) + " oct";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+
+                if (t.endsWithIgnoreCase ("oct"))
+                    t = t.dropLastCharacters (3).trim();
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
+    // band 3 (HI MID): the same pair, kHz-spoken like the high cut
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq3Hz", 1 }, "EQ 3 Frequency",
+        makeLogRange (500.0f, 12000.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, 10.0f * std::round (v / 10.0f));
+                      }),
+        1600.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (value * 0.001f, 2) + " kHz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+                const bool kHz = t.endsWithIgnoreCase ("khz");
+
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                const float parsed = t.replaceCharacter (',', '.').getFloatValue();
+
+                return kHz ? 1000.0f * parsed : parsed;
+            })));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq3Gain", 1 }, "EQ 3 Gain",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq3Oct", 1 }, "EQ 3 Width",
+        juce::NormalisableRange<float> (0.2f, 2.0f, 0.05f), 1.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (value, 2) + " oct";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+
+                if (t.endsWithIgnoreCase ("oct"))
+                    t = t.dropLastCharacters (3).trim();
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
+    // band 4 (HF): bell or high shelf, 600 Hz to 18 kHz
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq4Hz", 1 }, "EQ 4 Frequency",
+        makeLogRange (600.0f, 18000.0f,
+                      [] (float start, float end, float v)
+                      {
+                          return juce::jlimit (start, end, 10.0f * std::round (v / 10.0f));
+                      }),
+        7200.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (value * 0.001f, 2) + " kHz";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+                const bool kHz = t.endsWithIgnoreCase ("khz");
+
+                if (t.endsWithIgnoreCase ("hz"))
+                    t = t.dropLastCharacters (2).trim();
+
+                const float parsed = t.replaceCharacter (',', '.').getFloatValue();
+
+                return kHz ? 1000.0f * parsed : parsed;
+            })));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "eq4Gain", 1 }, "EQ 4 Gain",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "eq4Bell", 1 }, "EQ 4 Mode", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("bell") : juce::String ("shelf");
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                return ! (t.equalsIgnoreCase ("shelf") || t == "0");
+            })));
+
     // the tilt (v2.57.0, Clement's remark 1): a full-band tilt, the
     // FabFilter style - a straight line of adjustable slope in the
     // log(f)/dB plane. The single knob is the +/- 12 dB gained or lost
@@ -422,6 +668,15 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     lastHighCutOrder = -1;
     lastTiltDb      = -999.0f;
 
+    for (int j = 0; j < numEqBands; ++j)
+    {
+        lastEqHz[j]   = -1.0f;
+        lastEqGain[j] = -999.0f;
+        lastEqN[j]    = -1.0f;
+        lastEqBell[j] = false;
+    }
+    lastEqOn = -1;
+
     for (auto& row : lowCut)
         for (auto& section : row)
             section.reset();
@@ -431,6 +686,10 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
             section.reset();
 
     for (auto& row : tiltShelves)
+        for (auto& section : row)
+            section.reset();
+
+    for (auto& row : eqBands)
         for (auto& section : row)
             section.reset();
 
@@ -444,6 +703,7 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     oversampler->initProcessing ((size_t) preparedMaxSamples);
 
     refreshCutCoefficients();
+    refreshEqCoefficients();
     refreshTiltCoefficients();
 }
 
@@ -575,6 +835,122 @@ void CostesStrip::refreshCutCoefficients()
     }
 }
 
+void CostesStrip::refreshEqCoefficients()
+{
+    // clamp all four corners below Nyquist with the same headroom as
+    // the cuts: a hostile rate change must never feed RBJ a w0 past pi
+    const float nyquistGuard = (float) (currentSampleRate * 0.45);
+
+    const float hz[4] =
+    {
+        juce::jlimit (20.0f,  nyquistGuard, eq1Hz->load()),
+        juce::jlimit (60.0f,  nyquistGuard, eq2Hz->load()),
+        juce::jlimit (500.0f, nyquistGuard, eq3Hz->load()),
+        juce::jlimit (600.0f, nyquistGuard, eq4Hz->load())
+    };
+    const float gainDb[4] = { eq1Gain->load(), eq2Gain->load(),
+                              eq3Gain->load(), eq4Gain->load() };
+    // the bells of bands 1/4 ride a fixed one-octave bandwidth; bands
+    // 2/3 sweep theirs; the shelf modes use the RBJ Q form instead
+    const float octaves[4] = { 1.0f, eq2Oct->load(), eq3Oct->load(), 1.0f };
+    const bool bell[4] = { eq1Bell->load() > 0.5f, true, true,
+                           eq4Bell->load() > 0.5f };
+    const int on = (eqOn->load() > 0.5f) ? 1 : 0;
+
+    // the cache guard: any change among the thirteen parameters rebuilds,
+    // a step smaller than 1e-4 does not (same discipline as the cuts)
+    bool unchanged = (on == lastEqOn);
+
+    for (int j = 0; j < numEqBands; ++j)
+        unchanged = unchanged
+            && std::abs (hz[j] - lastEqHz[j]) < 1.0e-4f
+            && std::abs (gainDb[j] - lastEqGain[j]) < 1.0e-4f
+            && std::abs (octaves[j] - lastEqN[j]) < 1.0e-4f
+            && bell[j] == lastEqBell[j];
+
+    if (unchanged)
+        return;
+
+    for (int j = 0; j < numEqBands; ++j)
+    {
+        lastEqHz[j]   = hz[j];
+        lastEqGain[j] = gainDb[j];
+        lastEqN[j]    = octaves[j];
+        lastEqBell[j] = bell[j];
+    }
+    lastEqOn = on;
+
+    // the global plate parks the section count at zero: the process loop
+    // reads that as a full bypass - the filter states keep their
+    // coefficients but no sample passes through
+    activeEqSections = (on == 1) ? numEqBands : 0;
+
+    // the RBJ formulas in double, cast to float once, normalised by a0 -
+    // exactly the cuts' discipline. The bell uses the bandwidth-in-
+    // octaves form (alpha = sin w0 * sinh (ln2/2 * N * w0 / sin w0)),
+    // so a bell reads EXACTLY its gain at its centre whatever N; the
+    // shelves use the Q form with Q = 1/sqrt(2). At 0 dB (A == 1) the
+    // numerator coefficients equal the denominators coefficient-for-
+    // coefficient, so a parked band is the bit-exact identity
+    for (int j = 0; j < activeEqSections; ++j)
+    {
+        const double w0 = juce::MathConstants<double>::twoPi
+                              * (double) hz[j] / currentSampleRate;
+        const double cs = std::cos (w0);
+        const double sn = std::sin (w0);
+        const double A  = std::pow (10.0, (double) gainDb[j] / 40.0);
+
+        double b0, b1, b2, a0, a1, a2;
+
+        if (bell[j])
+        {
+            const double alpha = sn
+                * std::sinh ((std::log (2.0) * 0.5 * (double) octaves[j] * w0) / sn);
+
+            a0 = 1.0 + alpha / A;
+            b0 = (1.0 + alpha * A) / a0;
+            b1 = -2.0 * cs / a0;
+            b2 = (1.0 - alpha * A) / a0;
+            a1 = -2.0 * cs / a0;
+            a2 = (1.0 - alpha / A) / a0;
+        }
+        else
+        {
+            // the RBJ shelf, Q form with Q = 1/sqrt(2): alpha =
+            // sin w0 / (2 Q) = sin w0 * sqrt(2) / 2
+            const double alpha = sn * std::sqrt (2.0) * 0.5;
+            const double sqA  = std::sqrt (A);
+
+            if (j == 0)
+            {
+                // the low shelf of band 1
+                a0 = (A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha;
+                b0 = A * ((A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
+                b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cs) / a0;
+                b2 = A * ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+                a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
+                a2 = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+            }
+            else
+            {
+                // the high shelf of band 4
+                a0 = (A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha;
+                b0 = ((A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
+                b1 = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
+                b2 = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+                a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cs) / a0;
+                a2 = ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+            }
+        }
+
+        const float fb0 = (float) b0, fb1 = (float) b1, fb2 = (float) b2;
+        const float fa1 = (float) a1, fa2 = (float) a2;
+
+        for (auto& section : eqBands[j])
+            section.setCoefficients (fb0, fb1, fb2, fa1, fa2);
+    }
+}
+
 void CostesStrip::refreshTiltCoefficients()
 {
     const float tilt = tiltDb->load();
@@ -660,6 +1036,7 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     trimInGain.setTargetValue (juce::Decibels::decibelsToGain (trimInDb->load()));
 
     refreshCutCoefficients();
+    refreshEqCoefficients();
     refreshTiltCoefficients();
 
     // the tilt's flat -tilt/2 dB companion: the shelf cascade of ten
@@ -703,6 +1080,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             for (int k = 0; k < activeHighCutSections; ++k)
                 sample = highCut[k][ch].processSample (sample);
+
+            // the four-band EQ (v2.61.0): between the cuts and the tilt,
+            // exactly where the SSL channel strips put it
+            for (int k = 0; k < activeEqSections; ++k)
+                sample = eqBands[k][ch].processSample (sample);
 
             for (int k = 0; k < numTiltShelves; ++k)
                 sample = tiltShelves[k][ch].processSample (sample);
@@ -866,6 +1248,18 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
 
+    // the EQ knobs (v2.61.0): the same ergonomics, one FREQ and one GAIN
+    // per band - double-click parks each band on its SSL-style starting
+    // point (100 Hz, 400 Hz, 1600 Hz, 7200 Hz) or 0 dB
+    setUpKnob (eq1HzKnob,   eq1HzLabel,   "FREQ", 100.0f);
+    setUpKnob (eq1GainKnob, eq1GainLabel, "GAIN", 0.0f);
+    setUpKnob (eq2HzKnob,   eq2HzLabel,   "FREQ", 400.0f);
+    setUpKnob (eq2GainKnob, eq2GainLabel, "GAIN", 0.0f);
+    setUpKnob (eq3HzKnob,   eq3HzLabel,   "FREQ", 1600.0f);
+    setUpKnob (eq3GainKnob, eq3GainLabel, "GAIN", 0.0f);
+    setUpKnob (eq4HzKnob,   eq4HzLabel,   "FREQ", 7200.0f);
+    setUpKnob (eq4GainKnob, eq4GainLabel, "GAIN", 0.0f);
+
     // the section glyphs (v2.60.0, Clement's remark): each icon sits at
     // the left of its caption and paints itself - nothing to add here
     // beyond making them visible
@@ -874,6 +1268,32 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (highCutIcon);
     addAndMakeVisible (tiltIcon);
     addAndMakeVisible (driveIcon);
+    addAndMakeVisible (eqIcon);   // v2.61.0: the EQ header's bell glyph
+
+    // the EQ section header (v2.61.0): the caption is a label so the
+    // icon can hug its left edge with the same geometry the knob
+    // captions use - the engraved silkscreen look, drawn as a component
+    eqSectionLabel.setText ("EQ", juce::dontSendNotification);
+    eqSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    eqSectionLabel.setJustificationType (juce::Justification::centred);
+    eqSectionLabel.setColour (juce::Label::textColourId, engravingDim);
+    addAndMakeVisible (eqSectionLabel);
+
+    // the four band captions (v2.61.0): LF, LO MID, HI MID, HF - the
+    // SSL E-series naming, each above its band's column
+    const auto setUpBandCaption = [this] (juce::Label& label, const juce::String& text)
+    {
+        label.setText (text, juce::dontSendNotification);
+        label.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+        label.setJustificationType (juce::Justification::centred);
+        label.setColour (juce::Label::textColourId, engraving);
+        addAndMakeVisible (label);
+    };
+
+    setUpBandCaption (eqBand1Label, "LF");
+    setUpBandCaption (eqBand2Label, "LO MID");
+    setUpBandCaption (eqBand3Label, "HI MID");
+    setUpBandCaption (eqBand4Label, "HF");
 
     // the slope selectors under the cut knobs (v2.58.0, Clement's remark;
     // v2.59.0): a horizontal slider from 6 to 72 dB/oct. "off" moved to
@@ -898,13 +1318,31 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpSlope (lowCutSlope);
     setUpSlope (highCutSlope);
 
+    // the bandwidth sweeps of EQ bands 2/3 (v2.61.0): the same horizontal
+    // selector the cuts use for their slopes, reading the bell's width in
+    // octaves ("0.20 oct" ... "2.00 oct")
+    setUpSlope (eq2OctSlider);
+    setUpSlope (eq3OctSlider);
+
     // the oversampling switch, an SSL-style illuminated plate under the
     // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
     // LED and a dim caption when off, glowing amber plate with a lit LED
     // and the caption spelled "OS 2x ON" when on - the state reads at a
-    // glance, where the old default checkbox tick was too quiet to see
-    oversampleButton.setButtonText ("OS 2x");
+    // glance, where the old default checkbox tick was too quiet to see.
+    // v2.61.0: the caption moved into the plate painter, so the EQ's own
+    // on/off plate speaks the same language
+    oversampleButton.caption = "OS 2x";
     addAndMakeVisible (oversampleButton);
+
+    // the EQ's global on/off plate (v2.61.0): beside the header, owning
+    // the whole section's bypass - "EQ ON" lit amber, "EQ OFF" dark
+    eqOnButton.caption = "EQ";
+    addAndMakeVisible (eqOnButton);
+
+    // the band-1/4 shape plates (v2.61.0): lit "BELL" or dark "SHELF",
+    // one per outer band, under the band's knobs
+    addAndMakeVisible (eq1ModeButton);
+    addAndMakeVisible (eq4ModeButton);
 
     // the cut on/off plates (v2.59.0, Clement's remark 2): the same SSL
     // plate language as the oversampling switch, vertical, one per cut.
@@ -934,7 +1372,36 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     highCutOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "highCutOn", highCutOnButton);
 
-    setSize (880, 200);
+    eqOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "eqOn", eqOnButton);
+    eq1HzAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq1Hz", eq1HzKnob);
+    eq1GainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq1Gain", eq1GainKnob);
+    eq1ModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "eq1Bell", eq1ModeButton);
+    eq2HzAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq2Hz", eq2HzKnob);
+    eq2GainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq2Gain", eq2GainKnob);
+    eq2OctAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq2Oct", eq2OctSlider);
+    eq3HzAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq3Hz", eq3HzKnob);
+    eq3GainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq3Gain", eq3GainKnob);
+    eq3OctAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq3Oct", eq3OctSlider);
+    eq4HzAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq4Hz", eq4HzKnob);
+    eq4GainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "eq4Gain", eq4GainKnob);
+    eq4ModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "eq4Bell", eq4ModeButton);
+
+    // v2.61.0: the second row adds 180 px - the EQ header (20) plus the
+    // band columns (152) plus the breathing room between them
+    setSize (880, 380);
 }
 
 CostesStripEditor::~CostesStripEditor()
@@ -950,6 +1417,20 @@ CostesStripEditor::~CostesStripEditor()
     oversampleAttachment.reset();
     lowCutOnAttachment.reset();
     highCutOnAttachment.reset();
+
+    eqOnAttachment.reset();
+    eq1HzAttachment.reset();
+    eq1GainAttachment.reset();
+    eq1ModeAttachment.reset();
+    eq2HzAttachment.reset();
+    eq2GainAttachment.reset();
+    eq2OctAttachment.reset();
+    eq3HzAttachment.reset();
+    eq3GainAttachment.reset();
+    eq3OctAttachment.reset();
+    eq4HzAttachment.reset();
+    eq4GainAttachment.reset();
+    eq4ModeAttachment.reset();
 
     setLookAndFeel (nullptr);
 }
@@ -1003,6 +1484,13 @@ void CostesStripEditor::paint (juce::Graphics& g)
         g.drawLine ((float) x1, 44.0f, (float) x2, 44.0f, 1.0f);
     }
 
+    // the EQ section's own rules (v2.61.0): a full divider under the
+    // row-1 silkscreen and one under the EQ header - the section reads
+    // as its own engraved band of the module front
+    g.setColour (engravingDim.withAlpha (0.5f));
+    g.drawLine (14.0f, 197.0f, (float) width - 14.0f, 197.0f, 1.0f);
+    g.drawLine (14.0f, 224.0f, (float) width - 14.0f, 224.0f, 1.0f);
+
     // the four corner screws of the module front
     for (int i = 0; i < 4; ++i)
     {
@@ -1023,14 +1511,20 @@ void CostesStripEditor::resized()
     area.removeFromTop (44);   // the name plate and the section captions
     area.removeFromBottom (6);
 
+    // row 1 (v2.61.0): the original five-knob band keeps its own 150 px,
+    // so every column sits exactly where it sat on the v2.60 panel -
+    // everything below is the new EQ section
+    auto row1 = area.removeFromTop (150);
+    auto eqArea = area;
+
     // five equal columns: knob above, caption below; the cut columns also
     // carry their slope slider under the caption, and the drive column
     // hosts the OS toggle under its caption
-    const int columnWidth = area.getWidth() / 5;
+    const int columnWidth = row1.getWidth() / 5;
 
     for (int i = 0; i < 5; ++i)
     {
-        auto column = area.removeFromLeft (columnWidth).reduced (8, 2);
+        auto column = row1.removeFromLeft (columnWidth).reduced (8, 2);
 
         auto* knob = &trimInKnob;
         auto* caption = &trimInLabel;
@@ -1087,17 +1581,100 @@ void CostesStripEditor::resized()
 
         knob->setBounds (column.removeFromTop (knobHeight));
     }
+
+    // ---- the EQ section (v2.61.0, Clement's spec) ----
+    // a breath under the row-1 silkscreen, then the header: the global
+    // on/off plate at the left and the section caption centred, its
+    // bell glyph hugging the text's left edge with the same geometry
+    // the knob captions use for their icons
+    eqArea.removeFromTop (8);
+    auto eqHeader = eqArea.removeFromTop (20);
+
+    eqOnButton.setBounds (eqHeader.getX() + 14, eqHeader.getY() + 1, 76, 18);
+    eqSectionLabel.setBounds (eqHeader);
+
+    const int eqTextWidth = eqSectionLabel.getFont()
+                                .getStringWidth (eqSectionLabel.getText());
+    eqIcon.setBounds (getWidth() / 2 - eqTextWidth / 2 - 21,
+                      eqHeader.getY() + 2, 16, 16);
+
+    // the four band columns: a caption above, the FREQ and GAIN knobs
+    // side by side with their own small captions, and the band's own
+    // selector underneath - the bandwidth sweep for the mid bells, the
+    // BELL/SHELF plate for the outer bands
+    const int eqColumnWidth = eqArea.getWidth() / 4;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        auto column = eqArea.removeFromLeft (eqColumnWidth).reduced (4, 2);
+
+        auto* bandLabel = &eqBand1Label;
+        auto* freqKnob  = &eq1HzKnob;
+        auto* freqLabel = &eq1HzLabel;
+        auto* gainKnob  = &eq1GainKnob;
+        auto* gainLabel = &eq1GainLabel;
+        juce::Slider* octSlider   = nullptr;
+        ShelfModeToggle* modeButton = &eq1ModeButton;
+
+        if (i == 1)
+        {
+            bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
+            gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
+            octSlider = &eq2OctSlider; modeButton = nullptr;
+        }
+        else if (i == 2)
+        {
+            bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
+            gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
+            octSlider = &eq3OctSlider; modeButton = nullptr;
+        }
+        else if (i == 3)
+        {
+            bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
+            gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
+            modeButton = &eq4ModeButton;
+        }
+
+        bandLabel->setBounds (column.removeFromTop (16));
+        column.removeFromTop (4);   // a breath under the band caption
+
+        auto bottom = column.removeFromBottom (28);
+        auto knobRow = column;
+
+        const int half = knobRow.getWidth() / 2;
+        auto freqCol = knobRow.removeFromLeft (half);
+        auto gainCol = knobRow;
+
+        freqLabel->setBounds (freqCol.removeFromBottom (14));
+        freqKnob->setBounds (freqCol);
+        gainLabel->setBounds (gainCol.removeFromBottom (14));
+        gainKnob->setBounds (gainCol);
+
+        if (octSlider != nullptr)
+        {
+            // the mid bells' bandwidth sweep - the cuts' own selector
+            // geometry, one band width wide
+            octSlider->setBounds (bottom.reduced (1, 1));
+        }
+        else if (modeButton != nullptr)
+        {
+            // the outer bands' BELL/SHELF plate, centred under its band
+            modeButton->setBounds (bottom.withSizeKeepingCentre (
+                juce::jmin (bottom.getWidth(), 76), 20));
+        }
+    }
 }
 
-void CostesStripEditor::OversampleToggle::paintButton (juce::Graphics& g,
-                                                       bool highlighted,
-                                                       bool /*down*/)
+void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
+                                                  bool highlighted,
+                                                  bool /*down*/)
 {
     const bool on = getToggleState();
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 
-    // the plate itself carries the state: lit amber when the 2x
-    // oversampling is on, dark cream-panel shadow when it is off
+    // the plate itself carries the state: lit amber when the section
+    // processes ("OS 2x" oversampling, the whole EQ), dark cream-panel
+    // shadow when it is off
     g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
                     : plateFill);
     g.fillRoundedRectangle (bounds, 5.0f);
@@ -1124,11 +1701,54 @@ void CostesStripEditor::OversampleToggle::paintButton (juce::Graphics& g,
         g.fillEllipse (led);
     }
 
-    // the caption says the state out loud: "OS 2x ON" / "OS 2x OFF",
+    // the caption says the state out loud: "EQ ON" / "EQ OFF",
     // dark engraving on the lit plate, dim cream on the dark one
     g.setColour (on ? engraving : engravingDim);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-    g.drawText (on ? "OS 2x ON" : "OS 2x OFF", bounds,
+    g.drawText (caption + (on ? " ON" : " OFF"), bounds,
+                juce::Justification::centred);
+}
+
+void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,
+                                                      bool highlighted,
+                                                      bool /*down*/)
+{
+    // the band-1/4 shape switch (v2.61.0): the same SSL plate language
+    // as the oversampling and EQ plates - lit amber with a live LED for
+    // the bell, dark with a dead LED for the shelf. BELL is the resting
+    // shape, so the plate lights whenever the band is a plain bell
+    const bool on = getToggleState();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
+                    : plateFill);
+    g.fillRoundedRectangle (bounds, 5.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+    const auto ledArea = bounds.removeFromLeft (20.0f);
+    const auto led = ledArea.withSizeKeepingCentre (8.0f, 8.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    // the caption spells the shape: "BELL" / "SHELF", dark engraving on
+    // the lit plate, dim cream on the dark one
+    g.setColour (on ? engraving : engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText (on ? "BELL" : "SHELF", bounds,
                 juce::Justification::centred);
 }
 
@@ -1179,13 +1799,15 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
 
 void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
 {
-    // the five glyphs (v2.60.0, Clement's remark): clean single-stroke
+    // the glyphs (v2.60.0, Clement's remark; the EQ bell joined in
+    // v2.61.0): clean single-stroke
     // vector shapes in the engraved silkscreen colour, drawn on a 16 x
     // 16 design grid scaled to the component's bounds so a degenerate
     // resize can never divide by anything. Every shape is drawn to be
     // read instantly: a fader for the trim, the two mirrored filter
-    // responses for the cuts, a tilted line for the tilt and the soft
-    // saturation transfer curve for the drive
+    // responses for the cuts, a tilted line for the tilt, the soft
+    // saturation transfer curve for the drive and the bell bump for
+    // the EQ
     const auto b = getLocalBounds().toFloat();
 
     const float sx = b.getWidth() / 16.0f;
@@ -1250,6 +1872,16 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
             p.startNewSubPath (X (2.0f), Y (13.6f));
             p.cubicTo (X (7.0f), Y (13.2f), X (5.0f), Y (8.0f), X (8.0f), Y (8.0f));
             p.cubicTo (X (11.0f), Y (8.0f), X (9.0f), Y (2.8f), X (14.0f), Y (2.4f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // EQ (v2.61.0): the bell curve - the universal gain bump, two
+        // mirrored quadratics over an implied baseline. One shape for
+        // the whole section, beside the header caption
+        case Icon::eq:
+            p.startNewSubPath (X (2.0f), Y (12.5f));
+            p.quadraticTo (X (4.5f), Y (3.0f), X (8.0f), Y (3.0f));
+            p.quadraticTo (X (11.5f), Y (3.0f), X (14.0f), Y (12.5f));
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
     }

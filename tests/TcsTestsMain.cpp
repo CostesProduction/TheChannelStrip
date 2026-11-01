@@ -4566,16 +4566,19 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 10,
-                "the strip's ten parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 23,
+                "the strip's twenty-three parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 10,
-                "the strip exposes exactly ten parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 23,
+                "the strip exposes exactly twenty-three parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
-    // drive at 0 dB) are unity: run past the 50 ms crossfade, then compare
-    // one processed block with its own reference
+    // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
+    // 50 ms crossfade, then compare one processed block with its own
+    // reference. At 0 dB every EQ band is the bit-exact identity filter
+    // (b == a coefficient-for-coefficient), so the four extra biquads
+    // change nothing
     {
         juce::AudioBuffer<float> block (2, 512);
         juce::AudioBuffer<float> reference;
@@ -4994,6 +4997,14 @@ void testCostesStripSession()
     strip->getApvts().getParameterAsValue ("driveDb").setValue (6.0f);
     strip->getApvts().getParameterAsValue ("driveOversampled").setValue (true);
 
+    // the EQ section (v2.61.0): a recognisable position on every band -
+    // a moved corner on band 1, a gain and a bandwidth on band 2, and
+    // band 4 switched to its shelf
+    strip->getApvts().getParameterAsValue ("eq1Hz").setValue (250.0f);
+    strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-3.5f);
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.7f);
+    strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
+
     juce::MemoryBlock state;
     proc.getStateInformation (state);
     expectTrue (state.getSize() > 0, "the session state is non-empty");
@@ -5033,10 +5044,18 @@ void testCostesStripSession()
                     "drive restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("driveOversampled")->load(), 1.0, 0.01,
                     "the oversampling switch restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq1Hz")->load(), 250.0, 0.1,
+                    "the EQ band 1 corner restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Gain")->load(), -3.5, 0.01,
+                    "the EQ band 2 gain restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.7, 0.01,
+                    "the EQ band 2 bandwidth restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq4Bell")->load(), 0.0, 0.01,
+                    "the EQ band 4 shelf mode restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 10,
-                "the restored strip's ten parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 23,
+                "the restored strip's twenty-three parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5148,10 +5167,20 @@ void testCostesStripSectionIcons()
                     "every section icon is laid out inside the panel");
     }
 
+    // the EQ header's own glyph (v2.61.0): a sixth icon, the bell bump,
+    // beside the section caption - the same visibility and containment
+    // rules as the five knob icons
+    auto* eqIcon = editor.getEqIcon();
+    expectTrue (eqIcon != nullptr && eqIcon->type == CostesStripEditor::SectionIcon::Icon::eq,
+                "the EQ section carries its own bell-curve glyph");
+    expectTrue (eqIcon != nullptr && eqIcon->isVisible()
+                    && editor.getLocalBounds().contains (eqIcon->getBounds()),
+                "the EQ glyph is laid out inside the panel");
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 880, 200 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+        const int testSizes[][2] = { { 880, 380 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
 
         for (const auto& size : testSizes)
         {
@@ -5164,11 +5193,14 @@ void testCostesStripSectionIcons()
             for (auto* icon : editor.getSectionIcons())
                 icon->paint (g);
 
+            if (eqIcon != nullptr)
+                eqIcon->paint (g);
+
             editor.paint (g);
         }
     }
 
-    editor.setSize (880, 200);
+    editor.setSize (880, 380);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5194,6 +5226,170 @@ void testCostesStripSectionIcons()
                         legalOrders[i], 0.0001,
                         "every legal order round-trips through its knob step without drift");
         }
+    }
+}
+
+void testCostesStripEq()
+{
+    beginTest ("v2.61.0: the Costes strip's four-band SSL-style EQ - bells, shelves, octave bandwidths, the global plate");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    // the same coherent lock-in amplitude the v2.59 audio test uses: a
+    // peak reading of a tone is grid-quantized, the lock-in correlates
+    // the block against the probe's own cos/sin over an exact integer
+    // number of cycles. Every probe here is a multiple of 100 Hz, so one
+    // 480-sample block at 48 kHz holds a whole number of cycles
+    const int lockinBlocks = 24;
+
+    auto measureAmplitude = [&proc, &noMidi] (double frequencyHz,
+                                              double probeHz) -> double
+    {
+        SineSource src (frequencyHz, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < lockinBlocks; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        const double probeOmega = juce::MathConstants<double>::twoPi * probeHz / 48000.0;
+        const double phase0 = probeOmega * (double) (lockinBlocks * 480);
+
+        double c = 0.0, s = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+        {
+            const double phase = phase0 + probeOmega * (double) i;
+            const double sample = block.getSample (0, i);
+            c += sample * std::cos (phase);
+            s += sample * std::sin (phase);
+        }
+
+        return 2.0 * std::sqrt (c * c + s * s) / 480.0;
+    };
+
+    // the unity reference with the EQ parked (every band at 0 dB - the
+    // bit-exact identity - and the plate ON): the parked cuts ride both
+    // the reference and every probe below, so they cancel in the ratios
+    const double unity1k = measureAmplitude (1000.0, 1000.0);
+
+    // the global plate at rest: OFF runs zero biquads, ON runs the four
+    // identity bands - both read the parked chain to within float dust
+    strip->getApvts().getParameterAsValue ("eqOn").setValue (false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.02,
+                "EQ OFF at rest is transparent against the unity reference");
+    strip->getApvts().getParameterAsValue ("eqOn").setValue (true);
+
+    // band 1 (LF): a bell reads EXACTLY its gain at its centre - an RBJ
+    // property the whole design leans on. Expected values come from the
+    // float64 simulation of the exact parked chain
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 6.0, 0.3,
+                "band 1 bell +6 dB reads +6 dB at its 100 Hz centre");
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (-6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), -6.0, 0.3,
+                "band 1 bell -6 dB reads -6 dB at its 100 Hz centre");
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
+
+    // band 1's shelf: the same corner knob drives the low shelf. fc 400
+    // at +6 dB has flattened to +5.97 dB by 100 Hz (the simulation)
+    strip->getApvts().getParameterAsValue ("eq1Bell").setValue (false);
+    strip->getApvts().getParameterAsValue ("eq1Hz").setValue (400.0f);
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 5.97, 0.4,
+                "band 1 low shelf +6 dB at 400 Hz reads +5.97 dB at 100 Hz");
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
+    strip->getApvts().getParameterAsValue ("eq1Hz").setValue (100.0f);
+    strip->getApvts().getParameterAsValue ("eq1Bell").setValue (true);
+
+    // band 2 (LO MID): the bell centre, then the bandwidth sweep - the
+    // same +6 dB bell probed one octave up reads +0.12 dB narrow
+    // (0.3 oct) and +3.00 dB wide (2.0 oct): the octave readout moves
+    // the bell exactly the way it says it does
+    strip->getApvts().getParameterAsValue ("eq2Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), 6.0, 0.3,
+                "band 2 bell +6 dB reads +6 dB at its 400 Hz centre");
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.3f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 0.12, 0.4,
+                "a 0.3-octave band 2 bell reaches +0.12 dB one octave above its centre");
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 3.0, 0.4,
+                "a 2.0-octave band 2 bell reaches +3.00 dB one octave above its centre");
+    strip->getApvts().getParameterAsValue ("eq2Gain").setValue (0.0f);
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
+
+    // band 3 (HI MID): the centre, then a wide -6 dB bell probed an
+    // octave BELOW its centre (the mirrored side of the band 2 check)
+    strip->getApvts().getParameterAsValue ("eq3Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1600.0, 1600.0) / unity1k), 6.0, 0.3,
+                "band 3 bell +6 dB reads +6 dB at its 1600 Hz centre");
+    strip->getApvts().getParameterAsValue ("eq3Gain").setValue (-6.0f);
+    strip->getApvts().getParameterAsValue ("eq3Oct").setValue (2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), -3.01, 0.4,
+                "a 2.0-octave band 3 bell at -6 dB reads -3.01 dB one octave below its centre");
+    strip->getApvts().getParameterAsValue ("eq3Gain").setValue (0.0f);
+    strip->getApvts().getParameterAsValue ("eq3Oct").setValue (1.0f);
+
+    // band 4 (HF): the centre, then the high shelf. fc 7200 at +6 dB has
+    // reached +3.74 dB of its own by 16 kHz and the parked 24 kHz cut
+    // eats another 0.79 dB there, so the chain reads +2.95 dB
+    strip->getApvts().getParameterAsValue ("eq4Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (7200.0, 7200.0) / unity1k), 6.0, 0.3,
+                "band 4 bell +6 dB reads +6 dB at its 7200 Hz centre");
+    strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 2.95, 0.4,
+                "band 4 high shelf +6 dB at 7200 Hz reads +2.95 dB at 16 kHz");
+    strip->getApvts().getParameterAsValue ("eq4Bell").setValue (true);
+    strip->getApvts().getParameterAsValue ("eq4Gain").setValue (0.0f);
+
+    // the global plate with a live band: OFF must silence it exactly -
+    // zero sections run, the +6 dB bell never touches the signal
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (6.0f);
+    strip->getApvts().getParameterAsValue ("eqOn").setValue (false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 0.0, 0.02,
+                "EQ OFF silences a live +6 dB band exactly (the true bypass)");
+    strip->getApvts().getParameterAsValue ("eqOn").setValue (true);
+    strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
+
+    // the readouts' own parse plumbing (v2.61.0): a typed "0.50 oct"
+    // lands on the 0.5-octave step, and the shape plate parses its
+    // words - "shelf" switches band 1 off its bell, "bell" back on
+    auto* eq2OctParam = dynamic_cast<juce::RangedAudioParameter*> (
+        strip->getApvts().getParameter ("eq2Oct"));
+    expectTrue (eq2OctParam != nullptr,
+                "the band 2 bandwidth parameter is a ranged parameter");
+
+    if (eq2OctParam != nullptr)
+        expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.5, 0.01,
+                    "a typed 0.50 oct parses to the 0.5-octave bandwidth");
+
+    auto* eq1BellParam = dynamic_cast<juce::RangedAudioParameter*> (
+        strip->getApvts().getParameter ("eq1Bell"));
+    expectTrue (eq1BellParam != nullptr,
+                "the band 1 shape parameter is a ranged parameter");
+
+    if (eq1BellParam != nullptr)
+    {
+        expectNear (eq1BellParam->convertFrom0to1 (eq1BellParam->getValueForText ("shelf")), 0.0, 0.01,
+                    "a typed shelf parses to the shelf shape");
+        expectNear (eq1BellParam->convertFrom0to1 (eq1BellParam->getValueForText ("bell")), 1.0, 0.01,
+                    "a typed bell parses back to the bell shape");
     }
 }
 
@@ -5340,6 +5536,7 @@ int main (int argc, char* argv[])
     testCostesStripSession();
     testCostesStripMigration();
     testCostesStripSectionIcons();
+    testCostesStripEq();
 
     if (integration)
         testIntegrationRealConsole();
