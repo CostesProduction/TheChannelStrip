@@ -171,6 +171,14 @@ namespace
     const juce::Colour meterGreen   (0xff4d9c55);
     const juce::Colour meterGrOrange (0xffd97a2b);
 
+    // v2.66.0 (Clement's remark F): the two dynamics stages speak their
+    // own colours - a pastel sea-teal cap on the expander's knobs, a
+    // pastel copper on the compressor's, the same anodised-pastel family
+    // the EQ band caps wear (so the stages read at a glance like the
+    // SSL J's own two dynamics halves)
+    const juce::Colour expKnobDisc  (0xff94b8b0);
+    const juce::Colour compKnobDisc (0xffc9a074);
+
     // a true logarithmic sweep for the cut corners: every octave of the
     // range spans the same knob travel, and the optional snap lambda lands
     // every knob position on a legal value (whole Hz for the low cut, tens
@@ -233,10 +241,13 @@ CostesStrip::CostesStrip()
     expOn          = apvts.getRawParameterValue ("expOn");
     expThreshold   = apvts.getRawParameterValue ("expThreshold");
     expRange       = apvts.getRawParameterValue ("expRange");
-    expAttack      = apvts.getRawParameterValue ("expAttack");
     expRelease     = apvts.getRawParameterValue ("expRelease");
     expRatio       = apvts.getRawParameterValue ("expRatio");
     expMix         = apvts.getRawParameterValue ("expMix");
+    expFastAttack  = apvts.getRawParameterValue ("expFastAttack");
+    expScHpf       = apvts.getRawParameterValue ("expScHpf");
+    expScLpf       = apvts.getRawParameterValue ("expScLpf");
+    expListen      = apvts.getRawParameterValue ("expListen");
     compOn         = apvts.getRawParameterValue ("compOn");
     compThreshold  = apvts.getRawParameterValue ("compThreshold");
     compRatio      = apvts.getRawParameterValue ("compRatio");
@@ -245,6 +256,8 @@ CostesStrip::CostesStrip()
     compGain       = apvts.getRawParameterValue ("compGain");
     compMix        = apvts.getRawParameterValue ("compMix");
     compHpf        = apvts.getRawParameterValue ("compHpf");
+    compScLpf     = apvts.getRawParameterValue ("compScLpf");
+    compListen    = apvts.getRawParameterValue ("compListen");
 
     jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
              && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
@@ -256,11 +269,13 @@ CostesStrip::CostesStrip()
              && eq3Oct != nullptr && eq4Hz != nullptr && eq4Gain != nullptr
              && eq4Bell != nullptr
              && expOn != nullptr && expThreshold != nullptr && expRange != nullptr
-             && expAttack != nullptr && expRelease != nullptr && expRatio != nullptr
-             && expMix != nullptr
+             && expFastAttack != nullptr && expRelease != nullptr && expRatio != nullptr
+             && expMix != nullptr && expScHpf != nullptr && expScLpf != nullptr
+             && expListen != nullptr
              && compOn != nullptr && compThreshold != nullptr && compRatio != nullptr
              && compRelease != nullptr && compFastAttack != nullptr
-             && compGain != nullptr && compMix != nullptr && compHpf != nullptr);
+             && compGain != nullptr && compMix != nullptr && compHpf != nullptr
+             && compScLpf != nullptr && compListen != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
@@ -712,16 +727,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             })));
 
     // -----------------------------------------------------------------------
-    // the DYNAMICS section (v2.64.0, Clement's spec, roadmap C3): the
+    // the DYNAMICS section (v2.64.0, Clement's spec, roadmap C3;
+    // reorganised in v2.66.0, Clement's remarks A to F): the
     // gate/expander and the classic compressor, between the EQ and the
-    // tilt. The expander: threshold -70 to 0 dB, range 0 to 40 dB (the
-    // maximum attenuation - 0 is a true bypass), attack 0.5 to 100 ms,
-    // release 0.1 to 3 s, ratio 1.2 to 12, mix 0 to 100 % wet. The
-    // compressor: threshold -60 to 0 dB, ratio 1 to 20, release 0.05 to
-    // 1.5 s, the FAST ATTACK plate (3 ms lit / 30 ms dark), make-up gain
-    // 0 to +20 dB, mix, and a 10 to 1000 Hz sidechain HPF. The DEFAULTS
-    // are neutral (range 0, threshold 0): the process loop skips both
-    // halves wholesale, so a parked strip is bit-for-bit v2.63. Sessions
+    // tilt, both stages carrying the SAME control set. The expander:
+    // threshold -70 to 0 dB, range 0 to 40 dB (the maximum attenuation
+    // - 0 is a true bypass), the FAST ATTACK plate (1 ms lit / 30 ms
+    // dark, since v2.66.0), release 0.1 to 3 s, ratio 1.2 to 12, mix 0
+    // to 100 % wet, the sidechain pair (SC HPF 16 to 1600 Hz, SC LPF
+    // 100 to 24000 Hz, their rest positions a true bypass) and the
+    // LISTEN plate. The compressor: threshold -60 to 0 dB, ratio 1 to
+    // 20, release 0.05 to 1.5 s, the FAST ATTACK plate (3 ms lit /
+    // 30 ms dark), make-up gain 0 to +20 dB, mix, its own sidechain
+    // pair and LISTEN. The DEFAULTS are neutral (range 0, threshold 0,
+    // every sidechain at rest): the process loop skips both halves
+    // wholesale, so a parked strip is bit-for-bit v2.63. Sessions
     // saved by earlier versions find no dynamics children and load these
     // defaults (the APVTS tree stores denormalised values)
     // -----------------------------------------------------------------------
@@ -764,33 +784,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
 
-    // the shared time plumbing: the attack knob speaks milliseconds
-    // ("1.0 ms") and the releases speak seconds ("0.30 s"), and both
-    // parsers tolerate either unit - the French decimal comma included
-    const auto msText = [] (float value, int)
-    {
-        return juce::String (value * 1000.0f, 1) + " ms";
-    };
-
-    const auto msParse = [] (const juce::String& text)
-    {
-        auto t = text.trim();
-        float scale = 1000.0f;   // a bare number reads as the knob's own ms
-
-        if (t.endsWithIgnoreCase ("ms"))
-        {
-            t = t.dropLastCharacters (2).trim();
-            scale = 1000.0f;
-        }
-        else if (t.endsWithIgnoreCase ("s"))
-        {
-            t = t.dropLastCharacters (1).trim();
-            scale = 1.0f;
-        }
-
-        return t.replaceCharacter (',', '.').getFloatValue() / scale;
-    };
-
+    // the shared time plumbing: the releases speak seconds ("0.30 s"),
+    // and the parser tolerates either unit - the French decimal comma
+    // included. (v2.66.0: the millisecond plumbing retired with the
+    // expander's attack knob, which became the FAST/SLOW plate)
     const auto sText = [] (float value, int)
     {
         return juce::String (value, 2) + " s";
@@ -814,15 +811,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         return t.replaceCharacter (',', '.').getFloatValue() / scale;
     };
 
-    // the expander's attack (added beyond the spec): the gate's OPENING
-    // speed, 0.5 to 100 ms - fast enough to let a transient land whole,
-    // slow enough to become a deliberate fade-in. Default 1 ms
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "expAttack", 1 }, "Expander Attack",
-        makeLogRange (0.0005f, 0.1f), 0.001f,
-        juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (msText)
-            .withValueFromStringFunction (msParse)));
+    // the expander's FAST ATTACK plate (v2.66.0, Clement's remark A):
+    // the gate's OPENING speed as the J's own two-position switch - 1 ms
+    // lit (the old knob's default: a transient lands whole), 30 ms dark
+    // (the compressor's classic slow fade-in). FAST is the default, so
+    // the strip breathes exactly as it did; a session saved with the old
+    // "expAttack" knob simply finds no value here and parks on it
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "expFastAttack", 1 }, "Expander Fast Attack", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("fast") : juce::String ("slow");
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                return text.trim().equalsIgnoreCase ("slow") ? false : true;
+            })));
 
     // the expander's release: the gate's CLOSING speed, 0.1 to 3 s -
     // the sweep Clement asked for
@@ -881,6 +886,72 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction (mixText)
             .withValueFromStringFunction (mixParse)));
+
+    // the shared sidechain plumbing (v2.66.0, Clement's remarks D and
+    // E): a corner snapped to whole Hz like the low cut, spoken in the
+    // selector's own "640 Hz". Both stages ride the SAME two ranges -
+    // 16 to 1600 Hz for the SC HPF, 100 to 24000 Hz for the SC LPF
+    const auto hzSnap = [] (float start, float end, float v)
+    {
+        return juce::jlimit (start, end, std::round (v));
+    };
+
+    const auto hzText = [] (float value, int)
+    {
+        return juce::String (juce::roundToInt (value)) + " Hz";
+    };
+
+    const auto hzParse = [] (const juce::String& text)
+    {
+        auto t = text.trim();
+
+        if (t.endsWithIgnoreCase ("hz"))
+            t = t.dropLastCharacters (2).trim();
+
+        return t.replaceCharacter (',', '.').getFloatValue();
+    };
+
+    // the shared LISTEN plumbing (v2.66.0, Clement's remark A): the
+    // plate speaks "listen" when lit and "off" when dark, and a typed
+    // value parses the way the cuts' on/off plates do
+    const auto listenText = [] (bool value, int)
+    {
+        return value ? juce::String ("listen") : juce::String ("off");
+    };
+
+    const auto listenParse = [] (const juce::String& text)
+    {
+        return ! text.trim().equalsIgnoreCase ("off");
+    };
+
+    // the expander's own sidechain pair (v2.66.0, Clement's remarks A,
+    // D and E): the same two selectors the compressor owns, feeding
+    // only the gate's detector - 12 dB/oct biquads like the
+    // compressor's own HPF. The rest positions (16 Hz / 24000 Hz)
+    // leave the detector's band whole: a knob at rest never filters, so
+    // the default strip hears exactly as v2.65 did
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "expScHpf", 1 }, "Expander SC HPF",
+        makeLogRange (16.0f, 1600.0f, hzSnap), 16.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "expScLpf", 1 }, "Expander SC LPF",
+        makeLogRange (100.0f, 24000.0f, hzSnap), 24000.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
+
+    // the expander's LISTEN plate (v2.66.0, Clement's remark A): the
+    // strip's voice becomes the gate's own sidechain - the filtered
+    // signal its detector hears - while the plate is lit
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "expListen", 1 }, "Expander Listen", false,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction (listenText)
+            .withValueFromStringFunction (listenParse)));
 
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "compOn", 1 }, "Compressor On", true,
@@ -948,32 +1019,40 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (mixText)
             .withValueFromStringFunction (mixParse)));
 
-    // the sidechain HPF: 10 to 1000 Hz, snapped to whole Hz like the low
-    // cut. Only the detector ever hears it - the audio path is untouched.
-    // The 10 Hz default is the honest "off": a corner that low leaves the
-    // whole band in the detector
+    // the compressor's sidechain HPF (v2.66.0, Clement's remark D): the
+    // range grows to the same 16 to 1600 Hz the expander's own selector
+    // rides, and the flat 16 Hz rest position is the honest "off" the
+    // old 10 Hz default approximated - a knob at rest never filters, so
+    // the detector hears the whole band and the parked strip stays
+    // bit-exact. Only the detector ever hears it - the audio path is
+    // untouched
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "compHpf", 1 }, "Compressor SC HPF",
-        makeLogRange (10.0f, 1000.0f,
-                      [] (float start, float end, float v)
-                      {
-                          return juce::jlimit (start, end, std::round (v));
-                      }),
-        10.0f,
+        makeLogRange (16.0f, 1600.0f, hzSnap), 16.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (juce::roundToInt (value)) + " Hz";
-            })
-            .withValueFromStringFunction ([] (const juce::String& text)
-            {
-                auto t = text.trim();
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
 
-                if (t.endsWithIgnoreCase ("hz"))
-                    t = t.dropLastCharacters (2).trim();
+    // the compressor's SC LPF (v2.66.0, Clement's remark E): 100 to
+    // 24000 Hz, darkening the detector's top end - a bright cymbal wash
+    // stops pumping the gain. The 24000 Hz rest position leaves the
+    // band whole
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "compScLpf", 1 }, "Compressor SC LPF",
+        makeLogRange (100.0f, 24000.0f, hzSnap), 24000.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
 
-                return t.replaceCharacter (',', '.').getFloatValue();
-            })));
+    // the compressor's LISTEN plate (v2.66.0, Clement's remark A): the
+    // strip's voice becomes the compressor's sidechain while lit - and
+    // when both plates are lit the compressor's wins (the later stage,
+    // the last one you reached for)
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "compListen", 1 }, "Compressor Listen", false,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction (listenText)
+            .withValueFromStringFunction (listenParse)));
 
     // the tilt (v2.57.0, Clement's remark 1): a full-band tilt, the
     // FabFilter style - a straight line of adjustable slope in the
@@ -1081,10 +1160,31 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     compMeterInDb.store (-120.0f, std::memory_order_relaxed);
     compMeterGrDb.store (0.0f,    std::memory_order_relaxed);
 
+    // v2.66.0: the OUT ladders start at the floor like the IN ladders,
+    // and every sidechain biquad - the compressor's pair and the
+    // expander's own - starts from silence with its corner cache
+    // forced to rebuild
+    expMeterOutDb.store  (-120.0f, std::memory_order_relaxed);
+    compMeterOutDb.store (-120.0f, std::memory_order_relaxed);
+    expOutPower  = 0.0f;
+    compOutPower = 0.0f;
+
     for (auto& section : compSidechain)
         section.reset();
 
-    lastCompHpf = -1.0f;
+    for (auto& section : compSidechainLp)
+        section.reset();
+
+    for (auto& section : expSidechainHp)
+        section.reset();
+
+    for (auto& section : expSidechainLp)
+        section.reset();
+
+    lastCompHpf   = -1.0f;
+    lastCompScLpf = -1.0f;
+    lastExpScHpf  = -1.0f;
+    lastExpScLpf  = -1.0f;
 
     // the oversampler is built here, never on the audio thread. A
     // generous maximum (any sane host block, then some) lets the whole
@@ -1470,7 +1570,8 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                             && expRangeDb > 0.0f
                             && expMixNorm > 0.0f;
     const float expAttackCoef  = 1.0f - std::exp (-1.0f
-        / (juce::jmax (0.0005f, expAttack->load()) * (float) currentSampleRate));
+        / ((expFastAttack->load() > 0.5f ? 0.001f : 0.030f)
+           * (float) currentSampleRate));
     const float expReleaseCoef = 1.0f - std::exp (-1.0f
         / (juce::jmax (0.1f, expRelease->load()) * (float) currentSampleRate));
     const float expCurveSlope  = expRatioValue - 1.0f;
@@ -1489,35 +1590,86 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const float compMakeupGain  = juce::Decibels::decibelsToGain (compGain->load());
     const float compCurveSlope  = 1.0f - 1.0f / compRatioValue;
 
-    // the sidechain corner rides the same per-block cache discipline as
-    // the cuts: the biquad coefficients rebuild only when the knob moves
-    // (10 to 1000 Hz always sits under the Nyquist guard). v2.65.0: the
-    // rebuild left the compActive gate - the detector always listens
-    // through the sidechain now, so the IN meter shows the level the
-    // compressor will actually act on, corner or no corner
+    // the sidechain corners ride the same per-block cache discipline as
+    // the cuts: the biquad coefficients rebuild only when a knob moves,
+    // and a section standing on its rest position is hard-bypassed - a
+    // reset biquad and a forced cache, so the detector hears the whole
+    // band and the parked strip stays bit-exact. v2.65.0: the rebuild
+    // left the compActive gate - the detectors always listen through
+    // their sidechains now, so the IN meters show the levels the
+    // sections will actually act on, corner or no corner. v2.66.0: the
+    // expander owns its own pair and the SC LPFs join both stages; the
+    // LPF corners also stand down above 0.45 of the sample rate, so no
+    // Nyquist edge is ever crossed at any rate
+    const auto rebuildSidechain = [this] (Biquad (&sections)[2], float corner,
+                                          float& cache, bool highPass)
     {
-        const float hpfHz = juce::jlimit (10.0f, 1000.0f, compHpf->load());
-
-        if (std::abs (hpfHz - lastCompHpf) > 1.0e-4f)
+        if (std::abs (corner - cache) > 1.0e-4f)
         {
-            lastCompHpf = hpfHz;
+            cache = corner;
 
             const double w0 = juce::MathConstants<double>::twoPi
-                                  * (double) hpfHz / currentSampleRate;
+                                  * (double) corner / currentSampleRate;
             const double cs = std::cos (w0);
             const double alpha = std::sin (w0) / (2.0 * shelfQ);
             const double a0 = 1.0 + alpha;
 
-            const float b0 = (float) ((1.0 + cs) * 0.5 / a0);
-            const float b1 = (float) (-(1.0 + cs) / a0);
+            const float b0 = highPass ? (float) ((1.0 + cs) * 0.5 / a0)
+                                      : (float) ((1.0 - cs) * 0.5 / a0);
+            const float b1 = highPass ? (float) (-(1.0 + cs) / a0)
+                                      : (float) ((1.0 - cs) / a0);
             const float b2 = b0;
             const float a1 = (float) (-2.0 * cs / a0);
             const float a2 = (float) ((1.0 - alpha) / a0);
 
-            for (auto& section : compSidechain)
+            for (auto& section : sections)
                 section.setCoefficients (b0, b1, b2, a1, a2);
         }
-    }
+    };
+
+    const auto restSidechain = [] (Biquad (&sections)[2], float& cache)
+    {
+        for (auto& section : sections)
+            section.reset();
+
+        cache = -1.0f;
+    };
+
+    const float compScHpfHz = juce::jlimit (16.0f, 1600.0f, compHpf->load());
+    const bool  compScHpfOn = compScHpfHz > 16.5f;
+    const float compScLpfHz = juce::jlimit (100.0f, 24000.0f, compScLpf->load());
+    const bool  compScLpfOn = compScLpfHz < 23999.5f
+                              && compScLpfHz < 0.45f * (float) currentSampleRate;
+    const float expScHpfHz  = juce::jlimit (16.0f, 1600.0f, expScHpf->load());
+    const bool  expScHpfOn  = expScHpfHz > 16.5f;
+    const float expScLpfHz  = juce::jlimit (100.0f, 24000.0f, expScLpf->load());
+    const bool  expScLpfOn  = expScLpfHz < 23999.5f
+                              && expScLpfHz < 0.45f * (float) currentSampleRate;
+
+    if (compScHpfOn)
+        rebuildSidechain (compSidechain, compScHpfHz, lastCompHpf, true);
+    else
+        restSidechain (compSidechain, lastCompHpf);
+
+    if (compScLpfOn)
+        rebuildSidechain (compSidechainLp, compScLpfHz, lastCompScLpf, false);
+    else
+        restSidechain (compSidechainLp, lastCompScLpf);
+
+    if (expScHpfOn)
+        rebuildSidechain (expSidechainHp, expScHpfHz, lastExpScHpf, true);
+    else
+        restSidechain (expSidechainHp, lastExpScHpf);
+
+    if (expScLpfOn)
+        rebuildSidechain (expSidechainLp, expScLpfHz, lastExpScLpf, false);
+    else
+        restSidechain (expSidechainLp, lastExpScLpf);
+
+    // the LISTEN plates, evaluated once per block like every other knob
+    // (the monitor itself is written per sample, in the stage loops)
+    const bool compListenOn = compListen->load() > 0.5f;
+    const bool expListenOn  = expListen->load() > 0.5f;
 
     const bool useOS = drive > 0.0f && driveOversampled->load() > 0.5f
                         && numSamples <= preparedMaxSamples;
@@ -1537,6 +1689,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     {
         // one smoothed gain per sample, shared by every channel
         const float gainIn = trimInGain.getNextValue();
+
+        // v2.66.0: the LISTEN monitor's per-sample carry - whichever
+        // sidechain plate is lit writes its filtered signal here, and
+        // the tilt stage hands it to the output in place of the voice
+        float monitor[2] = { 0.0f, 0.0f };
 
         // stage 1: the per-channel chain up to and including the EQ
         for (int ch = 0; ch < numChannels; ++ch)
@@ -1569,10 +1726,27 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // the rectify compare and leaves the detector untouched - the
         // documented limit of the whole shell, no worse here
         {
+            // v2.66.0: the detector (and the LISTEN monitor) hear the
+            // stage's own sidechain - the signal through the SC HPF and
+            // SC LPF when their knobs sit off their rest positions, the
+            // raw sample otherwise
             float rectified = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
-                rectified = juce::jmax (rectified, std::abs (channels[ch][i]));
+            {
+                float sc = channels[ch][i];
+
+                if (expScHpfOn)
+                    sc = expSidechainHp[ch].processSample (sc);
+
+                if (expScLpfOn)
+                    sc = expSidechainLp[ch].processSample (sc);
+
+                if (expListenOn)
+                    monitor[ch] = sc;
+
+                rectified = juce::jmax (rectified, std::abs (sc));
+            }
 
             expDetectorPower += (rectified * rectified - expDetectorPower) * detectorCoef;
 
@@ -1600,6 +1774,17 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             {
                 expGainDb = 0.0f;
             }
+
+            // v2.66.0: the OUT ladder reads the level this half leaves
+            // behind - the blend applied or the untouched sample,
+            // whatever sits in the buffer now. The detector only reads,
+            // so the parked strip still processes bit-for-bit
+            float expOutLevel = 0.0f;
+
+            for (int ch = 0; ch < numChannels; ++ch)
+                expOutLevel = juce::jmax (expOutLevel, std::abs (channels[ch][i]));
+
+            expOutPower += (expOutLevel * expOutLevel - expOutPower) * detectorCoef;
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -1611,11 +1796,27 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // (and its sidechain) runs even when the section is parked, and
         // a parked gain snaps back to unity for the GR meter
         {
+            // the same sidechain discipline for the compressor (its SC
+            // HPF since v2.64, its SC LPF since v2.66.0) - and its
+            // LISTEN monitor wins over the expander's when both plates
+            // are lit: the later stage, the last one you reached for
             float rectified = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
-                rectified = juce::jmax (rectified,
-                    std::abs (compSidechain[ch].processSample (channels[ch][i])));
+            {
+                float sc = channels[ch][i];
+
+                if (compScHpfOn)
+                    sc = compSidechain[ch].processSample (sc);
+
+                if (compScLpfOn)
+                    sc = compSidechainLp[ch].processSample (sc);
+
+                if (compListenOn)
+                    monitor[ch] = sc;
+
+                rectified = juce::jmax (rectified, std::abs (sc));
+            }
 
             compDetectorPower += (rectified * rectified - compDetectorPower) * detectorCoef;
 
@@ -1642,11 +1843,29 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             {
                 compGainDb = 0.0f;
             }
+
+            float compOutLevel = 0.0f;
+
+            for (int ch = 0; ch < numChannels; ++ch)
+                compOutLevel = juce::jmax (compOutLevel, std::abs (channels[ch][i]));
+
+            compOutPower += (compOutLevel * compOutLevel - compOutPower) * detectorCoef;
         }
 
-        // stage 3: the tilt cascade and its flat centring companion
+        // stage 3: the tilt cascade and its flat centring companion -
+        // or the LISTEN monitor (v2.66.0, Clement's remark A): while a
+        // plate is lit, the strip's voice becomes its own sidechain
+        // instead, the compressor's plate winning when both are lit
+        const bool listening = compListenOn || expListenOn;
+
         for (int ch = 0; ch < numChannels; ++ch)
         {
+            if (listening)
+            {
+                channels[ch][i] = monitor[ch];
+                continue;
+            }
+
             float sample = channels[ch][i];
 
             for (int k = 0; k < numTiltShelves; ++k)
@@ -1662,15 +1881,22 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // the ladders read the state at the block's last sample. The IN
     // meters speak the detectors' RMS level (the floor parks an empty
     // ladder), the GR meters speak the gain each half applies right
-    // now - 0 by construction when the half is parked
+    // now - 0 by construction when the half is parked. v2.66.0: the OUT
+    // meters speak the level each half leaves behind
     expMeterInDb.store (10.0f * std::log10 (
                            juce::jmax (expDetectorPower, detectorFloorPower)),
                        std::memory_order_relaxed);
     expMeterGrDb.store (expGainDb, std::memory_order_relaxed);
+    expMeterOutDb.store (10.0f * std::log10 (
+                            juce::jmax (expOutPower, detectorFloorPower)),
+                        std::memory_order_relaxed);
     compMeterInDb.store (10.0f * std::log10 (
                             juce::jmax (compDetectorPower, detectorFloorPower)),
                         std::memory_order_relaxed);
     compMeterGrDb.store (compGainDb, std::memory_order_relaxed);
+    compMeterOutDb.store (10.0f * std::log10 (
+                             juce::jmax (compOutPower, detectorFloorPower)),
+                         std::memory_order_relaxed);
 
     if (drive <= 0.0f)
         return;   // the blend term vanishes: drive 0 is bit-exactly clean
@@ -1926,31 +2152,44 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpSlope (eq3OctSlider, 1.0f);
 
     // ------------------------------------------------------------------
-    // the DYNAMICS row (v2.64.0, Clement's spec): eleven knobs and the
-    // compressor's sidechain slider, wearing the same black aluminium
-    // caps as the row-1 knobs - the SSL dynamics modules carry no
-    // colour. Double-click and command-click park every one on its
-    // neutral default (threshold -50 / range 0 on the expander,
-    // threshold 0 / ratio 2 on the compressor, mix 100 %)
+    // the DYNAMICS row (v2.64.0, Clement's spec, reorganised in
+    // v2.66.0 per his remarks A to F): the two stages carry the SAME
+    // control set, and each stage's knobs wear its own cap colour
+    // (v2.66.0, remark F) - a pastel sea-teal on the expander, a
+    // pastel copper on the compressor, the same family as the EQ
+    // bands' own caps. Double-click and command-click park every one
+    // on its neutral default (threshold -50 / range 0 on the
+    // expander, threshold 0 / ratio 2 on the compressor, mix 100 %,
+    // every sidechain at rest)
     // ------------------------------------------------------------------
-    setUpKnob (expThresholdKnob, expThresholdLabel, "THRESH", -50.0f, knobDisc);
-    setUpKnob (expRangeKnob,     expRangeLabel,     "RANGE",    0.0f, knobDisc);
-    setUpKnob (expAttackKnob,    expAttackLabel,    "ATTACK",   0.001f, knobDisc);
-    setUpKnob (expReleaseKnob,  expReleaseLabel,   "RELEASE",   0.3f,  knobDisc);
-    setUpKnob (expRatioKnob,    expRatioLabel,      "RATIO",    2.0f,  knobDisc);
-    setUpKnob (expMixKnob,      expMixLabel,        "MIX",      100.0f, knobDisc);
+    setUpKnob (expThresholdKnob, expThresholdLabel, "THRESH", -50.0f, expKnobDisc);
+    setUpKnob (expRangeKnob,     expRangeLabel,     "RANGE",    0.0f, expKnobDisc);
+    setUpKnob (expReleaseKnob,  expReleaseLabel,   "RELEASE",   0.3f, expKnobDisc);
+    setUpKnob (expRatioKnob,    expRatioLabel,      "RATIO",    2.0f, expKnobDisc);
+    setUpKnob (expMixKnob,      expMixLabel,        "MIX",     100.0f, expKnobDisc);
 
-    setUpKnob (compThresholdKnob, compThresholdLabel, "THRESH",  0.0f,  knobDisc);
-    setUpKnob (compRatioKnob,     compRatioLabel,     "RATIO",   2.0f,  knobDisc);
-    setUpKnob (compReleaseKnob,   compReleaseLabel,  "RELEASE",  0.25f, knobDisc);
-    setUpKnob (compGainKnob,      compGainLabel,     "GAIN",     0.0f,  knobDisc);
-    setUpKnob (compMixKnob,       compMixLabel,      "MIX",      100.0f, knobDisc);
+    setUpKnob (compThresholdKnob, compThresholdLabel, "THRESH",  0.0f, compKnobDisc);
+    setUpKnob (compRatioKnob,     compRatioLabel,     "RATIO",   2.0f, compKnobDisc);
+    setUpKnob (compReleaseKnob,   compReleaseLabel,  "RELEASE", 0.25f, compKnobDisc);
+    setUpKnob (compGainKnob,      compGainLabel,      "GAIN",    0.0f, compKnobDisc);
+    setUpKnob (compMixKnob,       compMixLabel,      "MIX",     100.0f, compKnobDisc);
 
-    // the sidechain HPF rides the cuts' own horizontal selector
-    setUpSlope (compHpfSlider, 10.0f);
+    // the sidechain pair of each stage rides the cuts' own horizontal
+    // selector - the SC HPF parks at 16 Hz, the SC LPF at 24000 Hz,
+    // and both rest positions leave the detector a flat band
+    setUpSlope (compHpfSlider, 16.0f);
+    setUpSlope (compScLpfSlider, 24000.0f);
+    setUpSlope (expScHpfSlider, 16.0f);
+    setUpSlope (expScLpfSlider, 24000.0f);
 
     setUpBandCaption (compAttackLabel, "ATTACK");
     setUpBandCaption (compHpfLabel, "SC HPF");
+    setUpBandCaption (compScLpfLabel, "SC LPF");
+    setUpBandCaption (compListenLabel, "LISTEN");
+    setUpBandCaption (expAttackLabel, "ATTACK");
+    setUpBandCaption (expScHpfLabel, "SC HPF");
+    setUpBandCaption (expScLpfLabel, "SC LPF");
+    setUpBandCaption (expListenLabel, "LISTEN");
 
     // the dynamics' own transfer-curve glyphs, beside their captions
     addAndMakeVisible (expIcon);
@@ -1998,19 +2237,30 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // the dynamics' on/off plates (v2.64.0): "EXP ON" / "EXP OFF" and
     // "COMP ON" / "COMP OFF", the same plates as the EQ's global switch,
-    // one per half - and the compressor's FAST/SLOW attack plate
+    // one per half - and each stage's FAST/SLOW attack plate (the
+    // expander's own since v2.66.0, remark A: the two stages speak
+    // the same language, 1 ms fast / 30 ms slow on the gate, 3 ms /
+    // 30 ms on the compressor)
     expOnButton.caption = "EXP";
     addAndMakeVisible (expOnButton);
     compOnButton.caption = "COMP";
     addAndMakeVisible (compOnButton);
     addAndMakeVisible (compFastAttackButton);
+    addAndMakeVisible (expFastAttackButton);
+
+    // the LISTEN plates (v2.66.0, remark A): one push per stage, lit
+    // amber while the strip's voice is its own sidechain
+    addAndMakeVisible (expListenButton);
+    addAndMakeVisible (compListenButton);
 
     // the dynamics meters (v2.65.0): the SSL J's own language - an IN
     // ladder and a GR ladder per stage, painted from the processor's
     // per-block snapshots
     addAndMakeVisible (expInMeter);
+    addAndMakeVisible (expOutMeter);
     addAndMakeVisible (expGrMeter);
     addAndMakeVisible (compInMeter);
+    addAndMakeVisible (compOutMeter);
     addAndMakeVisible (compGrMeter);
 
     trimInAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -2068,14 +2318,20 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "expThreshold", expThresholdKnob);
     expRangeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expRange", expRangeKnob);
-    expAttackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        owner.getApvts(), "expAttack", expAttackKnob);
+    expFastAttackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "expFastAttack", expFastAttackButton);
     expReleaseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expRelease", expReleaseKnob);
     expRatioAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expRatio", expRatioKnob);
     expMixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expMix", expMixKnob);
+    expScHpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "expScHpf", expScHpfSlider);
+    expScLpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "expScLpf", expScLpfSlider);
+    expListenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "expListen", expListenButton);
     compOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "compOn", compOnButton);
     compThresholdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -2092,6 +2348,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "compMix", compMixKnob);
     compHpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "compHpf", compHpfSlider);
+    compScLpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "compScLpf", compScLpfSlider);
+    compListenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "compListen", compListenButton);
 
     // v2.61.0: the second row added its header (20) plus the band
     // columns (152) plus the breathing room between them. v2.62.0
@@ -2145,10 +2405,13 @@ CostesStripEditor::~CostesStripEditor()
     expOnAttachment.reset();
     expThresholdAttachment.reset();
     expRangeAttachment.reset();
-    expAttackAttachment.reset();
+    expFastAttackAttachment.reset();
     expReleaseAttachment.reset();
     expRatioAttachment.reset();
     expMixAttachment.reset();
+    expScHpfAttachment.reset();
+    expScLpfAttachment.reset();
+    expListenAttachment.reset();
     compOnAttachment.reset();
     compThresholdAttachment.reset();
     compRatioAttachment.reset();
@@ -2157,6 +2420,8 @@ CostesStripEditor::~CostesStripEditor()
     compGainAttachment.reset();
     compMixAttachment.reset();
     compHpfAttachment.reset();
+    compScLpfAttachment.reset();
+    compListenAttachment.reset();
 
     setLookAndFeel (nullptr);
 }
@@ -2291,8 +2556,10 @@ void CostesStripEditor::timerCallback()
     // are already smoothed, so the straight read of the per-block
     // snapshots is the display ballistics
     expInMeter.repaint();
+    expOutMeter.repaint();
     expGrMeter.repaint();
     compInMeter.repaint();
+    compOutMeter.repaint();
     compGrMeter.repaint();
 }
 
@@ -2475,29 +2742,37 @@ void CostesStripEditor::resized()
     }
 
     // ---- the dynamics, stage by stage (v2.65.0, Clement's photos of
-    // the SSL J): the expander and the compressor each own a FULL row -
-    // six and seven wide columns instead of the thirteen cramped ones -
-    // with the IN ladder at the left (the stereo-linked RMS level the
-    // section hears, sitting right beside the THRESHOLD knob so the
-    // setting reads naturally) and the GR ladder at the right (the
-    // section's payoff, 0 dB at the top). The stage chrome is shared:
-    // a breath, the on/off plate at the left, the section caption
-    // centred with its transfer-curve glyph hugging the text, then
-    // the meters and the knob columns
+    // the SSL J; reorganised in v2.66.0, his remarks A to F): the
+    // expander and the compressor each own a FULL row, and both
+    // stages carry the SAME control set in the SAME order - the IN
+    // and OUT ladders together at the left edge (the level the
+    // section hears and the level it leaves behind), then MIX,
+    // THRESH, RATIO and RELEASE as wide knob columns, then the
+    // vertical block (the FAST/SLOW attack plate, the SC HPF and
+    // SC LPF selectors, the LISTEN push), then RANGE on the expander
+    // / GAIN on the compressor, and the GR ladder at the right (the
+    // section's payoff, 0 dB at the top, two halves per Clement's
+    // remarks B and C). The stage chrome is shared: a breath, the
+    // on/off plate at the left, the section caption centred with its
+    // transfer-curve glyph hugging the text, then the ladders and
+    // the knob columns
     auto layoutStageChrome = [] (juce::Rectangle<int> stageArea,
                                      PlateToggle& onButton,
                                      juce::Label& sectionLabel,
                                      SectionIcon& sectionIcon,
                                      DynamicsMeter& inMeter,
+                                     DynamicsMeter& outMeter,
                                      DynamicsMeter& grMeter)
         -> juce::Rectangle<int>
     {
         stageArea.removeFromTop (8);
         auto header = stageArea.removeFromTop (20);
 
-        // the two ladders flank the stage: IN at the left edge, GR at
-        // the right - 80 px each, the full height of the stage
-        auto meterLeft  = stageArea.removeFromLeft (80);
+        // the three ladders flank the stage: IN and OUT together at
+        // the left edge, GR at the right - 80 px each, the full
+        // height of the stage
+        auto meterIn    = stageArea.removeFromLeft (80);
+        auto meterOut   = stageArea.removeFromLeft (80);
         auto meterRight = stageArea.removeFromRight (80);
 
         onButton.setBounds (header.getX() + 14, header.getY() + 1, 76, 18);
@@ -2508,34 +2783,71 @@ void CostesStripEditor::resized()
         sectionIcon.setBounds (header.getCentreX() - textWidth / 2 - 21,
                                header.getY() + 2, 16, 16);
 
-        inMeter.setBounds (meterLeft.reduced (2, 2));
+        inMeter.setBounds (meterIn.reduced (2, 2));
+        outMeter.setBounds (meterOut.reduced (2, 2));
         grMeter.setBounds (meterRight.reduced (2, 2));
 
         return stageArea;   // what is left: the knob columns
     };
 
-    // ---- the EXPANDER's stage: THRESH, RANGE, ATTACK, RELEASE, RATIO
-    // and MIX, six wide columns - a knob above its caption, the same
-    // geometry as the row-1 columns ----
+    // the vertical block (v2.66.0, remark A): the FAST/SLOW attack
+    // plate on top, the SC HPF and SC LPF selectors in the middle,
+    // the LISTEN push at the bottom - one column of plates and
+    // sliders, a caption under every control
+    auto layoutVerticalBlock = [] (juce::Rectangle<int> block,
+                                      juce::ToggleButton& attackButton,
+                                      juce::Label& attackLabel,
+                                      CostesSlider& hpfSlider,
+                                      juce::Label& hpfLabel,
+                                      CostesSlider& lpfSlider,
+                                      juce::Label& lpfLabel,
+                                      juce::ToggleButton& listenButton,
+                                      juce::Label& listenLabel)
+    {
+        attackButton.setBounds (
+            block.removeFromTop (22).withSizeKeepingCentre (72, 22));
+        attackLabel.setBounds (block.removeFromTop (14));
+
+        hpfSlider.setBounds (
+            block.removeFromTop (36).withSizeKeepingCentre (76, 36));
+        hpfLabel.setBounds (block.removeFromTop (14));
+
+        lpfSlider.setBounds (
+            block.removeFromTop (36).withSizeKeepingCentre (76, 36));
+        lpfLabel.setBounds (block.removeFromTop (14));
+
+        listenButton.setBounds (
+            block.removeFromTop (22).withSizeKeepingCentre (72, 22));
+        listenLabel.setBounds (block);
+    };
+
+    // ---- the EXPANDER's stage (v2.66.0, remark A): MIX, THRESH,
+    // RATIO and RELEASE as wide knob columns, the vertical block
+    // (FAST/SLOW attack, SC HPF, SC LPF, LISTEN), then RANGE - the
+    // expander's own payoff - under the same column geometry as the
+    // row-1 knobs ----
     {
         auto expColumns = layoutStageChrome (expArea, expOnButton,
                                                    expSectionLabel, expIcon,
-                                                   expInMeter, expGrMeter);
+                                                   expInMeter, expOutMeter,
+                                                   expGrMeter);
 
-        const int expColumnWidth = expColumns.getWidth() / 6;
+        auto rangeColumn = expColumns.removeFromRight (
+                               expColumns.getWidth() / 5).reduced (4, 2);
+        auto blockColumn = expColumns.removeFromRight (92).reduced (3, 0);
 
-        CostesSlider* expKnobs[6] =
+        const int expColumnWidth = expColumns.getWidth() / 4;
+
+        CostesSlider* expKnobs[4] =
         {
-            &expThresholdKnob, &expRangeKnob, &expAttackKnob,
-            &expReleaseKnob,  &expRatioKnob,  &expMixKnob
+            &expMixKnob, &expThresholdKnob, &expRatioKnob, &expReleaseKnob
         };
-        juce::Label* expCaptions[6] =
+        juce::Label* expCaptions[4] =
         {
-            &expThresholdLabel, &expRangeLabel, &expAttackLabel,
-            &expReleaseLabel,  &expRatioLabel,  &expMixLabel
+            &expMixLabel, &expThresholdLabel, &expRatioLabel, &expReleaseLabel
         };
 
-        for (int i = 0; i < 6; ++i)
+        for (int i = 0; i < 4; ++i)
         {
             auto column = expColumns.removeFromLeft (expColumnWidth).reduced (4, 2);
 
@@ -2545,68 +2857,79 @@ void CostesStripEditor::resized()
             expCaptions[i]->setBounds (captionBounds);
             expKnobs[i]->setBounds (column);
         }
+
+        layoutVerticalBlock (blockColumn,
+                            expFastAttackButton, expAttackLabel,
+                            expScHpfSlider, expScHpfLabel,
+                            expScLpfSlider, expScLpfLabel,
+                            expListenButton, expListenLabel);
+
+        auto rangeCaption = rangeColumn.removeFromBottom (18);
+        expRangeLabel.setBounds (rangeCaption);
+        expRangeKnob.setBounds (rangeColumn);
     }
 
-    // ---- the COMPRESSOR's stage: THRESH, RATIO, RELEASE, the
-    // FAST/SLOW plate, GAIN, MIX and the SC HPF slider - the plate
-    // column centres its plate over the caption, the slider column
-    // keeps the cuts' selector geometry ----
+    // ---- the COMPRESSOR's stage (v2.66.0, remark A): the SAME order
+    // and the SAME geometry as the expander - MIX, THRESH, RATIO and
+    // RELEASE, the vertical block (FAST/SLOW attack, SC HPF, SC LPF,
+    // LISTEN), then GAIN, the compressor's make-up payoff ----
     {
         auto compColumns = layoutStageChrome (compArea, compOnButton,
                                                     compSectionLabel, compIcon,
-                                                    compInMeter, compGrMeter);
+                                                    compInMeter, compOutMeter,
+                                                    compGrMeter);
 
-        const int compColumnWidth = compColumns.getWidth() / 7;
+        auto gainColumn = compColumns.removeFromRight (
+                              compColumns.getWidth() / 5).reduced (4, 2);
+        auto blockColumn = compColumns.removeFromRight (92).reduced (3, 0);
 
-        for (int i = 0; i < 7; ++i)
+        const int compColumnWidth = compColumns.getWidth() / 4;
+
+        CostesSlider* compKnobs[4] =
+        {
+            &compMixKnob, &compThresholdKnob, &compRatioKnob, &compReleaseKnob
+        };
+        juce::Label* compCaptions[4] =
+        {
+            &compMixLabel, &compThresholdLabel, &compRatioLabel, &compReleaseLabel
+        };
+
+        for (int i = 0; i < 4; ++i)
         {
             auto column = compColumns.removeFromLeft (compColumnWidth).reduced (4, 2);
 
-            auto* knob = &compThresholdKnob;
-            auto* caption = &compThresholdLabel;
-
-            if (i == 1)      { knob = &compRatioKnob;   caption = &compRatioLabel; }
-            else if (i == 2) { knob = &compReleaseKnob; caption = &compReleaseLabel; }
-            else if (i == 3) { caption = &compAttackLabel; }
-            else if (i == 4) { knob = &compGainKnob;  caption = &compGainLabel; }
-            else if (i == 5) { knob = &compMixKnob;   caption = &compMixLabel; }
-            else if (i == 6) { caption = &compHpfLabel; }
-
             auto captionBounds = column.removeFromBottom (18);
-            caption->setBounds (captionBounds);
-            auto controlArea = column;
-
-            if (i == 3)
-            {
-                // the FAST/SLOW attack plate, centred over its caption
-                compFastAttackButton.setBounds (
-                    controlArea.withSizeKeepingCentre (
-                        juce::jmin (controlArea.getWidth(), 72), 24));
-            }
-            else if (i == 6)
-            {
-                // the sidechain HPF: the cuts' own selector geometry,
-                // centred in the column
-                compHpfSlider.setBounds (
-                    controlArea.withSizeKeepingCentre (controlArea.getWidth(), 44));
-            }
-            else
-            {
-                knob->setBounds (controlArea);
-            }
+            compCaptions[i]->setBounds (captionBounds);
+            compKnobs[i]->setBounds (column);
         }
+
+        layoutVerticalBlock (blockColumn,
+                            compFastAttackButton, compAttackLabel,
+                            compHpfSlider, compHpfLabel,
+                            compScLpfSlider, compScLpfLabel,
+                            compListenButton, compListenLabel);
+
+        auto gainCaption = gainColumn.removeFromBottom (18);
+        compGainLabel.setBounds (gainCaption);
+        compGainKnob.setBounds (gainColumn);
     }
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 {
     // v2.65.0: the SSL J's own meter language, painted straight from
-    // the processor's per-block snapshots. An IN ladder lights from the
-    // BOTTOM up on the stereo-linked RMS level its detector hears
-    // (green, the top two segments amber - the over-region); a GR
-    // ladder lights from the TOP down in the classic reduction orange,
-    // 0 dB at the top. The component holds no state of its own: every
-    // paint reads the truth, and a degenerate resize paints nothing
-    // but the caption - there is no size small enough to divide by
+    // the processor's per-block snapshots. An IN ladder lights from
+    // the BOTTOM up on the stereo-linked RMS level its detector
+    // hears (green, the top two segments amber - the over-region); a
+    // GR ladder lights from the TOP down in the classic reduction
+    // orange, 0 dB at the top. v2.66.0 (Clement's remarks A to C): an
+    // OUT ladder joins each stage (the level the stage leaves
+    // behind), and the GR ladders carry the J's TWO-HALF scale - 0 to
+    // midDb over the top half, midDb to the floor over the bottom, so
+    // the working region reads wide (midDb is 10 dB on the expander,
+    // 6 dB on the compressor). The component holds no state of its
+    // own: every paint reads the truth, and a degenerate resize
+    // paints nothing but the caption - there is no size small enough
+    // to divide by
     auto b = getLocalBounds();
 
     g.setColour (engravingDim);
@@ -2631,11 +2954,14 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     g.drawRect (juce::Rectangle<float> (lx - 1.0f, top - 2.0f, lw + 2.0f, height + 4.0f), 1.0f);
 
     // the reading: the detector's RMS level for an IN ladder, the
-    // applied gain (sign-flipped into its reduction) for a GR ladder
+    // level the stage leaves behind for an OUT ladder, the applied
+    // gain (sign-flipped into its reduction) for a GR ladder
     float reading = 0.0f;
 
     if (mode == Mode::input)
         reading = expander ? owner.getExpInDb() : owner.getCompInDb();
+    else if (mode == Mode::output)
+        reading = expander ? owner.getExpOutDb() : owner.getCompOutDb();
     else
         reading = expander ? owner.getExpGrDb() : owner.getCompGrDb();
 
@@ -2643,25 +2969,38 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     const float step = span / (float) leds;
     const float seg = height / (float) leds;
 
-    // the LEDs: LED 0 is the lowest on an IN ladder, the highest on a
-    // GR ladder - both light towards the reading, never past it
+    // the GR ladder's two halves (v2.66.0, remarks B and C): 0 dB to
+    // midDb over the top half of the segments, midDb to the floor
+    // over the bottom - so each segment's border bends at the hinge
+    const float spanTop = highDb - midDb;
+    const float spanBottom = midDb - lowDb;
+    const int half = juce::jmax (1, leds / 2);
+
+    // the LEDs: LED 0 is the lowest on an IN or OUT ladder, the
+    // highest on a GR ladder - all three light towards the reading,
+    // never past it
     for (int j = 0; j < leds; ++j)
     {
         float y = 0.0f;
         bool lit = false;
         juce::Colour colour (meterGreen);
 
-        if (mode == Mode::input)
+        if (mode == Mode::gainReduction)
+        {
+            y = top + (float) j * seg + 1.0f;
+
+            const float border = (j < half)
+                ? spanTop * (float) j / (float) half
+                : spanTop + spanBottom * (float) (j - half) / (float) half;
+
+            lit = (-reading) > border;
+            colour = meterGrOrange;
+        }
+        else
         {
             y = bottom - (float) (j + 1) * seg + 1.0f;
             lit = reading >= lowDb + (float) j * step;
             colour = (j >= leds - 2) ? valueArc : meterGreen;
-        }
-        else
-        {
-            y = top + (float) j * seg + 1.0f;
-            lit = (-reading) > (float) j * step;
-            colour = meterGrOrange;
         }
 
         const juce::Rectangle<float> led (lx + 1.0f, y, lw - 2.0f,
@@ -2681,24 +3020,44 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         }
     }
 
-    // the dB scale, engraved beside the ladder: one mark every step of
-    // the meter's own scale (20 dB on an IN ladder, 10 on the
-    // expander's GR, 5 on the compressor's)
+    // the dB scale, engraved beside the ladder: one mark every 20 dB
+    // on an IN or OUT ladder; the GR ladder carries just its three
+    // anchors - 0 at the top, the hinge (10 dB on the expander, 6 on
+    // the compressor) at the middle, the floor (40 or 20) at the
+    // bottom, per Clement's remarks B and C
     g.setColour (engravingDim);
     g.setFont (juce::Font (juce::FontOptions (8.0f)));
 
     const float scaleRight = (float) body.getX() + 2.0f;
 
-    for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
+    if (mode == Mode::gainReduction)
     {
-        const float value = highDb - (float) m * markStep;
-        const float y = top + (float) m * markStep / span * height;
+        const float anchors[3] = { highDb, midDb, lowDb };
 
-        g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
-        g.drawText (juce::String (juce::roundToInt (value)),
-                    juce::Rectangle<int> ((int) scaleRight, (int) (y - 5.0f),
-                                          juce::jmax (1, body.getWidth() - 2), 10),
-                    juce::Justification::centredLeft);
+        for (int m = 0; m < 3; ++m)
+        {
+            const float y = top + (highDb - anchors[m]) / span * height;
+
+            g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
+            g.drawText (juce::String (-juce::roundToInt (anchors[m])),
+                        juce::Rectangle<int> ((int) scaleRight, (int) (y - 5.0f),
+                                              juce::jmax (1, body.getWidth() - 2), 10),
+                        juce::Justification::centredLeft);
+        }
+    }
+    else
+    {
+        for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
+        {
+            const float value = highDb - (float) m * markStep;
+            const float y = top + (float) m * markStep / span * height;
+
+            g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
+            g.drawText (juce::String (juce::roundToInt (value)),
+                        juce::Rectangle<int> ((int) scaleRight, (int) (y - 5.0f),
+                                              juce::jmax (1, body.getWidth() - 2), 10),
+                        juce::Justification::centredLeft);
+        }
     }
 }
 
@@ -2828,6 +3187,49 @@ void CostesStripEditor::FastAtkToggle::paintButton (juce::Graphics& g,
     g.setColour (on ? engraving : engravingDim);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText (on ? "FAST" : "SLOW", bounds,
+                juce::Justification::centred);
+}
+
+void CostesStripEditor::ListenToggle::paintButton (juce::Graphics& g,
+                                                   bool highlighted,
+                                                   bool /*down*/)
+{
+    // the LISTEN plate (v2.66.0, Clement's remark A): the same SSL
+    // plate language as the attack plates - lit amber with a live
+    // LED while the strip's voice is its own sidechain (the signal
+    // the detector hears, through its SC HPF and SC LPF), dark with a
+    // dead LED while the programme plays. The compressor's plate wins
+    // over the expander's when both are lit
+    const bool on = getToggleState();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
+                    : plateFill);
+    g.fillRoundedRectangle (bounds, 5.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+    const auto ledArea = bounds.removeFromLeft (20.0f);
+    const auto led = ledArea.withSizeKeepingCentre (8.0f, 8.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    g.setColour (on ? engraving : engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText ("LISTEN", bounds,
                 juce::Justification::centred);
 }
 

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.65.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.66.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,38 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.66.0** — *The two dynamics stages speak the same language.*
+  Following Clement's remarks A to F on the v2.65 layout:
+  - **A shared stage layout.** Both stages carry the SAME control set
+    in the SAME order: the IN and OUT ladders together at the left
+    edge (marked IN and OUT - the level the section hears and the
+    level it leaves behind), then MIX, THRESHOLD, RATIO and RELEASE,
+    then a vertical block with the FAST/SLOW attack plate, the SC HPF
+    and SC LPF selectors and the LISTEN push, then RANGE on the
+    expander / GAIN on the compressor, and the GR ladder at the
+    right.
+  - **The expander's attack became a plate.** The old 0.5-100 ms knob
+    is gone; the gate now speaks the compressor's own language - a
+    FAST/SLOW plate, 1 ms lit / 30 ms dark. Sessions saved with the
+    old knob find no value and load FAST (its old default). The
+    expander and the compressor read identically at a glance.
+  - **Two-half GR scales.** The GR ladders carry the J's segmented
+    scale: 0-10-40 dB on the expander (the top half of the ladder
+    reads the working region wide), 0-6-20 dB on the compressor.
+  - **A sidechain pair per stage.** The SC HPF sweeps 16-1600 Hz and
+    the SC LPF 100-24000 Hz (both 12 dB/oct biquads); their rest
+    positions - 16 Hz and 24000 Hz - are hard bypasses, so the
+    parked strip stays bit-exact and every existing reading holds.
+    The compressor's own SC HPF moved from its old 10-1000 Hz range
+    to the shared 16-1600 Hz.
+  - **LISTEN plates.** One push per stage: while it is lit the
+    strip's voice becomes its own sidechain - the filtered signal
+    the detector hears - handed to the output in place of the
+    programme (the compressor's plate wins when both are lit).
+  - **Stage colours.** The expander's knobs wear a pastel sea-teal
+    cap, the compressor's a pastel copper - the same family as the
+    EQ bands' own caps.
 
 - **2.65.0** — *The dynamics grow into two stages, each with its own
   SSL meters.* Following Clement's photos of a real SSL 9000 J

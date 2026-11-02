@@ -4566,12 +4566,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 38,
-                "the strip's thirty-eight parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 43,
+                "the strip's forty-three parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 38,
-                "the strip exposes exactly thirty-eight parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 43,
+                "the strip exposes exactly forty-three parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5074,8 +5074,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 38,
-                "the restored strip's thirty-eight parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 43,
+                "the restored strip's forty-three parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5241,40 +5241,52 @@ void testCostesStripSectionIcons()
                     "every dynamics glyph is laid out inside the panel");
     }
 
-    // the twelve dynamics sliders (v2.64.0): every knob and the sidechain
-    // selector laid out and visible inside the panel after the pass -
-    // the stable slider order's indices 17 to 28
+    // the fourteen dynamics sliders (v2.64.0, the sidechain pair grown
+    // to four in v2.66.0): every knob and the sidechain selectors laid
+    // out and visible inside the panel after the pass - the stable
+    // slider order's indices 17 to 30
     const auto sliders = editor.getStripSliders();
 
-    for (int i = 17; i < 29; ++i)
+    for (int i = 17; i < 31; ++i)
         expectTrue (sliders[(size_t) i]->isVisible()
                         && editor.getLocalBounds().contains (sliders[(size_t) i]->getBounds()),
                     "every dynamics knob and slider is laid out inside the panel");
 
-    // the four dynamics meters (v2.65.0): the expander's IN/GR pair then
-    // the compressor's, each laid out and visible inside the panel - the
-    // IN ladder beside the THRESHOLD knob, the GR ladder at the stage's
-    // right edge
+    // the six dynamics meters (v2.65.0, the OUT ladders joined in
+    // v2.66.0): the expander's IN/OUT/GR trio then the compressor's,
+    // each laid out and visible inside the panel - the IN and OUT
+    // ladders together at the stage's left edge, the GR ladder at the
+    // stage's right edge
     const auto meters = editor.getDynMeters();
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 6; ++i)
         expectTrue (meters[(size_t) i] != nullptr && meters[(size_t) i]->isVisible()
                         && editor.getLocalBounds().contains (meters[(size_t) i]->getBounds()),
                     "every dynamics meter is laid out inside the panel");
 
     expectTrue (meters[0] != nullptr && meters[0]->mode == CostesStripEditor::DynamicsMeter::Mode::input
-                    && meters[1] != nullptr && meters[1]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction
-                    && meters[2] != nullptr && meters[2]->mode == CostesStripEditor::DynamicsMeter::Mode::input
-                    && meters[3] != nullptr && meters[3]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction,
-                "the meters come as IN then GR, stage by stage");
+                    && meters[1] != nullptr && meters[1]->mode == CostesStripEditor::DynamicsMeter::Mode::output
+                    && meters[2] != nullptr && meters[2]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction
+                    && meters[3] != nullptr && meters[3]->mode == CostesStripEditor::DynamicsMeter::Mode::input
+                    && meters[4] != nullptr && meters[4]->mode == CostesStripEditor::DynamicsMeter::Mode::output
+                    && meters[5] != nullptr && meters[5]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction,
+                "the meters come as IN, OUT then GR, stage by stage");
 
-    expectTrue (meters[0] != nullptr && meters[0]->expander && meters[1] != nullptr && meters[1]->expander
-                    && meters[2] != nullptr && ! meters[2]->expander && meters[3] != nullptr && ! meters[3]->expander,
-                "the first pair reads the expander, the second the compressor");
+    expectTrue (meters[0] != nullptr && meters[0]->expander
+                    && meters[1] != nullptr && meters[1]->expander
+                    && meters[2] != nullptr && meters[2]->expander
+                    && meters[3] != nullptr && ! meters[3]->expander
+                    && meters[4] != nullptr && ! meters[4]->expander
+                    && meters[5] != nullptr && ! meters[5]->expander,
+                "the first trio reads the expander, the second the compressor");
 
-    expectTrue (meters[1] != nullptr && meters[1]->leds == 20
-                    && meters[3] != nullptr && meters[3]->leds == 10,
-                "the expander's GR ladder spans 40 dB in 2 dB LEDs, the compressor's 20 dB (2 dB LEDs)");
+    expectTrue (meters[2] != nullptr && meters[2]->leds == 20
+                    && meters[5] != nullptr && meters[5]->leds == 10,
+                "the expander's GR ladder spans 40 dB in 20 LEDs, the compressor's 20 dB (10 LEDs)");
+
+    expectTrue (meters[2] != nullptr && meters[2]->midDb == -10.0f
+                    && meters[5] != nullptr && meters[5]->midDb == -6.0f,
+                "the GR ladders hinge at 10 dB on the expander and 6 dB on the compressor (the two-half scale)");
 
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
@@ -5348,48 +5360,52 @@ void testCostesStripKnobDefaultsAndCaps()
 
     CostesStripEditor editor (stripProc);
 
-    // every knob and slider of the strip, in the accessor's stable order:
-    // the five row-1 knobs, the two cut slopes, the EQ's FREQ/GAIN knobs
-    // and width sweeps band by band, then the expander's six knobs and
-    // the compressor's five knobs plus its SC HPF slider (v2.64.0)
+    // every knob and slider of the strip, in the accessor's stable
+    // order: the five row-1 knobs, the two cut slopes, the EQ's
+    // FREQ/GAIN knobs and width sweeps band by band, then each stage's
+    // five knobs and its sidechain pair (v2.66.0: the expander's
+    // attack knob became a FAST/SLOW plate, so the sliders count 31)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[29] =
+    const char* paramIds[31] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
         "eq1Hz", "eq1Gain", "eq2Hz", "eq2Gain", "eq2Oct",
         "eq3Hz", "eq3Gain", "eq3Oct", "eq4Hz", "eq4Gain",
-        "expThreshold", "expRange", "expAttack", "expRelease", "expRatio", "expMix",
-        "compThreshold", "compRatio", "compRelease", "compGain", "compMix", "compHpf"
+        "expThreshold", "expRange", "expRelease", "expRatio", "expMix",
+        "compThreshold", "compRatio", "compRelease", "compGain", "compMix",
+        "compHpf", "compScLpf", "expScHpf", "expScLpf"
     };
 
-    const float expectedDefaults[29] =
+    const float expectedDefaults[31] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
         100.0f, 0.0f, 400.0f, 0.0f, 1.0f,
         1600.0f, 0.0f, 1.0f, 7200.0f, 0.0f,
-        -50.0f, 0.0f, 0.001f, 0.3f, 2.0f, 100.0f,
-        0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 10.0f
+        -50.0f, 0.0f, 0.3f, 2.0f, 100.0f,
+        0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 16.0f,
+        24000.0f, 16.0f, 24000.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[29] =
+    const float perturbed[31] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
         250.0f, -3.5f, 1000.0f, 4.0f, 3.0f,
         2500.0f, -6.0f, 2.0f, 9000.0f, 7.5f,
-        -22.5f, 18.0f, 0.02f, 1.4f, 7.0f, 35.0f,
-        -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f
+        -22.5f, 18.0f, 1.4f, 7.0f, 35.0f,
+        -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f,
+        2500.0f, 400.0f, 2500.0f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 29; ++i)
+    for (int i = 0; i < 31; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -5402,32 +5418,36 @@ void testCostesStripKnobDefaultsAndCaps()
                     "a command-click restores the parameter's default through the attachment");
     }
 
-    // ---- the cap colours (remark 4 + v2.62.0): the 24 rotary knobs
-    // carry their band's colour on the backgroundColourId - the row-1
-    // caps stay black EXCEPT the pastel red HIGH CUT (v2.63.0), the EQ
-    // bands speak the SSL colours, and the eleven dynamics knobs
-    // (v2.64.0) wear the row-1 black aluminium: the SSL dynamics
-    // modules carry no colour. The five linear selectors draw no cap,
-    // so they are not in the loop ----
-    const int knobIndex[24] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
-                                17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
-    const unsigned int knobCap[24] =
+    // ---- the cap colours (remark 4 + v2.62.0 + v2.66.0): the 23
+    // rotary knobs carry their band's colour on the
+    // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
+    // red HIGH CUT (v2.63.0), the EQ bands speak the SSL colours, and
+    // the dynamics knobs wear their stage's own colour (v2.66.0,
+    // Clement's remark F): the pastel sea-teal on the expander, the
+    // pastel copper on the compressor. The expander's attack knob
+    // became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
+    // loop. The eight linear selectors draw no cap, so they are not in
+    // the loop ----
+    const int knobIndex[23] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
+                               17, 18, 19, 20, 21,
+                               22, 23, 24, 25, 26 };
+    const unsigned int knobCap[23] =
     {
         0xff23232au, 0xff23232au, 0xffd8a49cu, 0xff23232au, 0xff23232au,
         0xff23232au, 0xff23232au,
         0xffaac6dfu, 0xffaac6dfu,
         0xfff0e9d8u, 0xfff0e9d8u,
         0xffd8a49cu, 0xffd8a49cu,
-        0xff23232au, 0xff23232au, 0xff23232au,
-        0xff23232au, 0xff23232au, 0xff23232au,
-        0xff23232au, 0xff23232au, 0xff23232au,
-        0xff23232au, 0xff23232au
+        0xff94b8b0u, 0xff94b8b0u, 0xff94b8b0u,
+        0xff94b8b0u, 0xff94b8b0u,
+        0xffc9a074u, 0xffc9a074u, 0xffc9a074u,
+        0xffc9a074u, 0xffc9a074u
     };
 
-    for (int k = 0; k < 24; ++k)
+    for (int k = 0; k < 23; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, the dynamics black)");
+                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, sea-teal expander, copper compressor)");
 }
 
 void testCostesStripEq()
@@ -5780,6 +5800,34 @@ void testCostesStripDynamics()
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
                 "the parked expander (range 0) is a true bypass");
 
+    // ---- the expander's own sidechain pair (v2.66.0, Clement's
+    // remarks D and E): the SC HPF and SC LPF shape what the gate's
+    // detector hears. At their 16 Hz / 24000 Hz rest positions the
+    // pair is hard-bypassed and the detector hears the flat band; a
+    // 1600 Hz SC HPF lifts the 100 Hz bass out of the detector so the
+    // gate floors at its RANGE, and a 100 Hz SC LPF lifts the 1 kHz
+    // tone the same way ----
+    setParam ("expThreshold", -20.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), 0.0, 0.5,
+                "a 100 Hz tone above the gate threshold holds it open (the flat sidechain)");
+
+    setParam ("expScHpf", 1600.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -40.0, 1.5,
+                "a 1600 Hz SC HPF lifts the bass out of the detector - the gate floors at its RANGE");
+    setParam ("expScHpf", 16.0f);
+
+    setParam ("expScLpf", 100.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -40.0, 1.5,
+                "a 100 Hz SC LPF lifts the tone out of the detector - the gate floors at its RANGE");
+    setParam ("expScLpf", 24000.0f);
+
+    // back to the parked expander: range 0 is the true bypass
+    setParam ("expThreshold", -50.0f);
+    setParam ("expRange", 0.0f);
+    setParam ("expRatio", 2.0f);
+
     // ---- the COMPRESSOR: the loud tone (-15.05 dB RMS) sits 9.95 dB
     // over a -25 dB threshold, and the reduction reads the ratio
     // arithmetic straight off the static curve ----
@@ -5822,7 +5870,7 @@ void testCostesStripDynamics()
     // its point through ----
     setParam ("compThreshold", -30.0f);
     setParam ("compRatio", 20.0f);
-    setParam ("compHpf", 10.0f);
+    setParam ("compHpf", 16.0f);
 
     auto onsetRmsDb = [&] (bool fastAttack) -> double
     {
@@ -5863,18 +5911,50 @@ void testCostesStripDynamics()
                 "the slow attack settles on the same 14.2 dB reduction");
 
     // ---- the sidechain HPF (Clement's spec): a 100 Hz tone at -25 dB
-    // threshold and 20:1 compresses with the corner parked at 10 Hz
-    // (the honest "off"), but a 1000 Hz corner removes it from the
+    // threshold and 20:1 compresses with the corner at its 16 Hz rest
+    // position (the honest "off", a flat band since v2.66.0), but a
+    // 1000 Hz corner removes it from the
     // detector and the compressor opens. The sim pins the exact
     // reading, Jensen ripple included: -9.86 dB ----
     setParam ("compThreshold", -25.0f);
-    setParam ("compHpf", 10.0f);
+    setParam ("compHpf", 16.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -9.9, 0.9,
-                "the sidechain HPF parked at 10 Hz leaves the bass in the detector");
+                "the sidechain HPF at its 16 Hz rest position leaves the bass in the detector");
 
     setParam ("compHpf", 1000.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), 0.0, 0.5,
                 "a 1000 Hz sidechain corner frees the bass from the detector");
+
+    // the compressor's own SC LPF (v2.66.0, remark E): a 100 Hz corner
+    // lifts the 1 kHz tone out of the detector and the compressor
+    // opens - the LPF is the HPF's mirror, its 24000 Hz rest position
+    // a flat band
+    setParam ("compScLpf", 100.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.5,
+                "a 100 Hz SC LPF lifts the tone out of the compressor's detector - it opens");
+    setParam ("compScLpf", 24000.0f);
+
+    // ---- the LISTEN plates (v2.66.0, Clement's remark A): while a
+    // plate is lit the strip's voice becomes its own sidechain - the
+    // filtered signal the detector hears - handed to the output in
+    // place of the programme. The compressor's plate wins when both
+    // are lit: the later stage, the last one you reached for ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compHpf", 16.0f);
+    setParam ("compListen", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.4,
+                "the lit LISTEN plate hands the strip's flat sidechain to the output");
+
+    setParam ("compHpf", 1600.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -48.0, 3.0,
+                "the monitored sidechain carries its SC HPF's corner (a 2nd-order attenuation)");
+    setParam ("compListen", false);
+
+    setParam ("expListen", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.4,
+                "the expander's LISTEN plate speaks the same language on its own stage");
+    setParam ("expListen", false);
+    setParam ("compHpf", 16.0f);
 
     // ---- the readouts' own parse plumbing: the knob speaks its format
     // and a typed value lands through the parameter's text functions ----
@@ -5897,14 +5977,14 @@ void testCostesStripDynamics()
             expectNear (releaseParam->convertFrom0to1 (releaseParam->getValueForText ("0.50 s")), 0.5, 0.001,
                         "a typed 0.50 s release parses to half a second");
 
-        auto* attackParam = dynamic_cast<juce::RangedAudioParameter*> (
-            strip->getApvts().getParameter ("expAttack"));
-        expectTrue (attackParam != nullptr,
-                    "the expander attack parameter is a ranged parameter");
+        auto* expFastParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expFastAttack"));
+        expectTrue (expFastParam != nullptr,
+                    "the expander's FAST ATTACK plate is a ranged parameter");
 
-        if (attackParam != nullptr)
-            expectNear (attackParam->convertFrom0to1 (attackParam->getValueForText ("5 ms")), 0.005, 0.0001,
-                        "a typed 5 ms attack parses to 5 milliseconds");
+        if (expFastParam != nullptr)
+            expectNear (expFastParam->convertFrom0to1 (expFastParam->getValueForText ("fast")), 1.0, 0.001,
+                        "a typed fast attack parses to the plate's lit position");
 
         auto* hpfParam = dynamic_cast<juce::RangedAudioParameter*> (
             strip->getApvts().getParameter ("compHpf"));
@@ -5935,17 +6015,18 @@ void testCostesStripDynamics()
     }
 
     // ---- back to the parked defaults: threshold 0, ratio 2, mix 100,
-    // HPF 10 - the compressor is skipped wholesale again ----
+    // the SC pair at rest (16 Hz / 24000 Hz) - the compressor is
+    // skipped wholesale again ----
     setParam ("compThreshold", 0.0f);
     setParam ("compRatio", 2.0f);
-    setParam ("compHpf", 10.0f);
+    setParam ("compHpf", 16.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
                 "the parked compressor (threshold 0) is a true bypass");
 }
 
 void testCostesStripDynamicsMeters()
 {
-    beginTest ("v2.65.0: the dynamics meters - the IN/GR ladders read the detectors' truth, parked or working");
+    beginTest ("v2.65.0 (grown in v2.66.0): the dynamics meters - the IN/OUT/GR ladders read the stages' truth, parked or working");
 
     juce::MidiBuffer noMidi;
 
@@ -6001,6 +6082,10 @@ void testCostesStripDynamicsMeters()
                     "a fresh strip's GR ladder reads unity");
         expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
                     "the compressor's GR ladder starts at unity");
+        expectNear ((double) strip->getExpOutDb(),  -120.0, 0.01,
+                    "a fresh strip's OUT ladder reads the floor, never a lying 0 dB");
+        expectNear ((double) strip->getCompOutDb(), -120.0, 0.01,
+                    "the compressor's OUT ladder starts empty too");
     }
 
     // ---- the PARKED defaults: the detectors run even while both
@@ -6012,11 +6097,15 @@ void testCostesStripDynamicsMeters()
     expectNear ((double) strip->getExpInDb(),  -15.05, 0.2,
                 "the IN ladder tracks the RMS level even while the section is parked");
     expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
-                "the compressor's IN ladder hears the same level through its 10 Hz sidechain");
+                "the compressor's IN ladder hears the same level through its flat sidechain");
     expectNear ((double) strip->getExpGrDb(),    0.0, 0.01,
                 "a parked expander reports no reduction");
     expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
                 "a parked compressor reports no reduction");
+    expectNear ((double) strip->getExpOutDb(),  -15.05, 0.2,
+                "the OUT ladder tracks the level the parked stage leaves behind");
+    expectNear ((double) strip->getCompOutDb(), -15.05, 0.2,
+                "the compressor's OUT ladder hears the same untouched level");
 
     // ---- the expander working: a -29 dB RMS tone sits 9 dB under
     // the -20 dB threshold, the 2:1 expansion pulls 9 dB down, and the
@@ -6035,6 +6124,10 @@ void testCostesStripDynamicsMeters()
                 "the compressor's IN ladder hears the GATED signal - the stages cascade");
     expectNear ((double) strip->getCompGrDb(), 0.0, 0.01,
                 "the parked compressor still reports no reduction while it listens");
+    expectNear ((double) strip->getExpOutDb(), -38.03, 0.25,
+                "the expander's OUT ladder reads the level after its 9 dB gate");
+    expectNear ((double) strip->getCompOutDb(), -38.03, 0.25,
+                "the compressor's OUT ladder hears the same gated level (it is parked)");
 
     // ---- the expander's OFF plate: the audio bypasses the section
     // and the GR ladder snaps open with it - no stale reading
@@ -6057,6 +6150,10 @@ void testCostesStripDynamicsMeters()
                 "the GR ladder reads the 2:1 reduction");
     expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
                 "the IN ladder still reads the level at the detector");
+    expectNear ((double) strip->getExpOutDb(), -15.05, 0.25,
+                "the parked expander's OUT ladder still reads the untouched tone");
+    expectNear ((double) strip->getCompOutDb(), -20.03, 0.25,
+                "the compressor's OUT ladder reads the level after its 4.98 dB reduction");
 
     // ---- the compressor's OFF plate: the same snap to unity
     setParam ("compOn", false);

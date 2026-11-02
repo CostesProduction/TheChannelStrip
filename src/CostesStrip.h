@@ -1,5 +1,24 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.65.0 (Clement's photos of a real SSL 9000 J)
+// src/CostesStrip.h - v2.66.0 (Clement's remarks A to F)
+//
+// v2.66.0 (Clement's remarks after the SSL J session): the two dynamics
+// stages adopt the SAME control order the J's modules share - the IN and
+// OUT ladders side by side at the left, then MIX, THRESH, RATIO and
+// RELEASE, a vertical block holding the FAST/SLOW attack plate, the two
+// sidechain selectors (SC HPF and SC LPF, 12 dB/oct biquads, 16 to 1600 Hz
+// and 100 to 24000 Hz - the flat rest positions leave the detector's band
+// whole) and the LISTEN plate, then RANGE on the expander (make-up GAIN on
+// the compressor), and the GR ladder at the right. The expander's attack
+// knob became a FAST/SLOW plate like the compressor's (1 ms lit / 30 ms
+// dark); each stage carries its own sidechain pair and its own LISTEN
+// monitor (the filtered signal its detector hears, the compressor's plate
+// winning when both are lit); two new OUT ladders read the level each
+// stage leaves behind; and the GR ladders speak the J's two-half scales
+// (0-10-40 dB on the expander, 0-6-20 on the compressor). The stage knobs
+// wear the section colours Clement asked for: a pastel sea-teal cap on
+// the expander's, a pastel copper on the compressor's.
+//
+// v2.65.0 (Clement's request, from his photos of the SSL J's dynamics
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
@@ -182,6 +201,8 @@ public:
     float getExpGrDb()  const { return expMeterGrDb.load  (std::memory_order_relaxed); }
     float getCompInDb() const { return compMeterInDb.load (std::memory_order_relaxed); }
     float getCompGrDb() const { return compMeterGrDb.load (std::memory_order_relaxed); }
+    float getExpOutDb()  const { return expMeterOutDb.load (std::memory_order_relaxed); }
+    float getCompOutDb() const { return compMeterOutDb.load (std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -265,10 +286,13 @@ private:
     std::atomic<float>* expOn         = nullptr; // 0.0 / 1.0
     std::atomic<float>* expThreshold  = nullptr;
     std::atomic<float>* expRange      = nullptr;
-    std::atomic<float>* expAttack     = nullptr;
+    std::atomic<float>* expFastAttack = nullptr; // 0.0 / 1.0 (v2.66.0)
     std::atomic<float>* expRelease    = nullptr;
     std::atomic<float>* expRatio      = nullptr;
     std::atomic<float>* expMix        = nullptr;
+    std::atomic<float>* expScHpf      = nullptr;  // v2.66.0
+    std::atomic<float>* expScLpf      = nullptr;  // v2.66.0
+    std::atomic<float>* expListen     = nullptr;  // 0.0 / 1.0 (v2.66.0)
     std::atomic<float>* compOn        = nullptr; // 0.0 / 1.0
     std::atomic<float>* compThreshold = nullptr;
     std::atomic<float>* compRatio     = nullptr;
@@ -277,6 +301,8 @@ private:
     std::atomic<float>* compGain      = nullptr;
     std::atomic<float>* compMix       = nullptr;
     std::atomic<float>* compHpf       = nullptr;
+    std::atomic<float>* compScLpf     = nullptr;  // v2.66.0
+    std::atomic<float>* compListen    = nullptr;  // 0.0 / 1.0 (v2.66.0)
 
     double currentSampleRate = 48000.0;
 
@@ -328,6 +354,14 @@ private:
     float detectorCoef     = 0.0f;    // 10 ms RMS ballistics, per sample
     Biquad compSidechain[2] = {};     // the SC HPF, one per channel
     float lastCompHpf      = -1.0f;   // the sidechain corner's cache
+    Biquad compSidechainLp[2] = {};   // the SC LPF, one per channel (v2.66.0)
+    float lastCompScLpf    = -1.0f;
+    Biquad expSidechainHp[2] = {};    // the expander's own pair (v2.66.0)
+    Biquad expSidechainLp[2] = {};
+    float lastExpScHpf     = -1.0f;
+    float lastExpScLpf     = -1.0f;
+    float expOutPower      = 0.0f;    // the OUT ladders' 10 ms RMS state
+    float compOutPower     = 0.0f;
 
     // the dynamics meters (v2.65.0): the per-block snapshots the four
     // SSL ladders read. The IN meters start at the detector's floor
@@ -337,6 +371,8 @@ private:
     std::atomic<float> expMeterGrDb   { 0.0f };
     std::atomic<float> compMeterInDb  { -120.0f };
     std::atomic<float> compMeterGrDb  { 0.0f };
+    std::atomic<float> expMeterOutDb  { -120.0f };   // v2.66.0
+    std::atomic<float> compMeterOutDb { -120.0f };
 
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
@@ -450,18 +486,22 @@ public:
     // every knob and slider of the strip, in a stable order for the
     // offline test harness: the five row-1 knobs, the two cut slopes,
     // the EQ's FREQ/GAIN knobs and width sweeps band by band, then the
-    // expander's six knobs and the compressor's five knobs plus its
-    // sidechain HPF slider (the attack plate is a button, not a slider)
-    std::array<CostesSlider*, 29> getStripSliders()
+    // expander's five knobs and the compressor's five (both attack
+    // plates are buttons, not sliders, since v2.66.0), and the four
+    // sidechain selectors - the compressor's SC HPF and SC LPF, the
+    // expander's own pair
+    std::array<CostesSlider*, 31> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
                  &eq1HzKnob, &eq1GainKnob, &eq2HzKnob, &eq2GainKnob, &eq2OctSlider,
                  &eq3HzKnob, &eq3GainKnob, &eq3OctSlider, &eq4HzKnob, &eq4GainKnob,
-                 &expThresholdKnob, &expRangeKnob, &expAttackKnob,
-                 &expReleaseKnob, &expRatioKnob, &expMixKnob,
+                 &expThresholdKnob, &expRangeKnob, &expReleaseKnob,
+                 &expRatioKnob, &expMixKnob,
                  &compThresholdKnob, &compRatioKnob, &compReleaseKnob,
-                 &compGainKnob, &compMixKnob, &compHpfSlider };
+                 &compGainKnob, &compMixKnob,
+                 &compHpfSlider, &compScLpfSlider,
+                 &expScHpfSlider, &expScLpfSlider };
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
@@ -508,24 +548,27 @@ public:
         return { &expIcon, &compIcon };
     }
 
-    // the dynamics meters (v2.65.0): the SSL J's own language, one IN
-    // ladder and one GR ladder per stage. The IN ladder lights from the
-    // bottom up on the stereo-linked RMS level its detector hears; the
-    // GR ladder lights from the top down as the section works. The
-    // component polls the processor in its paint, so the meters never
-    // hold state of their own - a fresh paint is always the truth.
-    // Public so the offline harness can name the modes and drive the
-    // degenerate-size paint path
+    // the dynamics meters (v2.65.0, grown in v2.66.0): the SSL J's own
+    // language, one IN, one OUT and one GR ladder per stage. The IN and
+    // OUT ladders light from the bottom up on the stereo-linked RMS
+    // levels their stages hear and leave behind; the GR ladder lights
+    // from the top down as the section works, on the J's two-half scale
+    // (midDb is the hinge - 10 dB on the expander, 6 dB on the
+    // compressor, per Clement's remarks B and C). The component polls
+    // the processor in its paint, so the meters never hold state of
+    // their own - a fresh paint is always the truth. Public so the
+    // offline harness can name the modes and drive the degenerate-size
+    // paint path
     struct DynamicsMeter : public juce::Component
     {
-        enum class Mode { input, gainReduction };
+        enum class Mode { input, output, gainReduction };
 
         DynamicsMeter (CostesStrip& source, Mode meterMode, bool expanderSide,
-                       float lowScaleDb, float highScaleDb, int numLeds,
-                       float scaleMarkStep, const char* captionText)
+                       float lowScaleDb, float highScaleDb, float midScaleDb,
+                       int numLeds, float scaleMarkStep, const char* captionText)
             : owner (source), mode (meterMode), expander (expanderSide),
-              lowDb (lowScaleDb), highDb (highScaleDb), leds (numLeds),
-              markStep (scaleMarkStep), caption (captionText) {}
+              lowDb (lowScaleDb), highDb (highScaleDb), midDb (midScaleDb),
+              leds (numLeds), markStep (scaleMarkStep), caption (captionText) {}
 
         void paint (juce::Graphics& g) override;
 
@@ -534,16 +577,18 @@ public:
         bool expander;
         float lowDb;
         float highDb;
+        float midDb;
         int leds;
         float markStep;
         const char* caption;
     };
 
-    // the four ladders in stage order - the expander's IN/GR pair then
-    // the compressor's - for the offline test harness
-    std::array<DynamicsMeter*, 4> getDynMeters()
+    // the six ladders in stage order - the expander's IN/OUT/GR trio
+    // then the compressor's - for the offline test harness
+    std::array<DynamicsMeter*, 6> getDynMeters()
     {
-        return { &expInMeter, &expGrMeter, &compInMeter, &compGrMeter };
+        return { &expInMeter, &expOutMeter, &expGrMeter,
+                 &compInMeter, &compOutMeter, &compGrMeter };
     }
 
 private:
@@ -584,21 +629,28 @@ private:
     juce::Label eqBand1Label, eqBand2Label, eqBand3Label, eqBand4Label;
     juce::Label eqSectionLabel;
 
-    // the dynamics section (v2.64.0, Clement's spec): eleven knobs and one
-    // sidechain slider - the expander's THRESH, RANGE, ATTACK, RELEASE,
-    // RATIO and MIX, then the compressor's THRESH, RATIO, RELEASE, GAIN
-    // and MIX plus its SC HPF - each with its own caption label, the two
-    // section captions and the two transfer-curve glyphs
-    CostesSlider expThresholdKnob, expRangeKnob, expAttackKnob;
-    CostesSlider expReleaseKnob,  expRatioKnob,  expMixKnob;
+    // the dynamics section (v2.64.0, Clement's spec; reordered in
+    // v2.66.0): ten knobs and four sidechain selectors - the
+    // expander's THRESH, RANGE, RELEASE, RATIO and MIX, then the
+    // compressor's THRESH, RATIO, RELEASE, GAIN and MIX, plus each
+    // stage's SC HPF/SC LPF pair - each with its own caption label,
+    // the two section captions, the two transfer-curve glyphs, the
+    // two attack captions and the two LISTEN captions
+    CostesSlider expThresholdKnob, expRangeKnob;
+    CostesSlider expReleaseKnob,   expRatioKnob, expMixKnob;
     CostesSlider compThresholdKnob, compRatioKnob, compReleaseKnob;
-    CostesSlider compGainKnob,     compMixKnob,   compHpfSlider;
+    CostesSlider compGainKnob,     compMixKnob;
+    CostesSlider expScHpfSlider, expScLpfSlider;
+    CostesSlider compHpfSlider, compScLpfSlider;
 
-    juce::Label expThresholdLabel, expRangeLabel, expAttackLabel;
+    juce::Label expThresholdLabel, expRangeLabel;
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
     juce::Label compThresholdLabel, compRatioLabel, compReleaseLabel;
-    juce::Label compAttackLabel, compGainLabel, compMixLabel, compHpfLabel;
-    juce::Label expSectionLabel, compSectionLabel;
+    juce::Label compAttackLabel, compGainLabel, compMixLabel;
+    juce::Label expAttackLabel, expListenLabel;
+    juce::Label compHpfLabel, compScLpfLabel;
+    juce::Label expScHpfLabel, expScLpfLabel;
+    juce::Label compListenLabel, expSectionLabel, compSectionLabel;
 
     SectionIcon expIcon  { SectionIcon::Icon::expander };    // v2.64.0
     SectionIcon compIcon { SectionIcon::Icon::compressor }; // v2.64.0
@@ -637,6 +689,19 @@ private:
     };
 
     FastAtkToggle compFastAttackButton;
+    FastAtkToggle expFastAttackButton;   // v2.66.0: the gate's own plate
+
+    // the LISTEN plates (v2.66.0, Clement's spec): one push per stage -
+    // lit amber with a live LED while the strip's voice is its own
+    // sidechain (the filtered signal the detector hears), dark with a
+    // dead LED while the programme plays. The same plate language as
+    // the BELL/SHELF and FAST/SLOW switches
+    struct ListenToggle : public juce::ToggleButton
+    {
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    ListenToggle expListenButton, compListenButton;
 
     // the cut on/off plates (v2.59.0, Clement's remark 2): one ToggleButton
     // per cut, painted like the oversampling switch but vertical - a
@@ -653,19 +718,24 @@ private:
     // "NAME OFF" plates as the EQ's global switch, one per half
     PlateToggle expOnButton, compOnButton;
 
-    // the dynamics meters' instances (v2.65.0) - the public struct and
-    // the harness accessor sit above; the expander's pair spans 70 dB
-    // of IN (marks every 20) and 40 of GR (marks every 10 - its RANGE
-    // runs 0 to 40), the compressor's 70 of IN and 20 of GR (marks
-    // every 5)
+    // the dynamics meters' instances (v2.65.0, grown in v2.66.0) - the
+    // public struct and the harness accessor sit above. Each stage
+    // carries its IN and OUT pair over 70 dB (marks every 20) and its
+    // GR ladder on the J's two-half scale: 0-10-40 on the expander
+    // (its RANGE runs 0 to 40), 0-6-20 on the compressor - the top
+    // half of the ladder reads the working region wide
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
-                                true, -70.0f, 0.0f, 14, 20.0f, "IN" };
-    DynamicsMeter expGrMeter { owner, DynamicsMeter::Mode::gainReduction,
-                                true, -40.0f, 0.0f, 20, 10.0f, "GR" };
+                                true, -70.0f, 0.0f, -35.0f, 14, 20.0f, "IN" };
+    DynamicsMeter expOutMeter { owner, DynamicsMeter::Mode::output,
+                                true, -70.0f, 0.0f, -35.0f, 14, 20.0f, "OUT" };
+    DynamicsMeter expGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
+                                true, -40.0f, 0.0f, -10.0f, 20, 10.0f, "GR" };
     DynamicsMeter compInMeter { owner, DynamicsMeter::Mode::input,
-                                false, -70.0f, 0.0f, 14, 20.0f, "IN" };
+                                false, -70.0f, 0.0f, -35.0f, 14, 20.0f, "IN" };
+    DynamicsMeter compOutMeter { owner, DynamicsMeter::Mode::output,
+                                false, -70.0f, 0.0f, -35.0f, 14, 20.0f, "OUT" };
     DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
-                                false, -20.0f, 0.0f, 10, 5.0f, "GR" };
+                                false, -20.0f, 0.0f, -6.0f, 10, 5.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
@@ -698,10 +768,13 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> expOnAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expThresholdAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expRangeAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expAttackAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> expFastAttackAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expReleaseAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expRatioAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expMixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expScHpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expScLpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> expListenAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compOnAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compThresholdAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compRatioAttachment;
@@ -710,6 +783,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compGainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compMixAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compHpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compScLpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compListenAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
