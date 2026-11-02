@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.68.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.69.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,42 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.69.0** — *The engraved signature, the saturated caps, and the
+  MVP beside the EQ.*
+  Following Clement's seven remarks on the v2.68 panel:
+  - **The name plate is an engraved silkscreen.** The dark chip is
+    gone; the brand reads straight off the cream like an SL 4000's
+    own front panel - a dotted rule, the Costes seismic line, COSTES
+    in dark engraving, CONSOLE in dim caps, all in one 26 px band
+    (Clement's pick P2 of the five proposals).
+  - **The saturated caps (variant A).** The pastel EQ hues read
+    washed-out against the cream; the LO MID cap speaks a full
+    saturation blue, the HI MID a warm ivory, the HF (and the HIGH
+    CUT) a saturated red - the expander and compressor follow their
+    own bands' retint.
+  - **The OFF plates speak white.** A dark push button's caption now
+    draws in the plate's own cream instead of dim grey - EQ OFF,
+    BELL/SHELF, FAST/SLOW, LISTEN and the cut plates read at a
+    glance.
+  - **The sidechain corners are discrete cranks.** The SC HPF reads
+    off / 40 / 60 / 90 / 120 / 150 / 200 / 250 / 300 / 400 / 600 /
+    800 / 1200 / 1600 Hz and the SC LPF 120 / 150 / 200 / 250 / 300 /
+    400 / 600 / 800 / 1200 / 1600 / 3200 / 6400 / 12800 Hz / off,
+    one legal corner per step like the slope selectors, a tie landing
+    on the gentler filter; a pre-2.69 session snaps to its nearest
+    corner, and the readout says "off" at the rest positions.
+  - **The meters read above their ladder.** The IN, OUT and GR
+    captions sit centred straight up from the LED column; the peak
+    hold grew thicker on every ladder (3.4 px on the GR bar, 2.4 on
+    the IN/OUT markers); and the GR ladders' engraved scale finally
+    agrees with its own LEDs - 0 at the top, the hinge (10 dB / 6 dB)
+    at the exact middle, the floor at the bottom, a true 50/50.
+  - **The MVP and the EQ stand side by side.** The left 380 px stack
+    the MVP's five sections as two sub-rows (TRIM, TONE and DRIVE
+    across the top, the two cuts across the bottom), the right 480 px
+    read the EQ's four bands as a 2 x 2 grid (LF | LO MID over
+    HI MID | HF), an engraved vertical divider between them - the
+    whole band one row tall, the panel still 860 x 645.
 - **2.68.0** — *Two dynamics blocks, standing side by side.*
   Following Clement's remarks on the v2.67 layout:
   - **The dynamics band is one row of two VERTICAL blocks.** The

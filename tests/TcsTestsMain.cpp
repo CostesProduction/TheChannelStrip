@@ -5285,17 +5285,17 @@ void testCostesStripSectionIcons()
                 "the expander's block sits at the left of the dynamics band, the compressor's at the right, one row tall");
 
     // the dynamics knobs wear the EQ's own cap colours (v2.68.0,
-    // Clement's remark): the expander the HI MID band's off-white, the
-    // compressor the LO MID band's pastel blue - index 17 is the
+    // Clement's remark): the expander the HI MID band's ivory, the
+    // compressor the LO MID band's saturated blue - index 17 is the
     // expander's THRESH, 22 the compressor's
     expectTrue (sliders[17] != nullptr
                     && sliders[17]->findColour (juce::Slider::backgroundColourId)
-                           == juce::Colour (0xfff0e9d8),
-                "the expander's knobs wear the HI MID band's off-white cap");
+                           == juce::Colour (0xffefe0bc),
+                "the expander's knobs wear the HI MID band's saturated ivory cap");
     expectTrue (sliders[22] != nullptr
                     && sliders[22]->findColour (juce::Slider::backgroundColourId)
-                           == juce::Colour (0xffaac6df),
-                "the compressor's knobs wear the LO MID band's pastel blue cap");
+                           == juce::Colour (0xff6f9fd4),
+                "the compressor's knobs wear the LO MID band's saturated blue cap");
 
     // the knobs sit smaller than the row-1 columns (v2.68.0, Clement's
     // remark) - the SSL 500-series density inside the one-row band
@@ -5470,21 +5470,31 @@ void testCostesStripKnobDefaultsAndCaps()
                                22, 23, 24, 25, 26 };
     const unsigned int knobCap[23] =
     {
-        0xff23232au, 0xff23232au, 0xffd8a49cu, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au, 0xffcd7f6du, 0xff23232au, 0xff23232au,
         0xff23232au, 0xff23232au,
-        0xffaac6dfu, 0xffaac6dfu,
-        0xfff0e9d8u, 0xfff0e9d8u,
-        0xffd8a49cu, 0xffd8a49cu,
-        0xfff0e9d8u, 0xfff0e9d8u, 0xfff0e9d8u,
-        0xfff0e9d8u, 0xfff0e9d8u,
-        0xffaac6dfu, 0xffaac6dfu, 0xffaac6dfu,
-        0xffaac6dfu, 0xffaac6dfu
+        0xff6f9fd4u, 0xff6f9fd4u,
+        0xffefe0bcu, 0xffefe0bcu,
+        0xffcd7f6du, 0xffcd7f6du,
+        0xffefe0bcu, 0xffefe0bcu, 0xffefe0bcu,
+        0xffefe0bcu, 0xffefe0bcu,
+        0xff6f9fd4u, 0xff6f9fd4u, 0xff6f9fd4u,
+        0xff6f9fd4u, 0xff6f9fd4u
     };
 
     for (int k = 0; k < 23; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, off-white expander, pastel blue compressor)");
+                    "each rotary knob wears its band's cap colour (high cut and HF saturated red, LO MID saturated blue, HI MID saturated ivory, saturated ivory expander, saturated blue compressor)");
+
+    // v2.69.0 (Clement's remark): the MVP and the EQ stand side by
+    // side in one band - the trim knob lives in the left half, the
+    // EQ's first band in the right one, and the two blocks share the
+    // same vertical span instead of stacking
+    expectTrue (sliders[0] != nullptr && sliders[7] != nullptr
+                    && sliders[0]->getBounds().getRight() <= 380
+                    && sliders[7]->getBounds().getX() >= 380
+                    && sliders[7]->getBounds().getY() < sliders[0]->getBounds().getBottom(),
+                "the MVP sits at the left of the band and the EQ beside it - the two blocks share one row");
 }
 
 void testCostesStripEq()
@@ -6190,6 +6200,56 @@ void testCostesStripDynamics()
             expectNear (thresholdParam->convertFrom0to1 (thresholdParam->getValueForText ("-12 dB")), -12.0, 0.01,
                         "a typed -12 dB threshold parses to -12 dB");
     }
+
+    // ---- v2.69.0 (Clement's remark): the sidechain corners are
+    // discrete cranks - a set value snaps to its nearest legal
+    // corner, an equidistant tie lands on the gentler filter (the
+    // lower HPF, the higher LPF), and the "off" rest positions parse
+    // back and forth through the selector's own text ----
+    setParam ("expScHpf", 500.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScHpf")->load(), 400.0, 0.01,
+                "an expander SC HPF set between corners snaps to the nearest one (500 Hz -> 400 Hz, the gentler tie)");
+    setParam ("expScHpf", 200.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScHpf")->load(), 200.0, 0.01,
+                "a legal expander SC HPF corner (200 Hz) lands exactly on its own crank");
+    setParam ("expScHpf", 16.0f);
+
+    setParam ("expScLpf", 2500.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScLpf")->load(), 3200.0, 0.01,
+                "an expander SC LPF set between corners snaps to the nearest one (2500 Hz -> 3200 Hz)");
+    setParam ("expScLpf", 12000.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScLpf")->load(), 12800.0, 0.01,
+                "a bright expander SC LPF corner snaps up to 12800 Hz");
+    setParam ("expScLpf", 24000.0f);
+
+    {
+        auto* scHpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expScHpf"));
+        expectTrue (scHpfParam != nullptr,
+                    "the expander SC HPF parameter is a ranged parameter");
+
+        if (scHpfParam != nullptr)
+        {
+            expectNear (scHpfParam->convertFrom0to1 (scHpfParam->getValueForText ("90 Hz")), 90.0, 0.01,
+                        "a typed 90 Hz SC corner parses to its own legal crank");
+            expectNear (scHpfParam->convertFrom0to1 (scHpfParam->getValueForText ("off")), 16.0, 0.01,
+                        "a typed off parses to the flat-band rest position (16 Hz)");
+        }
+
+        auto* scLpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compScLpf"));
+        expectTrue (scLpfParam != nullptr,
+                    "the compressor SC LPF parameter is a ranged parameter");
+
+        if (scLpfParam != nullptr)
+            expectNear (scLpfParam->convertFrom0to1 (scLpfParam->getValueForText ("off")), 24000.0, 0.01,
+                        "a typed off on the SC LPF parses to its own flat-band rest (24000 Hz)");
+    }
+
+    setParam ("compHpf", 1000.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("compHpf")->load(), 800.0, 0.01,
+                "the compressor SC HPF tie at 1000 Hz lands on the gentler lower corner (800 Hz)");
+    setParam ("compHpf", 16.0f);
 
     // ---- back to the parked defaults: threshold 0, ratio 2, mix 100,
     // the SC pair at rest (16 Hz / 24000 Hz) - the compressor is

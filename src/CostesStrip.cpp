@@ -93,6 +93,50 @@ namespace
         return best;
     }
 
+    // v2.69.0 (Clement's remark): the sidechain corners are discrete
+    // cranks, evenly spaced like the slope selectors - the HPF reads
+    // off / 40 / 60 / 90 / 120 / 150 / 200 / 250 / 300 / 400 / 600 /
+    // 800 / 1200 / 1600 Hz and the LPF 120 / 150 / 200 / 250 / 300 /
+    // 400 / 600 / 800 / 1200 / 1600 / 3200 / 6400 / 12800 Hz / off.
+    // The two "off" rest positions are the honest flat-band corners
+    // the DSP already knows (16 Hz / 24000 Hz). An equidistant tie
+    // lands on the gentler corner - the lower HPF, the higher LPF -
+    // so a slip of the mouse never sharpens a filter
+    constexpr int numScHpfCorners = 14;
+    const float scHpfCorners[numScHpfCorners] =
+    {
+        16.0f, 40.0f, 60.0f, 90.0f, 120.0f, 150.0f, 200.0f,
+        250.0f, 300.0f, 400.0f, 600.0f, 800.0f, 1200.0f, 1600.0f
+    };
+
+    constexpr int numScLpfCorners = 14;
+    const float scLpfCorners[numScLpfCorners] =
+    {
+        120.0f, 150.0f, 200.0f, 250.0f, 300.0f, 400.0f, 600.0f,
+        800.0f, 1200.0f, 1600.0f, 3200.0f, 6400.0f, 12800.0f, 24000.0f
+    };
+
+    int nearestScCornerIndex (const float* corners, int n, float v, bool higherOnTie)
+    {
+        int best = 0;
+        float bestDist = std::abs (v - corners[0]);
+
+        for (int i = 1; i < n; ++i)
+        {
+            const float d = std::abs (v - corners[i]);
+
+            // strict < keeps the earlier entry on a tie unless the
+            // gentler corner is the higher one (the LPF's rule)
+            if (d < bestDist || (d == bestDist && higherOnTie))
+            {
+                best = i;
+                bestDist = d;
+            }
+        }
+
+        return best;
+    }
+
     // v2.62.0 (Clement's remarks 2-3) / v2.63.0 (Clement's remark 1):
     // the mid bells' bandwidth knob offers exactly seven legal widths,
     // 0.4 / 0.7 / 1.0 / 1.5 / 2.0 / 3.0 / 4.0 octaves. This snaps any
@@ -155,10 +199,12 @@ namespace
     // band wears a pastel blue cap, the HI MID an off-white and the HF
     // a pastel red. Each knob carries its cap colour on the slider's
     // backgroundColourId, and drawRotarySlider builds the disc's sheen
-    // around it (the pointer flips dark on the bright caps)
-    const juce::Colour eqLoMidDisc (0xffaac6df);
-    const juce::Colour eqHiMidDisc (0xfff0e9d8);
-    const juce::Colour eqHfDisc    (0xffd8a49c);
+    // around it (the pointer flips dark on the bright caps). v2.69.0
+    // (Clement's remark): the pastel hues sat washed-out against the
+    // cream front - the three caps speak at full saturation now
+    const juce::Colour eqLoMidDisc (0xff6f9fd4);
+    const juce::Colour eqHiMidDisc (0xffefe0bc);
+    const juce::Colour eqHfDisc    (0xffcd7f6d);
     const juce::Colour valueArc     (0xffe2a14f);
     const juce::Colour plateFill    (0xff26221b);
     const juce::Colour plateText    (0xffe8dcbf);
@@ -174,9 +220,10 @@ namespace
     // v2.68.0 (Clement's remark): the dynamics caps speak the EQ's own
     // SSL language - the expander wears the HI MID band's off-white,
     // the compressor the LO MID band's pastel blue, so the two stages
-    // identify by colour at a glance
-    const juce::Colour expKnobDisc  (0xfff0e9d8);
-    const juce::Colour compKnobDisc (0xffaac6df);
+    // identify by colour at a glance. v2.69.0: they follow the EQ's
+    // own saturated retint
+    const juce::Colour expKnobDisc  (0xffefe0bc);
+    const juce::Colour compKnobDisc (0xff6f9fd4);
 
     // a true logarithmic sweep for the cut corners: every octave of the
     // range spans the same knob travel, and the optional snap lambda lands
@@ -886,23 +933,74 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (mixText)
             .withValueFromStringFunction (mixParse)));
 
-    // the shared sidechain plumbing (v2.66.0, Clement's remarks D and
-    // E): a corner snapped to whole Hz like the low cut, spoken in the
-    // selector's own "640 Hz". Both stages ride the SAME two ranges -
-    // 16 to 1600 Hz for the SC HPF, 100 to 24000 Hz for the SC LPF
-    const auto hzSnap = [] (float start, float end, float v)
+    // v2.69.0 (Clement's remark): the sidechain selectors' own discrete
+    // range - one legal corner per step, the same equal-step geometry
+    // the slope and octave selectors ride, so the SC pairs feel like
+    // the rest of the console. The range bounds keep the old
+    // continuous spans, so a pre-2.69 session lands on its nearest
+    // legal corner instead of jumping
+    const auto makeScCornerRange = [] (float minValue, float maxValue,
+                                       const float* corners, int n, bool higherOnTie)
     {
-        return juce::jlimit (start, end, std::round (v));
+        return juce::NormalisableRange<float> (
+            minValue, maxValue,
+            [corners, n] (float, float, float normalised)
+            {
+                const int index = juce::jlimit (0, n - 1,
+                    juce::roundToInt (normalised * (float) (n - 1)));
+                return corners[index];
+            },
+            [corners, n, higherOnTie] (float, float, float value)
+            {
+                const int index = nearestScCornerIndex (corners, n,
+                    juce::jlimit (corners[0], corners[n - 1], value), higherOnTie);
+                return (float) index / (float) (n - 1);
+            },
+            [corners, n, higherOnTie] (float start, float end, float value)
+            {
+                const int index = nearestScCornerIndex (corners, n,
+                    juce::jlimit (start, end, value), higherOnTie);
+                return corners[index];
+            });
     };
 
-    const auto hzText = [] (float value, int)
+    // the sidechain readouts speak "off" at their rest positions and
+    // plain hertz elsewhere, and a typed "off" parses back to rest
+    const auto scHpfText = [] (float value, int)
     {
+        if (value < 16.5f)
+            return juce::String ("off");
+
         return juce::String (juce::roundToInt (value)) + " Hz";
     };
 
-    const auto hzParse = [] (const juce::String& text)
+    const auto scHpfParse = [] (const juce::String& text)
     {
         auto t = text.trim();
+
+        if (t.equalsIgnoreCase ("off"))
+            return 16.0f;
+
+        if (t.endsWithIgnoreCase ("hz"))
+            t = t.dropLastCharacters (2).trim();
+
+        return t.replaceCharacter (',', '.').getFloatValue();
+    };
+
+    const auto scLpfText = [] (float value, int)
+    {
+        if (value > 23999.5f)
+            return juce::String ("off");
+
+        return juce::String (juce::roundToInt (value)) + " Hz";
+    };
+
+    const auto scLpfParse = [] (const juce::String& text)
+    {
+        auto t = text.trim();
+
+        if (t.equalsIgnoreCase ("off"))
+            return 24000.0f;
 
         if (t.endsWithIgnoreCase ("hz"))
             t = t.dropLastCharacters (2).trim();
@@ -931,17 +1029,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // the default strip hears exactly as v2.65 did
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "expScHpf", 1 }, "Expander SC HPF",
-        makeLogRange (16.0f, 1600.0f, hzSnap), 16.0f,
+        makeScCornerRange (16.0f, 1600.0f, scHpfCorners, numScHpfCorners, false), 16.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (hzText)
-            .withValueFromStringFunction (hzParse)));
+            .withStringFromValueFunction (scHpfText)
+            .withValueFromStringFunction (scHpfParse)));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "expScLpf", 1 }, "Expander SC LPF",
-        makeLogRange (100.0f, 24000.0f, hzSnap), 24000.0f,
+        makeScCornerRange (100.0f, 24000.0f, scLpfCorners, numScLpfCorners, true), 24000.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (hzText)
-            .withValueFromStringFunction (hzParse)));
+            .withStringFromValueFunction (scLpfText)
+            .withValueFromStringFunction (scLpfParse)));
 
     // the expander's LISTEN plate (v2.66.0, Clement's remark A): the
     // strip's voice becomes the gate's own sidechain - the filtered
@@ -1027,10 +1125,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // untouched
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "compHpf", 1 }, "Compressor SC HPF",
-        makeLogRange (16.0f, 1600.0f, hzSnap), 16.0f,
+        makeScCornerRange (16.0f, 1600.0f, scHpfCorners, numScHpfCorners, false), 16.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (hzText)
-            .withValueFromStringFunction (hzParse)));
+            .withStringFromValueFunction (scHpfText)
+            .withValueFromStringFunction (scHpfParse)));
 
     // the compressor's SC LPF (v2.66.0, Clement's remark E): 100 to
     // 24000 Hz, darkening the detector's top end - a bright cymbal wash
@@ -1038,10 +1136,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // band whole
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "compScLpf", 1 }, "Compressor SC LPF",
-        makeLogRange (100.0f, 24000.0f, hzSnap), 24000.0f,
+        makeScCornerRange (100.0f, 24000.0f, scLpfCorners, numScLpfCorners, true), 24000.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (hzText)
-            .withValueFromStringFunction (hzParse)));
+            .withStringFromValueFunction (scLpfText)
+            .withValueFromStringFunction (scLpfParse)));
 
     // the compressor's LISTEN plate (v2.66.0, Clement's remark A): the
     // strip's voice becomes the compressor's sidechain while lit - and
@@ -2510,49 +2608,63 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.setColour (plateFill);
     g.drawRect (getLocalBounds(), 2);
 
-    // the name plate across the top
-    auto plate = getLocalBounds().removeFromTop (26).reduced (260, 3);
-    g.setColour (plateFill);
-    g.fillRoundedRectangle (plate.toFloat(), 4.0f);
-    g.setColour (plateText);
-    g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
-    g.drawText ("COSTES CHANNEL STRIP", plate, juce::Justification::centred);
-
-    // the engraved section captions: TRIM | FILTERS | TONE | DRIVE
+    // v2.69.0 (Clement's choice P2): the engraved console signature
+    // replaces the name plate - no dark chip, the brand is
+    // silkscreened straight into the cream like the SL 4000's own
+    // front panel: a dotted rule, the Costes seismic line, COSTES in
+    // dark engraving and CONSOLE in dim caps, all in one 26 px band
     const int width = getWidth();
-    const int columnWidth = width / 5;
-    const juce::Rectangle<int> captionRow (0, 26, width, 18);
 
-    auto drawSection = [&] (const juce::String& text, int x, int w)
+    g.setColour (engravingDim.withAlpha (0.45f));
+
+    for (int x = 14; x < width - 12; x += 34)
+        g.fillEllipse (juce::Rectangle<float> ((float) x, 12.0f, 2.0f, 2.0f));
+
+    // the seismic line: the logo's own 50 x 20 trace scaled to 24 px
+    // wide - a heartbeat running through the console's name
     {
-        g.setColour (engravingDim);
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-        g.drawText (text, juce::Rectangle<int> (x, captionRow.getY(), w, captionRow.getHeight()),
-                    juce::Justification::centred);
-    };
+        const float x0 = 352.0f, y0 = 6.0f, s = 0.48f;
+        const float trace[][2] =
+        {
+            {  0.0f, 10.0f }, {  5.0f, 10.0f }, {  8.0f,  2.5f },
+            { 11.0f, 17.0f }, { 14.0f, 10.0f }, { 20.0f, 10.0f },
+            { 23.0f,  5.0f }, { 26.0f, 15.0f }, { 29.0f, 10.0f },
+            { 36.0f, 10.0f }, { 39.0f,  6.0f }, { 42.0f, 13.5f },
+            { 45.0f, 10.0f }, { 50.0f, 10.0f }
+        };
 
-    drawSection ("TRIM",    0,                columnWidth);
-    drawSection ("FILTERS", columnWidth,     columnWidth * 2);
-    drawSection ("TONE",    columnWidth * 3,  columnWidth);
-    drawSection ("DRIVE",   columnWidth * 4,  columnWidth);
+        g.setColour (engraving);
 
-    // a thin engraved rule under the caption row, broken around the
-    // section boundaries like a real silkscreen
-    g.setColour (engravingDim.withAlpha (0.5f));
-
-    for (int i = 0; i < 5; ++i)
-    {
-        const int x1 = columnWidth * i + 14;
-        const int x2 = columnWidth * (i + 1) - 14;
-        g.drawLine ((float) x1, 44.0f, (float) x2, 44.0f, 1.0f);
+        for (int i = 1; i < 14; ++i)
+            g.drawLine (juce::Line<float> (x0 + trace[i - 1][0] * s,
+                                           y0 + trace[i - 1][1] * s,
+                                           x0 + trace[i][0] * s,
+                                           y0 + trace[i][1] * s), 1.8f);
     }
 
-    // the EQ section's own rules (v2.61.0): a full divider under the
-    // row-1 silkscreen and one under the EQ header - the section reads
-    // as its own engraved band of the module front
+    // the name itself: COSTES in engraving, a small divider, CONSOLE
+    // in dim caps - the whole block centred in the band, right of the
+    // trace
+    g.setColour (engraving);
+    g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+    g.drawText ("COSTES", juce::Rectangle<int> (378, 0, 70, 26),
+                juce::Justification::centredLeft);
+    g.setColour (engravingDim.withAlpha (0.7f));
+    g.drawVerticalLine (444, 8.0f, 18.0f);
+    g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
+    g.drawText ("CONSOLE", juce::Rectangle<int> (452, 0, 90, 26),
+                juce::Justification::centredLeft);
+
+    // v2.69.0 (Clement's remark): the MVP and the EQ now stand side by
+    // side as two vertical blocks, and the engraved silkscreen follows
+    // them - a divider between the two halves, a rule under the EQ's
+    // header, one between the MVP's two sub-rows. The dynamics band
+    // keeps its own rules below
     g.setColour (engravingDim.withAlpha (0.5f));
-    g.drawLine (14.0f, 197.0f, (float) width - 14.0f, 197.0f, 1.0f);
-    g.drawLine (14.0f, 224.0f, (float) width - 14.0f, 224.0f, 1.0f);
+
+    g.drawVerticalLine (380, 32.0f, 388.0f);
+    g.drawLine (394.0f, 55.0f, (float) width - 14.0f, 55.0f, 1.0f);
+    g.drawLine (22.0f, 208.0f, 366.0f, 208.0f, 1.0f);
 
     // the dynamics' own divider (v2.64.0): the same engraved rule under
     // the EQ block, so the third row reads as its own band too. v2.65.0:
@@ -2592,66 +2704,46 @@ void CostesStripEditor::resized()
 {
     auto area = getLocalBounds();
 
-    area.removeFromTop (44);   // the name plate and the section captions
+    area.removeFromTop (26);   // the engraved signature band (v2.69.0)
     area.removeFromBottom (6);
 
-    // v2.68.0 (Clement's remark): the row-1 band and the EQ sit a
-    // touch tighter, and the two dynamics stages share the remaining
-    // band as two vertical blocks - the expander at the left, the
-    // compressor at the right
-    auto row1    = area.removeFromTop (150);
-    auto eqArea  = area.removeFromTop (200);
-    auto dynArea = area;
+    // v2.69.0 (Clement's remark): the MVP and the EQ share one band
+    // as two vertical halves - the MVP's five sections stack as two
+    // sub-rows in the left half, the EQ's four bands read as a 2 x 2
+    // grid in the right one - and the dynamics band keeps its own
+    // full row below, as in v2.68
+    auto mvpEqBand = area.removeFromTop (368);
+    auto dynArea   = area;
 
-    // five equal columns: knob above, caption below; the cut columns also
-    // carry their slope slider under the caption, and the drive column
-    // hosts the OS toggle under its caption
-    const int columnWidth = row1.getWidth() / 5;
+    auto mvpArea = mvpEqBand.removeFromLeft (380);
+    auto eqArea  = mvpEqBand;
 
-    for (int i = 0; i < 5; ++i)
+    // the MVP's top sub-row: TRIM, TONE and DRIVE, the same column
+    // pattern as ever - knob above, caption below, the section glyph
+    // hugging the caption's left edge - and the drive column keeps
+    // its OS toggle under the caption
+    auto mvpTop = mvpArea.removeFromTop (180);
+    mvpArea.removeFromTop (4);          // the engraved rule's breath
+    auto mvpBottom = mvpArea;
+
+    const int mvpTopW = mvpTop.getWidth() / 3;
+
+    for (int i = 0; i < 3; ++i)
     {
-        auto column = row1.removeFromLeft (columnWidth).reduced (8, 2);
+        auto column = mvpTop.removeFromLeft (mvpTopW).reduced (8, 2);
 
         auto* knob = &trimInKnob;
         auto* caption = &trimInLabel;
-        juce::Slider* slope = nullptr;
         SectionIcon* icon = &trimIcon;
 
-        if (i == 1)      { knob = &lowCutKnob;  caption = &lowCutLabel;  slope = &lowCutSlope;  icon = &lowCutIcon; }
-        else if (i == 2) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; icon = &highCutIcon; }
-        else if (i == 3) { knob = &tiltKnob;    caption = &tiltLabel;    icon = &tiltIcon; }
-        else if (i == 4) { knob = &driveKnob;   caption = &driveLabel;   icon = &driveIcon; }
-
-        // the slope columns give their selector a 26 px band - the 18 px
-        // readout box plus a slice of track above it (v2.60.0)
-        const int knobHeight = (i == 4) ? column.getHeight() - 48
-                             : (slope != nullptr) ? column.getHeight() - 46
-                                                  : column.getHeight() - 20;
-
-        // the cut on/off plate (v2.59.0): a 34 px strip on the left of
-        // the readout band - the knob's own frequency readout and the
-        // caption row - above the slope slider. The readout box stays
-        // centred, so the plate never collides with it
-        if (slope != nullptr)
-        {
-            auto plateArea = column;
-            plateArea = plateArea.removeFromBottom (64).removeFromTop (40);
-
-            auto plate = plateArea.removeFromLeft (34).reduced (2);
-            (i == 1 ? lowCutOnButton : highCutOnButton).setBounds (plate);
-        }
-
-        if (slope != nullptr)
-        {
-            auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
-            slope->setBounds (slopeBounds);
-        }
+        if (i == 1)      { knob = &tiltKnob;  caption = &tiltLabel;  icon = &tiltIcon; }
+        else if (i == 2) { knob = &driveKnob; caption = &driveLabel; icon = &driveIcon; }
 
         // the drive column hosts the switch below its caption
-        if (i == 4)
+        if (i == 2)
         {
             auto toggleBounds = column.removeFromBottom (26);
-            toggleBounds = toggleBounds.withSizeKeepingCentre (juce::jmin (toggleBounds.getWidth(), 130), 26);
+            toggleBounds = toggleBounds.withSizeKeepingCentre (juce::jmin (toggleBounds.getWidth(), 110), 26);
             oversampleButton.setBounds (toggleBounds);
         }
 
@@ -2665,15 +2757,59 @@ void CostesStripEditor::resized()
         icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
                          captionBounds.getY() + 1, 16, 16);
 
+        knob->setBounds (column.removeFromTop (column.getHeight() - 20));
+    }
+
+    // the MVP's bottom sub-row: the two cuts side by side, each with
+    // its slope selector and its on/off plate - the same per-column
+    // geometry the cuts have carried since v2.59, one column wider
+    const int mvpCutW = mvpBottom.getWidth() / 2;
+
+    for (int i = 0; i < 2; ++i)
+    {
+        auto column = mvpBottom.removeFromLeft (mvpCutW).reduced (8, 2);
+
+        auto* knob = &lowCutKnob;
+        auto* caption = &lowCutLabel;
+        juce::Slider* slope = &lowCutSlope;
+        SectionIcon* icon = &lowCutIcon;
+
+        if (i == 1) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; icon = &highCutIcon; }
+
+        // the slope columns give their selector a 26 px band - the 18 px
+        // readout box plus a slice of track above it (v2.60.0)
+        const int knobHeight = column.getHeight() - 46;
+
+        // the cut on/off plate (v2.59.0): a 34 px strip on the left of
+        // the readout band, above the slope selector. The readout box
+        // stays centred, so the plate never collides with it
+        auto plateArea = column;
+        plateArea = plateArea.removeFromBottom (64).removeFromTop (40);
+
+        auto plate = plateArea.removeFromLeft (34).reduced (2);
+        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (plate);
+
+        auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
+        slope->setBounds (slopeBounds);
+
+        auto captionBounds = column.removeFromBottom (18);
+        caption->setBounds (captionBounds);
+
+        const int textWidth = caption->getFont().getStringWidth (caption->getText());
+        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
+                         captionBounds.getY() + 1, 16, 16);
+
         knob->setBounds (column.removeFromTop (knobHeight));
     }
 
-    // ---- the EQ section (v2.61.0, Clement's spec) ----
-    // a breath under the row-1 silkscreen, then the header: the global
-    // on/off plate at the left and the section caption centred, its
-    // bell glyph hugging the text's left edge with the same geometry
-    // the knob captions use for their icons
-    eqArea.removeFromTop (8);
+    // ---- the EQ section (v2.61.0, Clement's spec; v2.69.0: the
+    // section stands beside the MVP as the right half of the band, and
+    // its four bands read as a 2 x 2 grid - LF and LO MID across the
+    // top, HI MID and HF across the bottom) ----
+    // the header: the global on/off plate at the left and the section
+    // caption centred, its bell glyph hugging the text's left edge
+    // with the same geometry the knob captions use for their icons
+    eqArea.removeFromTop (6);
     auto eqHeader = eqArea.removeFromTop (20);
 
     eqOnButton.setBounds (eqHeader.getX() + 14, eqHeader.getY() + 1, 76, 18);
@@ -2681,84 +2817,91 @@ void CostesStripEditor::resized()
 
     const int eqTextWidth = eqSectionLabel.getFont()
                                 .getStringWidth (eqSectionLabel.getText());
-    eqIcon.setBounds (getWidth() / 2 - eqTextWidth / 2 - 21,
+    eqIcon.setBounds (eqHeader.getCentreX() - eqTextWidth / 2 - 21,
                       eqHeader.getY() + 2, 16, 16);
 
-    // the four band columns: a caption above, the FREQ and GAIN knobs
+    // the four band cells: a caption above, the FREQ and GAIN knobs
     // side by side with their own small captions, the band's own
     // selector underneath - the bandwidth sweep for the mid bells, the
     // BELL/SHELF plate for the outer bands - and (v2.62.0, Clement's
     // remark 5) a 16 px glyph in a final row: the LF band's low-shelf
     // response, the two mid bells' bump and the HF band's high shelf
-    const int eqColumnWidth = eqArea.getWidth() / 4;
+    const int eqBandH = eqArea.getHeight() / 2;
 
-    for (int i = 0; i < 4; ++i)
+    for (int row = 0; row < 2; ++row)
     {
-        auto column = eqArea.removeFromLeft (eqColumnWidth).reduced (4, 2);
+        auto eqRow = eqArea.removeFromTop (eqBandH);
+        const int eqColumnWidth = eqRow.getWidth() / 2;
 
-        auto* bandLabel = &eqBand1Label;
-        auto* freqKnob  = &eq1HzKnob;
-        auto* freqLabel = &eq1HzLabel;
-        auto* gainKnob  = &eq1GainKnob;
-        auto* gainLabel = &eq1GainLabel;
-        juce::Slider* octSlider   = nullptr;
-        ShelfModeToggle* modeButton = &eq1ModeButton;
-        SectionIcon* bandIcon = &eqBand1Icon;
-
-        if (i == 1)
+        for (int i = 0; i < 2; ++i)
         {
-            bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
-            gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
-            octSlider = &eq2OctSlider; modeButton = nullptr;
-            bandIcon  = &eqBand2Icon;
-        }
-        else if (i == 2)
-        {
-            bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
-            gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
-            octSlider = &eq3OctSlider; modeButton = nullptr;
-            bandIcon  = &eqBand3Icon;
-        }
-        else if (i == 3)
-        {
-            bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
-            gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
-            modeButton = &eq4ModeButton;
-            bandIcon  = &eqBand4Icon;
-        }
+            const int band = row * 2 + i;
+            auto column = eqRow.removeFromLeft (eqColumnWidth).reduced (4, 2);
 
-        bandLabel->setBounds (column.removeFromTop (16));
-        column.removeFromTop (4);   // a breath under the band caption
+            auto* bandLabel = &eqBand1Label;
+            auto* freqKnob  = &eq1HzKnob;
+            auto* freqLabel = &eq1HzLabel;
+            auto* gainKnob  = &eq1GainKnob;
+            auto* gainLabel = &eq1GainLabel;
+            juce::Slider* octSlider   = nullptr;
+            ShelfModeToggle* modeButton = &eq1ModeButton;
+            SectionIcon* bandIcon = &eqBand1Icon;
 
-        // the bottom band hosts the selector (26 px) and the band glyph
-        // beneath it (v2.62.0): a centred 16 x 16 icon
-        auto bottom = column.removeFromBottom (44);
-        auto iconRow = bottom.removeFromBottom (18);
-        bandIcon->setBounds (iconRow.withSizeKeepingCentre (16, 16));
-        auto control = bottom;
+            if (band == 1)
+            {
+                bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
+                gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
+                octSlider = &eq2OctSlider; modeButton = nullptr;
+                bandIcon  = &eqBand2Icon;
+            }
+            else if (band == 2)
+            {
+                bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
+                gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
+                octSlider = &eq3OctSlider; modeButton = nullptr;
+                bandIcon  = &eqBand3Icon;
+            }
+            else if (band == 3)
+            {
+                bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
+                gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
+                modeButton = &eq4ModeButton;
+                bandIcon  = &eqBand4Icon;
+            }
 
-        auto knobRow = column;
+            bandLabel->setBounds (column.removeFromTop (16));
+            column.removeFromTop (4);   // a breath under the band caption
 
-        const int half = knobRow.getWidth() / 2;
-        auto freqCol = knobRow.removeFromLeft (half);
-        auto gainCol = knobRow;
+            // the bottom band hosts the selector (26 px) and the band glyph
+            // beneath it (v2.62.0): a centred 16 x 16 icon
+            auto bottom = column.removeFromBottom (44);
+            auto iconRow = bottom.removeFromBottom (18);
+            bandIcon->setBounds (iconRow.withSizeKeepingCentre (16, 16));
+            auto control = bottom;
 
-        freqLabel->setBounds (freqCol.removeFromBottom (14));
-        freqKnob->setBounds (freqCol);
-        gainLabel->setBounds (gainCol.removeFromBottom (14));
-        gainKnob->setBounds (gainCol);
+            auto knobRow = column;
 
-        if (octSlider != nullptr)
-        {
-            // the mid bells' bandwidth sweep - the cuts' own selector
-            // geometry, one band width wide
-            octSlider->setBounds (control.reduced (1, 1));
-        }
-        else if (modeButton != nullptr)
-        {
-            // the outer bands' BELL/SHELF plate, centred under its band
-            modeButton->setBounds (control.withSizeKeepingCentre (
-                juce::jmin (control.getWidth(), 76), 20));
+            const int half = knobRow.getWidth() / 2;
+            auto freqCol = knobRow.removeFromLeft (half);
+            auto gainCol = knobRow;
+
+            freqLabel->setBounds (freqCol.removeFromBottom (14));
+            freqKnob->setBounds (freqCol);
+            gainLabel->setBounds (gainCol.removeFromBottom (14));
+            gainKnob->setBounds (gainCol);
+
+            if (octSlider != nullptr)
+            {
+                // the mid bells' bandwidth sweep - the cuts' own selector
+                // geometry, one band width wide
+                octSlider->setBounds (control.reduced (1, 1));
+            }
+            else if (modeButton != nullptr)
+            {
+                // the outer bands' BELL/SHELF plate, centred under its band
+                modeButton->setBounds (control.withSizeKeepingCentre (
+                    juce::jmin (control.getWidth(), 76), 20));
+            }
         }
     }
 
@@ -2922,14 +3065,22 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // paints nothing but the caption - there is no size small enough
     // to divide by
     auto b = getLocalBounds();
-
-    g.setColour (engravingDim);
-    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    g.drawText (juce::String (caption), b.removeFromTop (14),
-                juce::Justification::centred);
+    auto captionStrip = b.removeFromTop (14);
 
     auto body = b;
     auto ladderArea = body.removeFromLeft (26).reduced (3, 0);
+
+    // v2.69.0 (Clement's remark): the caption reads straight up from
+    // the LED column - IN, OUT and GR sit centred ABOVE the ladder
+    // they name, not across the corner of the box
+    g.setColour (engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText (juce::String (caption),
+                juce::Rectangle<int> (ladderArea.getX() - 8,
+                                      captionStrip.getY(),
+                                      ladderArea.getWidth() + 16,
+                                      captionStrip.getHeight()),
+                juce::Justification::centred);
 
     const float lx = (float) ladderArea.getX() + 1.0f;
     const float lw = (float) ladderArea.getWidth() - 2.0f;
@@ -3079,17 +3230,18 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
         // v2.68.0 (Clement's remark): the GR ladders hold their peak in
         // the panel's own pastel blue - the LO MID cap's colour - as a
-        // thick bar that reads across the orange LEDs; the IN and OUT
-        // ladders keep their cream hairline
+        // thick bar that reads across the orange LEDs; v2.69.0
+        // (Clement's remark): BOTH holds grew thicker - the GR bar and
+        // the IN and OUT ladders' cream marker
         if (mode == Mode::gainReduction)
         {
             g.setColour (compKnobDisc);
-            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 2.6f);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 3.4f);
         }
         else
         {
             g.setColour (knobPointer);
-            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 1.4f);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 2.4f);
         }
     }
 
@@ -3109,7 +3261,15 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
         for (int m = 0; m < 3; ++m)
         {
-            const float y = top + (highDb - anchors[m]) / span * height;
+            // v2.69.0 (Clement's remark): the engraved scale agrees
+            // with the LEDs' own two-half geometry - 0 at the top,
+            // the hinge at the middle of the ladder, the floor at
+            // the bottom - so the working 0 to 10 dB region of the
+            // expander (0 to 6 on the compressor) truly owns its
+            // full upper half
+            const float y = (m == 0) ? top
+                          : (m == 1) ? top + height * 0.5f
+                                     : bottom;
 
             g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
             g.drawText (juce::String (-juce::roundToInt (anchors[m])),
@@ -3171,8 +3331,10 @@ void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
     }
 
     // the caption says the state out loud: "EQ ON" / "EQ OFF",
-    // dark engraving on the lit plate, dim cream on the dark one
-    g.setColour (on ? engraving : engravingDim);
+    // dark engraving on the lit plate, and (v2.69.0, Clement's remark)
+    // the plate's own cream text on the dark one - the dim grey was
+    // unreadable against the plateFill
+    g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawText (caption + (on ? " ON" : " OFF"), bounds,
                 juce::Justification::centred);
@@ -3214,8 +3376,8 @@ void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,
     }
 
     // the caption spells the shape: "BELL" / "SHELF", dark engraving on
-    // the lit plate, dim cream on the dark one
-    g.setColour (on ? engraving : engravingDim);
+    // the lit plate, and (v2.69.0) the plate's own cream on the dark one
+    g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText (on ? "BELL" : "SHELF", bounds,
                 juce::Justification::centred);
@@ -3257,7 +3419,7 @@ void CostesStripEditor::FastAtkToggle::paintButton (juce::Graphics& g,
         g.fillEllipse (led);
     }
 
-    g.setColour (on ? engraving : engravingDim);
+    g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText (on ? "FAST" : "SLOW", bounds,
                 juce::Justification::centred);
@@ -3300,7 +3462,7 @@ void CostesStripEditor::ListenToggle::paintButton (juce::Graphics& g,
         g.fillEllipse (led);
     }
 
-    g.setColour (on ? engraving : engravingDim);
+    g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText ("LISTEN", bounds,
                 juce::Justification::centred);
@@ -3344,8 +3506,8 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
     }
 
     // the caption spells the state: "ON" / "OFF", dark engraving on the
-    // lit plate, dim cream on the dark one
-    g.setColour (on ? engraving : engravingDim);
+    // lit plate, and (v2.69.0) the plate's own cream on the dark one
+    g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText (on ? "ON" : "OFF", bounds,
                 juce::Justification::centred);
