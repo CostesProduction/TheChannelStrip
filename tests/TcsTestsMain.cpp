@@ -5169,8 +5169,8 @@ void testCostesStripSectionIcons()
 
     // v2.67.0 (Clement's remark): the panel adopts the shell's own
     // minimum window size - the footprint of the consoles it hosts
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 911,
-                "the strip panel opens at the shell's own minimum size (860 x 911)");
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 645,
+                "the strip panel opens at the shell's own minimum size (860 x 645)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5226,60 +5226,7 @@ void testCostesStripSectionIcons()
                     "every band glyph is laid out inside the panel");
     }
 
-    // the two dynamics glyphs (v2.64.0): the expander's and the
-    // compressor's transfer curves, beside their section captions - the
-    // same type, visibility and containment rules as the five knob
-    // icons and the EQ's own
-    const auto dynIcons = editor.getDynIcons();
-    const CostesStripEditor::SectionIcon::Icon expectedDynTypes[2] =
-    {
-        CostesStripEditor::SectionIcon::Icon::expander,
-        CostesStripEditor::SectionIcon::Icon::compressor
-    };
 
-    for (int i = 0; i < 2; ++i)
-    {
-        expectTrue (dynIcons[(size_t) i] != nullptr
-                        && dynIcons[(size_t) i]->type == expectedDynTypes[i],
-                    "each dynamics half carries its own transfer-curve glyph");
-        expectTrue (dynIcons[(size_t) i] != nullptr && dynIcons[(size_t) i]->isVisible()
-                        && editor.getLocalBounds().contains (dynIcons[(size_t) i]->getBounds()),
-                    "every dynamics glyph is laid out inside the panel");
-    }
-
-    // the fourteen dynamics knob glyphs (v2.67.0, Clement's remark):
-    // every knob of both stages carries its own shape beside its
-    // caption - MIX, THRESHOLD, RATIO, RELEASE, RANGE on the expander
-    // (GAIN on the compressor) and the sidechain pair - the same
-    // v2.60 language as the row-1 columns
-    const auto knobIcons = editor.getDynKnobIcons();
-    const CostesStripEditor::SectionIcon::Icon expectedKnobTypes[14] =
-    {
-        CostesStripEditor::SectionIcon::Icon::mix,
-        CostesStripEditor::SectionIcon::Icon::threshold,
-        CostesStripEditor::SectionIcon::Icon::ratio,
-        CostesStripEditor::SectionIcon::Icon::release,
-        CostesStripEditor::SectionIcon::Icon::range,
-        CostesStripEditor::SectionIcon::Icon::scHpf,
-        CostesStripEditor::SectionIcon::Icon::scLpf,
-        CostesStripEditor::SectionIcon::Icon::mix,
-        CostesStripEditor::SectionIcon::Icon::threshold,
-        CostesStripEditor::SectionIcon::Icon::ratio,
-        CostesStripEditor::SectionIcon::Icon::release,
-        CostesStripEditor::SectionIcon::Icon::gain,
-        CostesStripEditor::SectionIcon::Icon::scHpf,
-        CostesStripEditor::SectionIcon::Icon::scLpf
-    };
-
-    for (int i = 0; i < 14; ++i)
-    {
-        expectTrue (knobIcons[(size_t) i] != nullptr
-                        && knobIcons[(size_t) i]->type == expectedKnobTypes[i],
-                    "every dynamics knob carries its own glyph");
-        expectTrue (knobIcons[(size_t) i] != nullptr && knobIcons[(size_t) i]->isVisible()
-                        && editor.getLocalBounds().contains (knobIcons[(size_t) i]->getBounds()),
-                    "every dynamics knob glyph is laid out inside the panel");
-    }
 
     // the fourteen dynamics sliders (v2.64.0, the sidechain pair grown
     // to four in v2.66.0): every knob and the sidechain selectors laid
@@ -5328,10 +5275,38 @@ void testCostesStripSectionIcons()
                     && meters[5] != nullptr && meters[5]->midDb == -6.0f,
                 "the GR ladders hinge at 10 dB on the expander and 6 dB on the compressor (the two-half scale)");
 
+    // v2.68.0 (Clement's remark): the two stages stand as two VERTICAL
+    // blocks side by side - the expander's whole trio at the LEFT of
+    // the band, the compressor's at the RIGHT, both the same height
+    expectTrue (meters[0] != nullptr && meters[3] != nullptr
+                    && meters[0]->getBounds().getX() < meters[3]->getBounds().getX()
+                    && meters[0]->getHeight() == meters[3]->getHeight()
+                    && meters[2]->getHeight() == meters[5]->getHeight(),
+                "the expander's block sits at the left of the dynamics band, the compressor's at the right, one row tall");
+
+    // the dynamics knobs wear the EQ's own cap colours (v2.68.0,
+    // Clement's remark): the expander the HI MID band's off-white, the
+    // compressor the LO MID band's pastel blue - index 17 is the
+    // expander's THRESH, 22 the compressor's
+    expectTrue (sliders[17] != nullptr
+                    && sliders[17]->findColour (juce::Slider::backgroundColourId)
+                           == juce::Colour (0xfff0e9d8),
+                "the expander's knobs wear the HI MID band's off-white cap");
+    expectTrue (sliders[22] != nullptr
+                    && sliders[22]->findColour (juce::Slider::backgroundColourId)
+                           == juce::Colour (0xffaac6df),
+                "the compressor's knobs wear the LO MID band's pastel blue cap");
+
+    // the knobs sit smaller than the row-1 columns (v2.68.0, Clement's
+    // remark) - the SSL 500-series density inside the one-row band
+    expectTrue (sliders[17] != nullptr && sliders[0] != nullptr
+                    && sliders[17]->getHeight() < sliders[0]->getHeight(),
+                "the dynamics knobs sit smaller than the row-1 columns");
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 860, 911 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 645 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -5350,13 +5325,7 @@ void testCostesStripSectionIcons()
             for (auto* icon : bandIcons)
                 icon->paint (g);
 
-            for (auto* icon : dynIcons)
-                icon->paint (g);
 
-            // the dynamics knob glyphs paint against whatever bounds
-            // the layout hands them too (v2.67.0)
-            for (auto* icon : editor.getDynKnobIcons())
-                icon->paint (g);
 
             // the meters paint against degenerate bounds too - an
             // empty ladder, never a division
@@ -5373,7 +5342,7 @@ void testCostesStripSectionIcons()
     // (the GR ladders). The degenerate sizes above paint nothing
     // (the early return), so the first real paint here arms the hold
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 911, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 645, true);
         juce::Graphics g (canvas);
 
         for (int i = 0; i < 6; ++i)
@@ -5389,7 +5358,7 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (860, 911);
+    editor.setSize (860, 645);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5485,14 +5454,15 @@ void testCostesStripKnobDefaultsAndCaps()
                     "a command-click restores the parameter's default through the attachment");
     }
 
-    // ---- the cap colours (remark 4 + v2.62.0 + v2.66.0): the 23
+    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 23
     // rotary knobs carry their band's colour on the
     // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
     // red HIGH CUT (v2.63.0), the EQ bands speak the SSL colours, and
-    // the dynamics knobs wear their stage's own colour (v2.66.0,
-    // Clement's remark F): the pastel sea-teal on the expander, the
-    // pastel copper on the compressor. The expander's attack knob
-    // became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
+    // the dynamics knobs wear their stage's own colour (v2.68.0,
+    // Clement's remark): the expander borrows the HI MID band's
+    // off-white, the compressor the LO MID band's pastel blue - the
+    // two stages echo the EQ's own palette. The expander's attack
+    // knob became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
     // loop. The eight linear selectors draw no cap, so they are not in
     // the loop ----
     const int knobIndex[23] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
@@ -5505,16 +5475,16 @@ void testCostesStripKnobDefaultsAndCaps()
         0xffaac6dfu, 0xffaac6dfu,
         0xfff0e9d8u, 0xfff0e9d8u,
         0xffd8a49cu, 0xffd8a49cu,
-        0xff94b8b0u, 0xff94b8b0u, 0xff94b8b0u,
-        0xff94b8b0u, 0xff94b8b0u,
-        0xffc9a074u, 0xffc9a074u, 0xffc9a074u,
-        0xffc9a074u, 0xffc9a074u
+        0xfff0e9d8u, 0xfff0e9d8u, 0xfff0e9d8u,
+        0xfff0e9d8u, 0xfff0e9d8u,
+        0xffaac6dfu, 0xffaac6dfu, 0xffaac6dfu,
+        0xffaac6dfu, 0xffaac6dfu
     };
 
     for (int k = 0; k < 23; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, sea-teal expander, copper compressor)");
+                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, off-white expander, pastel blue compressor)");
 }
 
 void testCostesStripEq()

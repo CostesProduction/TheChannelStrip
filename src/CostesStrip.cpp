@@ -171,13 +171,12 @@ namespace
     const juce::Colour meterGreen   (0xff4d9c55);
     const juce::Colour meterGrOrange (0xffd97a2b);
 
-    // v2.66.0 (Clement's remark F): the two dynamics stages speak their
-    // own colours - a pastel sea-teal cap on the expander's knobs, a
-    // pastel copper on the compressor's, the same anodised-pastel family
-    // the EQ band caps wear (so the stages read at a glance like the
-    // SSL J's own two dynamics halves)
-    const juce::Colour expKnobDisc  (0xff94b8b0);
-    const juce::Colour compKnobDisc (0xffc9a074);
+    // v2.68.0 (Clement's remark): the dynamics caps speak the EQ's own
+    // SSL language - the expander wears the HI MID band's off-white,
+    // the compressor the LO MID band's pastel blue, so the two stages
+    // identify by colour at a glance
+    const juce::Colour expKnobDisc  (0xfff0e9d8);
+    const juce::Colour compKnobDisc (0xffaac6df);
 
     // a true logarithmic sweep for the cut corners: every octave of the
     // range spans the same knob travel, and the optional snap lambda lands
@@ -2183,11 +2182,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // ------------------------------------------------------------------
     // the DYNAMICS row (v2.64.0, Clement's spec, reorganised in
-    // v2.66.0 per his remarks A to F): the two stages carry the SAME
-    // control set, and each stage's knobs wear its own cap colour
-    // (v2.66.0, remark F) - a pastel sea-teal on the expander, a
-    // pastel copper on the compressor, the same family as the EQ
-    // bands' own caps. Double-click and command-click park every one
+    // v2.66.0 and re-cut into two vertical blocks in v2.68.0): the
+    // two stages carry the SAME control set, and each stage's knobs
+    // wear its own cap colour (v2.68.0, Clement's remark) - the HI
+    // MID band's off-white on the expander, the LO MID band's pastel
+    // blue on the compressor, the two stages echoing the EQ's own
+    // palette. Double-click and command-click park every one
     // on its neutral default (threshold -50 / range 0 on the
     // expander, threshold 0 / ratio 2 on the compressor, mix 100 %,
     // every sidechain at rest)
@@ -2221,27 +2221,9 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpBandCaption (expScLpfLabel, "SC LPF");
     setUpBandCaption (expListenLabel, "LISTEN");
 
-    // the dynamics' own transfer-curve glyphs, beside their captions
-    addAndMakeVisible (expIcon);
-    addAndMakeVisible (compIcon);
-
-    // v2.67.0 (Clement's remark): the fourteen dynamics knob glyphs -
-    // every knob of both stages carries its own shape, the same v2.60
-    // language as the row-1 columns
-    addAndMakeVisible (expMixIcon);
-    addAndMakeVisible (expThresholdIcon);
-    addAndMakeVisible (expRatioIcon);
-    addAndMakeVisible (expReleaseIcon);
-    addAndMakeVisible (expRangeIcon);
-    addAndMakeVisible (expScHpfIcon);
-    addAndMakeVisible (expScLpfIcon);
-    addAndMakeVisible (compMixIcon);
-    addAndMakeVisible (compThresholdIcon);
-    addAndMakeVisible (compRatioIcon);
-    addAndMakeVisible (compReleaseIcon);
-    addAndMakeVisible (compGainIcon);
-    addAndMakeVisible (compScHpfIcon);
-    addAndMakeVisible (compScLpfIcon);
+    // v2.68.0 (Clement's remark): the dynamics sections carry no
+    // glyphs any more - the stages read through their captions, their
+    // knob colours and their ladders alone
 
     // the two section captions, engraved like the EQ header's own
     expSectionLabel.setText ("EXPANDER", juce::dontSendNotification);
@@ -2401,20 +2383,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     compListenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "compListen", compListenButton);
 
-    // v2.61.0: the second row added its header (20) plus the band
-    // columns (152) plus the breathing room between them. v2.62.0
-    // (Clement's remark 5): each band column also hosts its own 16 px
-    // glyph under the selector, so the row grows to 200 px. v2.64.0:
-    // the dynamics row added its own 200 px. v2.65.0 (Clement's
-    // photos of the SSL J): the dynamics split into TWO stages, the
-    // expander's row then the compressor's, each with its own 200 px -
-    // thirteen cramped columns became six and seven wide ones, and
-    // each stage hosts its IN ladder at the left (beside the THRESH
-    // knob) and its GR ladder at the right (the section's payoff).
-    // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // minimum window size - 860 x 911, the footprint of the consoles
-    // it hosts
-    setSize (860, 911);
+    // v2.68.0 (Clement's remark): the whole strip tightens - the row-1
+    // band and the EQ lose a slice of height, the two dynamics stages
+    // share ONE band as two vertical blocks side by side, and the
+    // panel drops from 860 x 911 to 860 x 645 while keeping the
+    // shell's own width
+    setSize (860, 645);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2621,15 +2595,13 @@ void CostesStripEditor::resized()
     area.removeFromTop (44);   // the name plate and the section captions
     area.removeFromBottom (6);
 
-    // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // minimum window size - 860 x 911 - so the strip reads the same
-    // footprint on the desk as the consoles it hosts. The two
-    // dynamics stages breathe a little taller for it, the row-1 band
-    // and the EQ a touch too
-    auto row1    = area.removeFromTop (165);
-    auto eqArea  = area.removeFromTop (220);
-    auto expArea = area.removeFromTop (238);
-    auto compArea = area;
+    // v2.68.0 (Clement's remark): the row-1 band and the EQ sit a
+    // touch tighter, and the two dynamics stages share the remaining
+    // band as two vertical blocks - the expander at the left, the
+    // compressor at the right
+    auto row1    = area.removeFromTop (150);
+    auto eqArea  = area.removeFromTop (200);
+    auto dynArea = area;
 
     // five equal columns: knob above, caption below; the cut columns also
     // carry their slope slider under the caption, and the drive column
@@ -2790,224 +2762,147 @@ void CostesStripEditor::resized()
         }
     }
 
-    // ---- the dynamics, stage by stage (v2.65.0, Clement's photos of
-    // the SSL J; reorganised in v2.66.0, his remarks A to F): the
-    // expander and the compressor each own a FULL row, and both
-    // stages carry the SAME control set in the SAME order - the IN
-    // and OUT ladders together at the left edge (the level the
-    // section hears and the level it leaves behind), then MIX,
-    // THRESH, RATIO and RELEASE as wide knob columns, then the
-    // vertical block (the FAST/SLOW attack plate, the SC HPF and
-    // SC LPF selectors, the LISTEN push), then RANGE on the expander
-    // / GAIN on the compressor, and the GR ladder at the right (the
-    // section's payoff, 0 dB at the top, two halves per Clement's
-    // remarks B and C). The stage chrome is shared: a breath, the
-    // on/off plate at the left, the section caption centred with its
-    // transfer-curve glyph hugging the text, then the ladders and
-    // the knob columns
-    auto layoutStageChrome = [] (juce::Rectangle<int> stageArea,
-                                     PlateToggle& onButton,
-                                     juce::Label& sectionLabel,
-                                     SectionIcon& sectionIcon,
-                                     DynamicsMeter& inMeter,
-                                     DynamicsMeter& outMeter,
-                                     DynamicsMeter& grMeter)
-        -> juce::Rectangle<int>
+    // ---- the dynamics (v2.68.0, Clement's remark): the two stages
+    // stand side by side as two VERTICAL blocks - the expander owns
+    // the LEFT half of the band, the compressor the RIGHT one. Each
+    // block is one column: the IN and OUT ladders at its left edge,
+    // the GR ladder at its right, and a three-by-three control grid
+    // between them - MIX, THRESH and RATIO across the top, RELEASE,
+    // RANGE (GAIN on the compressor) and the FAST/SLOW plate across
+    // the middle, the SC HPF and SC LPF selectors and the LISTEN push
+    // across the bottom. The knobs sit smaller than the row-1 and EQ
+    // columns - the SSL 500-series density - and the whole band is
+    // one row tall
+    auto expBlock  = dynArea.removeFromLeft (dynArea.getWidth() / 2);
+    auto compBlock = dynArea;
+
+    // one layout for both stages: the same control set in the same
+    // order, the same ladders, so the two halves read as one design
+    auto layoutDynStage = [] (juce::Rectangle<int> block,
+                                 PlateToggle& onButton,
+                                 juce::Label& sectionLabel,
+                                 DynamicsMeter& inMeter,
+                                 DynamicsMeter& outMeter,
+                                 DynamicsMeter& grMeter,
+                                 CostesSlider* knobs[5],
+                                 juce::Label* captions[5],
+                                 FastAtkToggle& attackButton,
+                                 juce::Label& attackLabel,
+                                 CostesSlider& hpfSlider,
+                                 juce::Label& hpfLabel,
+                                 CostesSlider& lpfSlider,
+                                 juce::Label& lpfLabel,
+                                 ListenToggle& listenButton,
+                                 juce::Label& listenLabel)
     {
-        stageArea.removeFromTop (8);
-        auto header = stageArea.removeFromTop (20);
+        block = block.reduced (4, 2);
+        block.removeFromTop (6);      // a breath under the band above
+        auto header = block.removeFromTop (20);
 
-        // the three ladders flank the stage: IN and OUT together at
-        // the left edge, GR at the right - 80 px each, the full
-        // height of the stage
-        auto meterIn    = stageArea.removeFromLeft (80);
-        auto meterOut   = stageArea.removeFromLeft (80);
-        auto meterRight = stageArea.removeFromRight (80);
-
-        onButton.setBounds (header.getX() + 14, header.getY() + 1, 76, 18);
+        onButton.setBounds (header.getX() + 8, header.getY() + 1, 76, 18);
         sectionLabel.setBounds (header);
 
-        const int textWidth = sectionLabel.getFont()
-                                  .getStringWidth (sectionLabel.getText());
-        sectionIcon.setBounds (header.getCentreX() - textWidth / 2 - 21,
-                               header.getY() + 2, 16, 16);
-
+        // the three ladders: IN and OUT together at the left edge,
+        // GR at the right - the full height of the stage
+        auto meterIn  = block.removeFromLeft (64);
+        auto meterOut = block.removeFromLeft (64);
+        auto meterGr  = block.removeFromRight (64);
         inMeter.setBounds (meterIn.reduced (2, 2));
         outMeter.setBounds (meterOut.reduced (2, 2));
-        grMeter.setBounds (meterRight.reduced (2, 2));
+        grMeter.setBounds (meterGr.reduced (2, 2));
 
-        return stageArea;   // what is left: the knob columns
-    };
-
-    // the vertical block (v2.66.0, remark A): the FAST/SLOW attack
-    // plate on top, the SC HPF and SC LPF selectors in the middle,
-    // the LISTEN push at the bottom - one column of plates and
-    // sliders, a caption under every control. v2.67.0: the sidechain
-    // selectors carry their own glyphs beside their captions, the
-    // same v2.60 language as every other knob
-    auto layoutVerticalBlock = [] (juce::Rectangle<int> block,
-                                      juce::ToggleButton& attackButton,
-                                      juce::Label& attackLabel,
-                                      CostesSlider& hpfSlider,
-                                      juce::Label& hpfLabel,
-                                      SectionIcon& hpfIcon,
-                                      CostesSlider& lpfSlider,
-                                      juce::Label& lpfLabel,
-                                      SectionIcon& lpfIcon,
-                                      juce::ToggleButton& listenButton,
-                                      juce::Label& listenLabel)
-    {
-        attackButton.setBounds (
-            block.removeFromTop (22).withSizeKeepingCentre (72, 22));
-        attackLabel.setBounds (block.removeFromTop (14));
-
-        hpfSlider.setBounds (
-            block.removeFromTop (36).withSizeKeepingCentre (76, 36));
-        hpfLabel.setBounds (block.removeFromTop (14));
-
-        const int hpfTextWidth = hpfLabel.getFont()
-                                     .getStringWidth (hpfLabel.getText());
-        hpfIcon.setBounds (hpfLabel.getBounds().getCentreX() - hpfTextWidth / 2 - 21,
-                           hpfLabel.getBounds().getY() + 1, 16, 16);
-
-        lpfSlider.setBounds (
-            block.removeFromTop (36).withSizeKeepingCentre (76, 36));
-        lpfLabel.setBounds (block.removeFromTop (14));
-
-        const int lpfTextWidth = lpfLabel.getFont()
-                                     .getStringWidth (lpfLabel.getText());
-        lpfIcon.setBounds (lpfLabel.getBounds().getCentreX() - lpfTextWidth / 2 - 21,
-                           lpfLabel.getBounds().getY() + 1, 16, 16);
-
-        listenButton.setBounds (
-            block.removeFromTop (22).withSizeKeepingCentre (72, 22));
-        listenLabel.setBounds (block);
-    };
-
-    // ---- the EXPANDER's stage (v2.66.0, remark A): MIX, THRESH,
-    // RATIO and RELEASE as wide knob columns, the vertical block
-    // (FAST/SLOW attack, SC HPF, SC LPF, LISTEN), then RANGE - the
-    // expander's own payoff - under the same column geometry as the
-    // row-1 knobs ----
-    {
-        auto expColumns = layoutStageChrome (expArea, expOnButton,
-                                                   expSectionLabel, expIcon,
-                                                   expInMeter, expOutMeter,
-                                                   expGrMeter);
-
-        auto rangeColumn = expColumns.removeFromRight (
-                               expColumns.getWidth() / 5).reduced (4, 2);
-        auto blockColumn = expColumns.removeFromRight (92).reduced (3, 0);
-
-        const int expColumnWidth = expColumns.getWidth() / 4;
-
-        CostesSlider* expKnobs[4] =
+        // every cell sits its caption at the bottom and centres its
+        // control in the room that is left
+        const auto captionCell = [] (juce::Rectangle<int> cell, juce::Label& caption)
         {
-            &expMixKnob, &expThresholdKnob, &expRatioKnob, &expReleaseKnob
-        };
-        juce::Label* expCaptions[4] =
-        {
-            &expMixLabel, &expThresholdLabel, &expRatioLabel, &expReleaseLabel
-        };
-        SectionIcon* expKnobIcons[4] =
-        {
-            &expMixIcon, &expThresholdIcon, &expRatioIcon, &expReleaseIcon
+            caption.setBounds (cell.removeFromBottom (14));
+            return cell;
         };
 
-        for (int i = 0; i < 4; ++i)
+        const int cellH = block.getHeight() / 3;
+
+        // the top row: MIX, THRESH and RATIO
+        auto knobRow = block.removeFromTop (cellH);
+        const int knobW = knobRow.getWidth() / 3;
+
+        for (int i = 0; i < 3; ++i)
         {
-            auto column = expColumns.removeFromLeft (expColumnWidth).reduced (4, 2);
-
-            // the caption sits at the bottom of the column, the knob
-            // above it - the same geometry as the row-1 columns, glyph
-            // and all (v2.67.0)
-            auto captionBounds = column.removeFromBottom (18);
-            expCaptions[i]->setBounds (captionBounds);
-
-            const int textWidth = expCaptions[i]->getFont()
-                                      .getStringWidth (expCaptions[i]->getText());
-            expKnobIcons[i]->setBounds (
-                captionBounds.getCentreX() - textWidth / 2 - 21,
-                captionBounds.getY() + 1, 16, 16);
-
-            expKnobs[i]->setBounds (column);
+            auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
+                                     *captions[(size_t) i]);
+            knobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
+                juce::jmin (cell.getWidth(), 72), cell.getHeight()));
         }
 
-        layoutVerticalBlock (blockColumn,
-                            expFastAttackButton, expAttackLabel,
-                            expScHpfSlider, expScHpfLabel, expScHpfIcon,
-                            expScLpfSlider, expScLpfLabel, expScLpfIcon,
-                            expListenButton, expListenLabel);
+        // the middle row: RELEASE, RANGE (GAIN on the compressor) and
+        // the FAST/SLOW attack plate
+        auto midRow = block.removeFromTop (cellH);
+        const int midW = midRow.getWidth() / 3;
 
-        auto rangeCaption = rangeColumn.removeFromBottom (18);
-        expRangeLabel.setBounds (rangeCaption);
-        expRangeIcon.setBounds (rangeCaption.getCentreX()
-                                    - expRangeLabel.getFont()
-                                          .getStringWidth (expRangeLabel.getText()) / 2
-                                    - 21,
-                                rangeCaption.getY() + 1, 16, 16);
-        expRangeKnob.setBounds (rangeColumn);
+        for (int i = 0; i < 2; ++i)
+        {
+            auto cell = captionCell (midRow.removeFromLeft (midW).reduced (2, 0),
+                                     *captions[(size_t) (3 + i)]);
+            knobs[(size_t) (3 + i)]->setBounds (cell.withSizeKeepingCentre (
+                juce::jmin (cell.getWidth(), 72), cell.getHeight()));
+        }
+
+        auto plateCell = captionCell (midRow.reduced (2, 0), attackLabel);
+        attackButton.setBounds (plateCell.withSizeKeepingCentre (64, 22));
+
+        // the bottom row: the SC HPF and SC LPF selectors and the
+        // LISTEN push
+        const int scW = block.getWidth() / 3;
+
+        auto hpfCell = captionCell (block.removeFromLeft (scW).reduced (2, 0), hpfLabel);
+        hpfSlider.setBounds (hpfCell.withSizeKeepingCentre (76, 36));
+
+        auto lpfCell = captionCell (block.removeFromLeft (scW).reduced (2, 0), lpfLabel);
+        lpfSlider.setBounds (lpfCell.withSizeKeepingCentre (76, 36));
+
+        auto listenCell = captionCell (block.reduced (2, 0), listenLabel);
+        listenButton.setBounds (listenCell.withSizeKeepingCentre (64, 22));
+    };
+
+    {
+        CostesSlider* expKnobs[5] =
+        {
+            &expMixKnob, &expThresholdKnob, &expRatioKnob,
+            &expReleaseKnob, &expRangeKnob
+        };
+        juce::Label* expCaptions[5] =
+        {
+            &expMixLabel, &expThresholdLabel, &expRatioLabel,
+            &expReleaseLabel, &expRangeLabel
+        };
+
+        layoutDynStage (expBlock, expOnButton, expSectionLabel,
+                        expInMeter, expOutMeter, expGrMeter,
+                        expKnobs, expCaptions,
+                        expFastAttackButton, expAttackLabel,
+                        expScHpfSlider, expScHpfLabel,
+                        expScLpfSlider, expScLpfLabel,
+                        expListenButton, expListenLabel);
     }
 
-    // ---- the COMPRESSOR's stage (v2.66.0, remark A): the SAME order
-    // and the SAME geometry as the expander - MIX, THRESH, RATIO and
-    // RELEASE, the vertical block (FAST/SLOW attack, SC HPF, SC LPF,
-    // LISTEN), then GAIN, the compressor's make-up payoff ----
     {
-        auto compColumns = layoutStageChrome (compArea, compOnButton,
-                                                    compSectionLabel, compIcon,
-                                                    compInMeter, compOutMeter,
-                                                    compGrMeter);
-
-        auto gainColumn = compColumns.removeFromRight (
-                              compColumns.getWidth() / 5).reduced (4, 2);
-        auto blockColumn = compColumns.removeFromRight (92).reduced (3, 0);
-
-        const int compColumnWidth = compColumns.getWidth() / 4;
-
-        CostesSlider* compKnobs[4] =
+        CostesSlider* compKnobs[5] =
         {
-            &compMixKnob, &compThresholdKnob, &compRatioKnob, &compReleaseKnob
+            &compMixKnob, &compThresholdKnob, &compRatioKnob,
+            &compReleaseKnob, &compGainKnob
         };
-        juce::Label* compCaptions[4] =
+        juce::Label* compCaptions[5] =
         {
-            &compMixLabel, &compThresholdLabel, &compRatioLabel, &compReleaseLabel
-        };
-        SectionIcon* compKnobIcons[4] =
-        {
-            &compMixIcon, &compThresholdIcon, &compRatioIcon, &compReleaseIcon
+            &compMixLabel, &compThresholdLabel, &compRatioLabel,
+            &compReleaseLabel, &compGainLabel
         };
 
-        for (int i = 0; i < 4; ++i)
-        {
-            auto column = compColumns.removeFromLeft (compColumnWidth).reduced (4, 2);
-
-            auto captionBounds = column.removeFromBottom (18);
-            compCaptions[i]->setBounds (captionBounds);
-
-            const int textWidth = compCaptions[i]->getFont()
-                                      .getStringWidth (compCaptions[i]->getText());
-            compKnobIcons[i]->setBounds (
-                captionBounds.getCentreX() - textWidth / 2 - 21,
-                captionBounds.getY() + 1, 16, 16);
-
-            compKnobs[i]->setBounds (column);
-        }
-
-        layoutVerticalBlock (blockColumn,
-                            compFastAttackButton, compAttackLabel,
-                            compHpfSlider, compHpfLabel, compScHpfIcon,
-                            compScLpfSlider, compScLpfLabel, compScLpfIcon,
-                            compListenButton, compListenLabel);
-
-        auto gainCaption = gainColumn.removeFromBottom (18);
-        compGainLabel.setBounds (gainCaption);
-        compGainIcon.setBounds (gainCaption.getCentreX()
-                                    - compGainLabel.getFont()
-                                          .getStringWidth (compGainLabel.getText()) / 2
-                                    - 21,
-                                gainCaption.getY() + 1, 16, 16);
-        compGainKnob.setBounds (gainColumn);
+        layoutDynStage (compBlock, compOnButton, compSectionLabel,
+                        compInMeter, compOutMeter, compGrMeter,
+                        compKnobs, compCaptions,
+                        compFastAttackButton, compAttackLabel,
+                        compHpfSlider, compHpfLabel,
+                        compScLpfSlider, compScLpfLabel,
+                        compListenButton, compListenLabel);
     }
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
@@ -3182,8 +3077,20 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
         markerY = juce::jlimit (top, bottom - 1.0f, markerY);
 
-        g.setColour (knobPointer);
-        g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 1.4f);
+        // v2.68.0 (Clement's remark): the GR ladders hold their peak in
+        // the panel's own pastel blue - the LO MID cap's colour - as a
+        // thick bar that reads across the orange LEDs; the IN and OUT
+        // ladders keep their cream hairline
+        if (mode == Mode::gainReduction)
+        {
+            g.setColour (compKnobDisc);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 2.6f);
+        }
+        else
+        {
+            g.setColour (knobPointer);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 1.4f);
+        }
     }
 
     // the dB scale, engraved beside the ladder: one mark every 20 dB
@@ -3555,112 +3462,6 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
 
-        // EXPANDER (v2.64.0): the transfer curve itself - the output
-        // rises steeply out of the range floor, then straightens to the
-        // unity diagonal once the signal clears the threshold. The
-        // whole gate in one stroke
-        case Icon::expander:
-            p.startNewSubPath (X (2.0f), Y (13.4f));
-            p.lineTo (X (6.5f), Y (5.0f));
-            p.quadraticTo (X (8.5f), Y (3.4f), X (14.0f), Y (2.6f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // COMPRESSOR (v2.64.0): the mirrored transfer curve - the unity
-        // diagonal first, then the knee bending flatter as the output
-        // gives up a decibel for every decibel the input gains
-        case Icon::compressor:
-            p.startNewSubPath (X (2.0f), Y (13.4f));
-            p.lineTo (X (9.5f), Y (6.2f));
-            p.quadraticTo (X (11.5f), Y (5.0f), X (14.0f), Y (4.2f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // MIX (v2.67.0, Clement's remark): two strands - dry and wet -
-        // converging into the one line the knob fades between
-        case Icon::mix:
-            p.startNewSubPath (X (2.0f), Y (4.5f));
-            p.lineTo (X (8.0f), Y (8.0f));
-            p.startNewSubPath (X (2.0f), Y (11.5f));
-            p.lineTo (X (8.0f), Y (8.0f));
-            p.lineTo (X (14.0f), Y (8.0f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // THRESHOLD (v2.67.0): the step - the level a signal must climb
-        // over before the curve answers
-        case Icon::threshold:
-            p.startNewSubPath (X (2.5f), Y (12.6f));
-            p.lineTo (X (7.0f), Y (12.6f));
-            p.lineTo (X (7.0f), Y (4.2f));
-            p.lineTo (X (13.5f), Y (4.2f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // RATIO (v2.67.0): the wedge - the unity slope and the steeper
-        // one, sharing their origin
-        case Icon::ratio:
-            p.startNewSubPath (X (2.0f), Y (13.2f));
-            p.lineTo (X (13.0f), Y (3.8f));
-            p.startNewSubPath (X (2.0f), Y (13.2f));
-            p.lineTo (X (7.4f), Y (3.8f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // RELEASE (v2.67.0): the recovery - a steep fall that settles
-        // flat, the one-pole closing on the tail
-        case Icon::release:
-            p.startNewSubPath (X (2.4f), Y (2.8f));
-            p.quadraticTo (X (4.8f), Y (10.5f), X (13.4f), Y (12.6f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // RANGE (v2.67.0): the span - a double-headed vertical arrow,
-        // floor to ceiling
-        case Icon::range:
-            p.startNewSubPath (X (8.0f), Y (4.4f));
-            p.lineTo (X (8.0f), Y (11.6f));
-            p.startNewSubPath (X (5.9f), Y (6.6f));
-            p.lineTo (X (8.0f), Y (4.2f));
-            p.lineTo (X (10.1f), Y (6.6f));
-            p.startNewSubPath (X (5.9f), Y (9.4f));
-            p.lineTo (X (8.0f), Y (11.8f));
-            p.lineTo (X (10.1f), Y (9.4f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // GAIN (v2.67.0): the make-up - a single upward arrow
-        case Icon::gain:
-            p.startNewSubPath (X (8.0f), Y (12.8f));
-            p.lineTo (X (8.0f), Y (3.2f));
-            p.startNewSubPath (X (5.6f), Y (5.8f));
-            p.lineTo (X (8.0f), Y (3.2f));
-            p.lineTo (X (10.4f), Y (5.8f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // SC HPF (v2.67.0): the high-pass knee with its corner marked -
-        // the low cut's own curve, plus the vertical tick calling out
-        // the tunable corner
-        case Icon::scHpf:
-            p.startNewSubPath (X (2.0f), Y (13.0f));
-            p.lineTo (X (6.0f), Y (13.0f));
-            p.quadraticTo (X (11.0f), Y (13.0f), X (14.0f), Y (3.0f));
-            p.startNewSubPath (X (9.4f), Y (4.0f));
-            p.lineTo (X (9.4f), Y (13.0f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
-
-        // SC LPF (v2.67.0): the mirrored low-pass knee, the same
-        // corner tick
-        case Icon::scLpf:
-            p.startNewSubPath (X (2.0f), Y (3.0f));
-            p.lineTo (X (6.0f), Y (3.0f));
-            p.quadraticTo (X (11.0f), Y (3.0f), X (14.0f), Y (13.0f));
-            p.startNewSubPath (X (9.4f), Y (3.0f));
-            p.lineTo (X (9.4f), Y (12.0f));
-            g.strokePath (p, juce::PathStrokeType (stroke));
-            break;
     }
 }
 
@@ -3751,8 +3552,9 @@ void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,
     // The strings come from the slider's own value formatting, trimmed
     // to bare numbers ("+10.0 dB" -> "+10", "12.0:1" -> "12:1"), and
     // only the full-size knobs carry them - the little sidechain
-    // selectors have no skirt to spare
-    if (radius >= 18.0f)
+    // selectors and the v2.68 dynamics mini-knobs have no skirt to
+    // spare (the guard rose from 18 to 26 px for them)
+    if (radius >= 26.0f)
     {
         const auto skirtText = [] (juce::Slider& s, double value)
         {

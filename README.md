@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.67.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.68.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,28 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.68.0** — *Two dynamics blocks, standing side by side.*
+  Following Clement's remarks on the v2.67 layout:
+  - **The dynamics band is one row of two VERTICAL blocks.** The
+    expander owns the left half, the compressor the right; each block
+    carries its IN and OUT ladders at its left edge, its GR ladder at
+    its right, and a 3 x 3 control grid between them - MIX, THRESH,
+    RATIO across the top, RELEASE, RANGE (GAIN on the compressor) and
+    the FAST/SLOW plate across the middle, the SC HPF and SC LPF
+    selectors and the LISTEN push across the bottom. The panel drops
+    from 860 x 911 to 860 x 645; the row-1 band and the EQ sit a
+    touch tighter too, and the dynamics knobs are smaller - the SSL
+    500-series density.
+  - **The caps speak the EQ's own colours.** The expander's knobs
+    wear the HI MID band's off-white, the compressor's the LO MID
+    band's pastel blue - the two stages identify at a glance.
+  - **The dynamics glyphs are gone.** The v2.67 knob glyphs never
+    read right and are removed wholesale; the sections speak through
+    their captions, their cap colours and their ladders alone.
+  - **The GR peak hold is a thick pastel-blue bar** - the LO MID
+    colour - so the held reduction reads across the orange LEDs; the
+    IN and OUT ladders keep their cream hairline.
+
 - **2.67.0** — *The stages read like the hardware they imitate.*
   Following Clement's remarks on the v2.66 layout:
   - **Honest IN ladders.** The IN meters now read the TRUE full-band
@@ -373,9 +395,9 @@ Delete `scanned_plugins.xml` to redo a full scan.
     strip's voice becomes its own sidechain - the filtered signal
     the detector hears - handed to the output in place of the
     programme (the compressor's plate wins when both are lit).
-  - **Stage colours.** The expander's knobs wear a pastel sea-teal
-    cap, the compressor's a pastel copper - the same family as the
-    EQ bands' own caps.
+  - **Stage colours.** The expander's knobs wear the HI MID band's
+    off-white cap, the compressor's the LO MID band's pastel blue -
+    the two stages echoing the EQ's own palette.
 
 - **2.65.0** — *The dynamics grow into two stages, each with its own
   SSL meters.* Following Clement's photos of a real SSL 9000 J

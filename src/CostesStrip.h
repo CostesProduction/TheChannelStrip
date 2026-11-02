@@ -15,8 +15,9 @@
 // winning when both are lit); two new OUT ladders read the level each
 // stage leaves behind; and the GR ladders speak the J's two-half scales
 // (0-10-40 dB on the expander, 0-6-20 on the compressor). The stage knobs
-// wear the section colours Clement asked for: a pastel sea-teal cap on
-// the expander's, a pastel copper on the compressor's.
+// wear the section colours Clement asked for in v2.68.0: the HI MID
+// band's off-white cap on the expander's knobs, the LO MID band's
+// pastel blue on the compressor's.
 //
 // v2.65.0 (Clement's request, from his photos of the SSL J's dynamics
 //
@@ -520,10 +521,7 @@ public:
     // test harness can name the types and count the instances
     struct SectionIcon : public juce::Component
     {
-        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf,
-                           expander, compressor,
-                           mix, threshold, ratio, release, range, gain,
-                           scHpf, scLpf };   // v2.67.0: the dynamics knobs
+        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
 
         explicit SectionIcon (Icon iconType) : type (iconType) {}
 
@@ -550,14 +548,6 @@ public:
     std::array<SectionIcon*, 4> getEqBandIcons()
     {
         return { &eqBand1Icon, &eqBand2Icon, &eqBand3Icon, &eqBand4Icon };
-    }
-
-    // the two dynamics glyphs (v2.64.0): the expander's and the
-    // compressor's transfer curves, beside their section captions - for
-    // the offline test harness, in half order
-    std::array<SectionIcon*, 2> getDynIcons()
-    {
-        return { &expIcon, &compIcon };
     }
 
     // the dynamics meters (v2.65.0, grown in v2.66.0): the SSL J's own
@@ -615,16 +605,6 @@ public:
     {
         return { &expInMeter, &expOutMeter, &expGrMeter,
                  &compInMeter, &compOutMeter, &compGrMeter };
-    }
-
-    // v2.67.0: the fourteen dynamics knob glyphs, the expander's half
-    // then the compressor's - for the offline test harness
-    std::array<SectionIcon*, 14> getDynKnobIcons()
-    {
-        return { &expMixIcon, &expThresholdIcon, &expRatioIcon,
-                 &expReleaseIcon, &expRangeIcon, &expScHpfIcon, &expScLpfIcon,
-                 &compMixIcon, &compThresholdIcon, &compRatioIcon,
-                 &compReleaseIcon, &compGainIcon, &compScHpfIcon, &compScLpfIcon };
     }
 
 private:
@@ -688,28 +668,9 @@ private:
     juce::Label expScHpfLabel, expScLpfLabel;
     juce::Label compListenLabel, expSectionLabel, compSectionLabel;
 
-    SectionIcon expIcon  { SectionIcon::Icon::expander };    // v2.64.0
-    SectionIcon compIcon { SectionIcon::Icon::compressor }; // v2.64.0
-
-    // v2.67.0 (Clement's remark): one glyph per dynamics knob - the
-    // same v2.60 language as the row-1 columns, a 16 px vector shape
-    // hugging the caption's left edge, so MIX, THRESHOLD, RATIO,
-    // RELEASE, RANGE/GAIN and the sidechain pair read at a glance
-    // without any text
-    SectionIcon expMixIcon        { SectionIcon::Icon::mix };
-    SectionIcon expThresholdIcon  { SectionIcon::Icon::threshold };
-    SectionIcon expRatioIcon      { SectionIcon::Icon::ratio };
-    SectionIcon expReleaseIcon    { SectionIcon::Icon::release };
-    SectionIcon expRangeIcon      { SectionIcon::Icon::range };
-    SectionIcon expScHpfIcon      { SectionIcon::Icon::scHpf };
-    SectionIcon expScLpfIcon      { SectionIcon::Icon::scLpf };
-    SectionIcon compMixIcon       { SectionIcon::Icon::mix };
-    SectionIcon compThresholdIcon { SectionIcon::Icon::threshold };
-    SectionIcon compRatioIcon     { SectionIcon::Icon::ratio };
-    SectionIcon compReleaseIcon   { SectionIcon::Icon::release };
-    SectionIcon compGainIcon      { SectionIcon::Icon::gain };
-    SectionIcon compScHpfIcon     { SectionIcon::Icon::scHpf };
-    SectionIcon compScLpfIcon     { SectionIcon::Icon::scLpf };
+    // v2.68.0 (Clement's remark): every glyph of the dynamics sections
+    // is gone - the two stages read through their captions, their knob
+    // colours and their ladders alone
 
     // the oversampling switch: a ToggleButton that paints its own plate
     // (lit amber + LED when on, dark + dim LED when off) - the default
