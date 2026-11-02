@@ -45,7 +45,8 @@
 // waits for a section to be engaged - while the gain arithmetic stays
 // gated behind the activity flags, so a parked strip still processes
 // sample-for-sample exactly as v2.63 did and the meters still tell the
-// truth. A 30 Hz timer repaints the ladders; the panel grows to 1040x800.
+// truth. A 30 Hz timer repaints the ladders; the panel grows to 1040x800
+// (v2.67.0: 860x911, the shell's own minimum footprint).
 //
 // v2.64.0 (Clement's spec, roadmap C3): the DYNAMICS section - a
 // gate/expander and a classic compressor between the EQ and the tilt,
@@ -362,6 +363,15 @@ private:
     float lastExpScLpf     = -1.0f;
     float expOutPower      = 0.0f;    // the OUT ladders' 10 ms RMS state
     float compOutPower     = 0.0f;
+    // v2.67.0 (Clement's remark): the IN ladders' own 10 ms RMS state -
+    // the TRUE level the section receives, full band, whatever the
+    // sidechain corners do to the detector's copy. The detector still
+    // hears its filtered sidechain (that is what the GR curve acts on),
+    // but the IN meter reads the honest input, so an IN ladder can
+    // never sit below its OUT twin just because a corner shaved the
+    // detector's band
+    float expInPower       = 0.0f;
+    float compInPower     = 0.0f;
 
     // the dynamics meters (v2.65.0): the per-block snapshots the four
     // SSL ladders read. The IN meters start at the detector's floor
@@ -511,7 +521,9 @@ public:
     struct SectionIcon : public juce::Component
     {
         enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf,
-                           expander, compressor };
+                           expander, compressor,
+                           mix, threshold, ratio, release, range, gain,
+                           scHpf, scLpf };   // v2.67.0: the dynamics knobs
 
         explicit SectionIcon (Icon iconType) : type (iconType) {}
 
@@ -581,6 +593,20 @@ public:
         int leds;
         float markStep;
         const char* caption;
+
+        // v2.67.0 (Clement's remark): the peak hold - the reading's own
+        // extreme (the loudest level on an IN or OUT ladder, the
+        // deepest reduction on a GR ladder) held for 3 s, then a gentle
+        // glide back towards the live reading. The editor repaints the
+        // ladders at 30 Hz, so the state lives here and the paint
+        // itself advances it. Public so the offline harness can ask a
+        // ladder what it is holding
+        float getPeakHoldDb() const { return holdReading; }
+
+        float holdReading = 0.0f;
+        double holdStampMs = 0.0;
+        double holdLastMs = 0.0;
+        bool holdSet = false;
     };
 
     // the six ladders in stage order - the expander's IN/OUT/GR trio
@@ -589,6 +615,16 @@ public:
     {
         return { &expInMeter, &expOutMeter, &expGrMeter,
                  &compInMeter, &compOutMeter, &compGrMeter };
+    }
+
+    // v2.67.0: the fourteen dynamics knob glyphs, the expander's half
+    // then the compressor's - for the offline test harness
+    std::array<SectionIcon*, 14> getDynKnobIcons()
+    {
+        return { &expMixIcon, &expThresholdIcon, &expRatioIcon,
+                 &expReleaseIcon, &expRangeIcon, &expScHpfIcon, &expScLpfIcon,
+                 &compMixIcon, &compThresholdIcon, &compRatioIcon,
+                 &compReleaseIcon, &compGainIcon, &compScHpfIcon, &compScLpfIcon };
     }
 
 private:
@@ -654,6 +690,26 @@ private:
 
     SectionIcon expIcon  { SectionIcon::Icon::expander };    // v2.64.0
     SectionIcon compIcon { SectionIcon::Icon::compressor }; // v2.64.0
+
+    // v2.67.0 (Clement's remark): one glyph per dynamics knob - the
+    // same v2.60 language as the row-1 columns, a 16 px vector shape
+    // hugging the caption's left edge, so MIX, THRESHOLD, RATIO,
+    // RELEASE, RANGE/GAIN and the sidechain pair read at a glance
+    // without any text
+    SectionIcon expMixIcon        { SectionIcon::Icon::mix };
+    SectionIcon expThresholdIcon  { SectionIcon::Icon::threshold };
+    SectionIcon expRatioIcon      { SectionIcon::Icon::ratio };
+    SectionIcon expReleaseIcon    { SectionIcon::Icon::release };
+    SectionIcon expRangeIcon      { SectionIcon::Icon::range };
+    SectionIcon expScHpfIcon      { SectionIcon::Icon::scHpf };
+    SectionIcon expScLpfIcon      { SectionIcon::Icon::scLpf };
+    SectionIcon compMixIcon       { SectionIcon::Icon::mix };
+    SectionIcon compThresholdIcon { SectionIcon::Icon::threshold };
+    SectionIcon compRatioIcon     { SectionIcon::Icon::ratio };
+    SectionIcon compReleaseIcon   { SectionIcon::Icon::release };
+    SectionIcon compGainIcon      { SectionIcon::Icon::gain };
+    SectionIcon compScHpfIcon     { SectionIcon::Icon::scHpf };
+    SectionIcon compScLpfIcon     { SectionIcon::Icon::scLpf };
 
     // the oversampling switch: a ToggleButton that paints its own plate
     // (lit amber + LED when on, dark + dim LED when off) - the default

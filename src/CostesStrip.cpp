@@ -1169,6 +1169,11 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     expOutPower  = 0.0f;
     compOutPower = 0.0f;
 
+    // v2.67.0: the honest IN one-poles start from silence like the OUT
+    // states - a fresh strip paints empty IN ladders
+    expInPower  = 0.0f;
+    compInPower = 0.0f;
+
     for (auto& section : compSidechain)
         section.reset();
 
@@ -1570,7 +1575,7 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                             && expRangeDb > 0.0f
                             && expMixNorm > 0.0f;
     const float expAttackCoef  = 1.0f - std::exp (-1.0f
-        / ((expFastAttack->load() > 0.5f ? 0.001f : 0.030f)
+        / ((expFastAttack->load() > 0.5f ? 0.0003f : 0.003f)
            * (float) currentSampleRate));
     const float expReleaseCoef = 1.0f - std::exp (-1.0f
         / (juce::jmax (0.1f, expRelease->load()) * (float) currentSampleRate));
@@ -1729,12 +1734,20 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             // v2.66.0: the detector (and the LISTEN monitor) hear the
             // stage's own sidechain - the signal through the SC HPF and
             // SC LPF when their knobs sit off their rest positions, the
-            // raw sample otherwise
+            // raw sample otherwise. v2.67.0 (Clement's remark): the IN
+            // ladder no longer shares the detector's view - it reads
+            // the TRUE full-band input in its own one-pole below, so a
+            // corner that shaves the detector's band can never make an
+            // IN ladder read below the OUT ladder beside it
             float rectified = 0.0f;
+            float rawIn = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
             {
-                float sc = channels[ch][i];
+                const float rawSample = channels[ch][i];
+                rawIn = juce::jmax (rawIn, std::abs (rawSample));
+
+                float sc = rawSample;
 
                 if (expScHpfOn)
                     sc = expSidechainHp[ch].processSample (sc);
@@ -1749,6 +1762,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             }
 
             expDetectorPower += (rectified * rectified - expDetectorPower) * detectorCoef;
+
+            // v2.67.0: the IN ladder's own honest level - the raw
+            // full-band input the stage receives, whatever the
+            // sidechain corners do to the detector's copy
+            expInPower += (rawIn * rawIn - expInPower) * detectorCoef;
 
             if (expActive)
             {
@@ -1799,12 +1817,18 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             // the same sidechain discipline for the compressor (its SC
             // HPF since v2.64, its SC LPF since v2.66.0) - and its
             // LISTEN monitor wins over the expander's when both plates
-            // are lit: the later stage, the last one you reached for
+            // are lit: the later stage, the last one you reached for.
+            // v2.67.0: the IN ladder reads the true full-band input
+            // here too, in its own one-pole below
             float rectified = 0.0f;
+            float rawIn = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
             {
-                float sc = channels[ch][i];
+                const float rawSample = channels[ch][i];
+                rawIn = juce::jmax (rawIn, std::abs (rawSample));
+
+                float sc = rawSample;
 
                 if (compScHpfOn)
                     sc = compSidechain[ch].processSample (sc);
@@ -1819,6 +1843,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             }
 
             compDetectorPower += (rectified * rectified - compDetectorPower) * detectorCoef;
+
+            // v2.67.0: the same honest IN level for the compressor -
+            // the full-band sample entering the stage (the expander's
+            // output), not the detector's filtered band
+            compInPower += (rawIn * rawIn - compInPower) * detectorCoef;
 
             if (compActive)
             {
@@ -1879,19 +1908,20 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
     // v2.65.0: the meters' per-block snapshot, stored after the loop so
     // the ladders read the state at the block's last sample. The IN
-    // meters speak the detectors' RMS level (the floor parks an empty
-    // ladder), the GR meters speak the gain each half applies right
-    // now - 0 by construction when the half is parked. v2.66.0: the OUT
-    // meters speak the level each half leaves behind
+    // meters speak the TRUE input level (v2.67.0, Clement's remark: the
+    // full-band RMS, not the detector's filtered view - the floor parks
+    // an empty ladder), the GR meters speak the gain each half applies
+    // right now - 0 by construction when the half is parked. v2.66.0:
+    // the OUT meters speak the level each half leaves behind
     expMeterInDb.store (10.0f * std::log10 (
-                           juce::jmax (expDetectorPower, detectorFloorPower)),
+                           juce::jmax (expInPower, detectorFloorPower)),
                        std::memory_order_relaxed);
     expMeterGrDb.store (expGainDb, std::memory_order_relaxed);
     expMeterOutDb.store (10.0f * std::log10 (
                             juce::jmax (expOutPower, detectorFloorPower)),
                         std::memory_order_relaxed);
     compMeterInDb.store (10.0f * std::log10 (
-                            juce::jmax (compDetectorPower, detectorFloorPower)),
+                            juce::jmax (compInPower, detectorFloorPower)),
                         std::memory_order_relaxed);
     compMeterGrDb.store (compGainDb, std::memory_order_relaxed);
     compMeterOutDb.store (10.0f * std::log10 (
@@ -2195,6 +2225,24 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (expIcon);
     addAndMakeVisible (compIcon);
 
+    // v2.67.0 (Clement's remark): the fourteen dynamics knob glyphs -
+    // every knob of both stages carries its own shape, the same v2.60
+    // language as the row-1 columns
+    addAndMakeVisible (expMixIcon);
+    addAndMakeVisible (expThresholdIcon);
+    addAndMakeVisible (expRatioIcon);
+    addAndMakeVisible (expReleaseIcon);
+    addAndMakeVisible (expRangeIcon);
+    addAndMakeVisible (expScHpfIcon);
+    addAndMakeVisible (expScLpfIcon);
+    addAndMakeVisible (compMixIcon);
+    addAndMakeVisible (compThresholdIcon);
+    addAndMakeVisible (compRatioIcon);
+    addAndMakeVisible (compReleaseIcon);
+    addAndMakeVisible (compGainIcon);
+    addAndMakeVisible (compScHpfIcon);
+    addAndMakeVisible (compScLpfIcon);
+
     // the two section captions, engraved like the EQ header's own
     expSectionLabel.setText ("EXPANDER", juce::dontSendNotification);
     expSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
@@ -2362,8 +2410,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // expander's row then the compressor's, each with its own 200 px -
     // thirteen cramped columns became six and seven wide ones, and
     // each stage hosts its IN ladder at the left (beside the THRESH
-    // knob) and its GR ladder at the right (the section's payoff)
-    setSize (1040, 800);
+    // knob) and its GR ladder at the right (the section's payoff).
+    // v2.67.0 (Clement's remark): the panel adopts the shell's own
+    // minimum window size - 860 x 911, the footprint of the consoles
+    // it hosts
+    setSize (860, 911);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2570,16 +2621,14 @@ void CostesStripEditor::resized()
     area.removeFromTop (44);   // the name plate and the section captions
     area.removeFromBottom (6);
 
-    // row 1 (v2.61.0): the original five-knob band keeps its own 150 px,
-    // so every column sits exactly where it sat on the v2.60 panel.
-    // v2.64.0: the EQ takes its own fixed 200 px (a breath, its header
-    // and the band columns) and the dynamics owned what was left.
-    // v2.65.0: the dynamics split in two - the expander's stage then
-    // the compressor's, 200 px each, so the two halves breathe like
-    // the J's own silkscreened sections
-    auto row1 = area.removeFromTop (150);
-    auto eqArea = area.removeFromTop (200);
-    auto expArea = area.removeFromTop (200);
+    // v2.67.0 (Clement's remark): the panel adopts the shell's own
+    // minimum window size - 860 x 911 - so the strip reads the same
+    // footprint on the desk as the consoles it hosts. The two
+    // dynamics stages breathe a little taller for it, the row-1 band
+    // and the EQ a touch too
+    auto row1    = area.removeFromTop (165);
+    auto eqArea  = area.removeFromTop (220);
+    auto expArea = area.removeFromTop (238);
     auto compArea = area;
 
     // five equal columns: knob above, caption below; the cut columns also
@@ -2793,14 +2842,18 @@ void CostesStripEditor::resized()
     // the vertical block (v2.66.0, remark A): the FAST/SLOW attack
     // plate on top, the SC HPF and SC LPF selectors in the middle,
     // the LISTEN push at the bottom - one column of plates and
-    // sliders, a caption under every control
+    // sliders, a caption under every control. v2.67.0: the sidechain
+    // selectors carry their own glyphs beside their captions, the
+    // same v2.60 language as every other knob
     auto layoutVerticalBlock = [] (juce::Rectangle<int> block,
                                       juce::ToggleButton& attackButton,
                                       juce::Label& attackLabel,
                                       CostesSlider& hpfSlider,
                                       juce::Label& hpfLabel,
+                                      SectionIcon& hpfIcon,
                                       CostesSlider& lpfSlider,
                                       juce::Label& lpfLabel,
+                                      SectionIcon& lpfIcon,
                                       juce::ToggleButton& listenButton,
                                       juce::Label& listenLabel)
     {
@@ -2812,9 +2865,19 @@ void CostesStripEditor::resized()
             block.removeFromTop (36).withSizeKeepingCentre (76, 36));
         hpfLabel.setBounds (block.removeFromTop (14));
 
+        const int hpfTextWidth = hpfLabel.getFont()
+                                     .getStringWidth (hpfLabel.getText());
+        hpfIcon.setBounds (hpfLabel.getBounds().getCentreX() - hpfTextWidth / 2 - 21,
+                           hpfLabel.getBounds().getY() + 1, 16, 16);
+
         lpfSlider.setBounds (
             block.removeFromTop (36).withSizeKeepingCentre (76, 36));
         lpfLabel.setBounds (block.removeFromTop (14));
+
+        const int lpfTextWidth = lpfLabel.getFont()
+                                     .getStringWidth (lpfLabel.getText());
+        lpfIcon.setBounds (lpfLabel.getBounds().getCentreX() - lpfTextWidth / 2 - 21,
+                           lpfLabel.getBounds().getY() + 1, 16, 16);
 
         listenButton.setBounds (
             block.removeFromTop (22).withSizeKeepingCentre (72, 22));
@@ -2846,26 +2909,43 @@ void CostesStripEditor::resized()
         {
             &expMixLabel, &expThresholdLabel, &expRatioLabel, &expReleaseLabel
         };
+        SectionIcon* expKnobIcons[4] =
+        {
+            &expMixIcon, &expThresholdIcon, &expRatioIcon, &expReleaseIcon
+        };
 
         for (int i = 0; i < 4; ++i)
         {
             auto column = expColumns.removeFromLeft (expColumnWidth).reduced (4, 2);
 
             // the caption sits at the bottom of the column, the knob
-            // above it - the same geometry as the row-1 columns
+            // above it - the same geometry as the row-1 columns, glyph
+            // and all (v2.67.0)
             auto captionBounds = column.removeFromBottom (18);
             expCaptions[i]->setBounds (captionBounds);
+
+            const int textWidth = expCaptions[i]->getFont()
+                                      .getStringWidth (expCaptions[i]->getText());
+            expKnobIcons[i]->setBounds (
+                captionBounds.getCentreX() - textWidth / 2 - 21,
+                captionBounds.getY() + 1, 16, 16);
+
             expKnobs[i]->setBounds (column);
         }
 
         layoutVerticalBlock (blockColumn,
                             expFastAttackButton, expAttackLabel,
-                            expScHpfSlider, expScHpfLabel,
-                            expScLpfSlider, expScLpfLabel,
+                            expScHpfSlider, expScHpfLabel, expScHpfIcon,
+                            expScLpfSlider, expScLpfLabel, expScLpfIcon,
                             expListenButton, expListenLabel);
 
         auto rangeCaption = rangeColumn.removeFromBottom (18);
         expRangeLabel.setBounds (rangeCaption);
+        expRangeIcon.setBounds (rangeCaption.getCentreX()
+                                    - expRangeLabel.getFont()
+                                          .getStringWidth (expRangeLabel.getText()) / 2
+                                    - 21,
+                                rangeCaption.getY() + 1, 16, 16);
         expRangeKnob.setBounds (rangeColumn);
     }
 
@@ -2893,6 +2973,10 @@ void CostesStripEditor::resized()
         {
             &compMixLabel, &compThresholdLabel, &compRatioLabel, &compReleaseLabel
         };
+        SectionIcon* compKnobIcons[4] =
+        {
+            &compMixIcon, &compThresholdIcon, &compRatioIcon, &compReleaseIcon
+        };
 
         for (int i = 0; i < 4; ++i)
         {
@@ -2900,17 +2984,29 @@ void CostesStripEditor::resized()
 
             auto captionBounds = column.removeFromBottom (18);
             compCaptions[i]->setBounds (captionBounds);
+
+            const int textWidth = compCaptions[i]->getFont()
+                                      .getStringWidth (compCaptions[i]->getText());
+            compKnobIcons[i]->setBounds (
+                captionBounds.getCentreX() - textWidth / 2 - 21,
+                captionBounds.getY() + 1, 16, 16);
+
             compKnobs[i]->setBounds (column);
         }
 
         layoutVerticalBlock (blockColumn,
                             compFastAttackButton, compAttackLabel,
-                            compHpfSlider, compHpfLabel,
-                            compScLpfSlider, compScLpfLabel,
+                            compHpfSlider, compHpfLabel, compScHpfIcon,
+                            compScLpfSlider, compScLpfLabel, compScLpfIcon,
                             compListenButton, compListenLabel);
 
         auto gainCaption = gainColumn.removeFromBottom (18);
         compGainLabel.setBounds (gainCaption);
+        compGainIcon.setBounds (gainCaption.getCentreX()
+                                    - compGainLabel.getFont()
+                                          .getStringWidth (compGainLabel.getText()) / 2
+                                    - 21,
+                                gainCaption.getY() + 1, 16, 16);
         compGainKnob.setBounds (gainColumn);
     }
 }
@@ -2965,6 +3061,47 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     else
         reading = expander ? owner.getExpGrDb() : owner.getCompGrDb();
 
+    // v2.67.0 (Clement's remark): the peak hold - the ladder remembers
+    // the reading's own extreme (the loudest level on an IN or OUT
+    // ladder, the deepest reduction on a GR ladder) for 3 s, then
+    // glides back towards the live reading at 20 dB/s. The editor
+    // repaints the ladders at 30 Hz, so the paint itself advances the
+    // state; a degenerate resize returns above and never gets here
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = (holdLastMs > 0.0)
+            ? juce::jmin (0.2, (nowMs - holdLastMs) * 0.001) : 0.0;
+
+        holdLastMs = nowMs;
+
+        const bool newPeak = (mode == Mode::gainReduction)
+            ? (reading <= holdReading) : (reading >= holdReading);
+
+        if (! holdSet)
+        {
+            holdReading = reading;
+            holdStampMs = nowMs;
+            holdSet = true;
+        }
+        else if (newPeak)
+        {
+            holdReading = reading;
+            holdStampMs = nowMs;
+        }
+        else if (nowMs - holdStampMs > 3000.0)
+        {
+            const float glide = 20.0f * (float) dt;
+
+            if (mode == Mode::gainReduction)
+                holdReading = juce::jmin (reading, holdReading + glide);
+            else
+                holdReading = juce::jmax (reading, holdReading - glide);
+
+            if (holdReading == reading)
+                holdStampMs = nowMs;
+        }
+    }
+
     const float span = highDb - lowDb;
     const float step = span / (float) leds;
     const float seg = height / (float) leds;
@@ -3018,6 +3155,35 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
             g.setColour (juce::Colour (0xff17150f));
             g.fillRoundedRectangle (led, 1.5f);
         }
+    }
+
+    // the peak-hold marker (v2.67.0): a cream hairline across the
+    // ladder at the held extreme. The GR ladder's marker rides the
+    // same two-half geometry as its LEDs - it bends at the hinge
+    {
+        float markerY = top;
+
+        if (mode == Mode::gainReduction)
+        {
+            const float v = juce::jlimit (0.0f, spanTop + spanBottom,
+                                          -holdReading);
+            const float topHalfPx = (float) half * seg;
+
+            markerY = (v <= spanTop)
+                ? top + v / spanTop * topHalfPx
+                : top + topHalfPx + (v - spanTop) / spanBottom
+                      * (height - topHalfPx);
+        }
+        else
+        {
+            const float v = juce::jlimit (lowDb, highDb, holdReading);
+            markerY = bottom - (v - lowDb) / span * height;
+        }
+
+        markerY = juce::jlimit (top, bottom - 1.0f, markerY);
+
+        g.setColour (knobPointer);
+        g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 1.4f);
     }
 
     // the dB scale, engraved beside the ladder: one mark every 20 dB
@@ -3409,6 +3575,92 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
             p.quadraticTo (X (11.5f), Y (5.0f), X (14.0f), Y (4.2f));
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
+
+        // MIX (v2.67.0, Clement's remark): two strands - dry and wet -
+        // converging into the one line the knob fades between
+        case Icon::mix:
+            p.startNewSubPath (X (2.0f), Y (4.5f));
+            p.lineTo (X (8.0f), Y (8.0f));
+            p.startNewSubPath (X (2.0f), Y (11.5f));
+            p.lineTo (X (8.0f), Y (8.0f));
+            p.lineTo (X (14.0f), Y (8.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // THRESHOLD (v2.67.0): the step - the level a signal must climb
+        // over before the curve answers
+        case Icon::threshold:
+            p.startNewSubPath (X (2.5f), Y (12.6f));
+            p.lineTo (X (7.0f), Y (12.6f));
+            p.lineTo (X (7.0f), Y (4.2f));
+            p.lineTo (X (13.5f), Y (4.2f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // RATIO (v2.67.0): the wedge - the unity slope and the steeper
+        // one, sharing their origin
+        case Icon::ratio:
+            p.startNewSubPath (X (2.0f), Y (13.2f));
+            p.lineTo (X (13.0f), Y (3.8f));
+            p.startNewSubPath (X (2.0f), Y (13.2f));
+            p.lineTo (X (7.4f), Y (3.8f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // RELEASE (v2.67.0): the recovery - a steep fall that settles
+        // flat, the one-pole closing on the tail
+        case Icon::release:
+            p.startNewSubPath (X (2.4f), Y (2.8f));
+            p.quadraticTo (X (4.8f), Y (10.5f), X (13.4f), Y (12.6f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // RANGE (v2.67.0): the span - a double-headed vertical arrow,
+        // floor to ceiling
+        case Icon::range:
+            p.startNewSubPath (X (8.0f), Y (4.4f));
+            p.lineTo (X (8.0f), Y (11.6f));
+            p.startNewSubPath (X (5.9f), Y (6.6f));
+            p.lineTo (X (8.0f), Y (4.2f));
+            p.lineTo (X (10.1f), Y (6.6f));
+            p.startNewSubPath (X (5.9f), Y (9.4f));
+            p.lineTo (X (8.0f), Y (11.8f));
+            p.lineTo (X (10.1f), Y (9.4f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // GAIN (v2.67.0): the make-up - a single upward arrow
+        case Icon::gain:
+            p.startNewSubPath (X (8.0f), Y (12.8f));
+            p.lineTo (X (8.0f), Y (3.2f));
+            p.startNewSubPath (X (5.6f), Y (5.8f));
+            p.lineTo (X (8.0f), Y (3.2f));
+            p.lineTo (X (10.4f), Y (5.8f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // SC HPF (v2.67.0): the high-pass knee with its corner marked -
+        // the low cut's own curve, plus the vertical tick calling out
+        // the tunable corner
+        case Icon::scHpf:
+            p.startNewSubPath (X (2.0f), Y (13.0f));
+            p.lineTo (X (6.0f), Y (13.0f));
+            p.quadraticTo (X (11.0f), Y (13.0f), X (14.0f), Y (3.0f));
+            p.startNewSubPath (X (9.4f), Y (4.0f));
+            p.lineTo (X (9.4f), Y (13.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // SC LPF (v2.67.0): the mirrored low-pass knee, the same
+        // corner tick
+        case Icon::scLpf:
+            p.startNewSubPath (X (2.0f), Y (3.0f));
+            p.lineTo (X (6.0f), Y (3.0f));
+            p.quadraticTo (X (11.0f), Y (3.0f), X (14.0f), Y (13.0f));
+            p.startNewSubPath (X (9.4f), Y (3.0f));
+            p.lineTo (X (9.4f), Y (12.0f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
     }
 }
 
@@ -3492,4 +3744,65 @@ void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,
 
     g.setColour (discBase.getPerceivedBrightness() > 0.55f ? engraving : knobPointer);
     g.drawLine (juce::Line<float> (centre, tip), radius * 0.09f);
+
+    // the min/max skirt (v2.67.0, Clement's remark): the range's two
+    // end values printed at the arc's own ends, the SSL silkscreen
+    // language - the knob's whole span readable before it is touched.
+    // The strings come from the slider's own value formatting, trimmed
+    // to bare numbers ("+10.0 dB" -> "+10", "12.0:1" -> "12:1"), and
+    // only the full-size knobs carry them - the little sidechain
+    // selectors have no skirt to spare
+    if (radius >= 18.0f)
+    {
+        const auto skirtText = [] (juce::Slider& s, double value)
+        {
+            juce::String t = s.getTextFromValue (value);
+
+            // the skirt speaks bare numbers: drop the unit word
+            if (const int space = t.indexOf (" "); space > 0)
+                t = t.substring (0, space);
+
+            // a ratio carries its ":1" suffix - trim the number
+            // in front of it
+            juce::String suffix;
+
+            if (const int colon = t.indexOf (":"); colon > 0)
+            {
+                suffix = t.substring (colon);
+                t = t.substring (0, colon);
+            }
+
+            // trim the decimal's trailing zeros ("24.00" -> "24",
+            // "-60.0" -> "-60", "0.05" keeps its own digits)
+            if (t.contains ("."))
+            {
+                while (t.endsWith ("0"))
+                    t = t.dropLastCharacters (1);
+
+                if (t.endsWith ("."))
+                    t = t.dropLastCharacters (1);
+            }
+
+            return t + suffix;
+        };
+
+        g.setColour (engravingDim);
+        g.setFont (juce::Font (juce::FontOptions (7.5f)));
+
+        g.drawText (skirtText (slider, slider.getMinimum()),
+                    juce::Rectangle<float> (bounds.getX(),
+                                            bounds.getBottom() - 11.0f,
+                                            (centre.x - radius * 0.55f)
+                                                - bounds.getX(),
+                                            11.0f),
+                    juce::Justification::bottomLeft, false);
+
+        g.drawText (skirtText (slider, slider.getMaximum()),
+                    juce::Rectangle<float> (centre.x + radius * 0.55f,
+                                            bounds.getBottom() - 11.0f,
+                                            bounds.getRight()
+                                                - (centre.x + radius * 0.55f),
+                                            11.0f),
+                    juce::Justification::bottomRight, false);
+    }
 }

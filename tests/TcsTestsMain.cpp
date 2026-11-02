@@ -153,6 +153,7 @@
 #include "../src/PluginProcessor.h"
 #include "../src/PluginEditor.h"   // v2.19: SpectrumPanel readout statics
 #include "../src/CostesStrip.h"    // v2.55.0: the internal strip's API
+#include "../src/GRForwarder.h"    // v2.67.0: the Studio One GR forwarding
 
 // The plugin entry point is defined in PluginProcessor.cpp but not declared
 // in any header (the wrapper targets pick it up from
@@ -5166,6 +5167,11 @@ void testCostesStripSectionIcons()
     // and sitting inside the panel after the layout pass
     CostesStripEditor editor (stripProc);
 
+    // v2.67.0 (Clement's remark): the panel adopts the shell's own
+    // minimum window size - the footprint of the consoles it hosts
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 911,
+                "the strip panel opens at the shell's own minimum size (860 x 911)");
+
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
     {
@@ -5241,6 +5247,40 @@ void testCostesStripSectionIcons()
                     "every dynamics glyph is laid out inside the panel");
     }
 
+    // the fourteen dynamics knob glyphs (v2.67.0, Clement's remark):
+    // every knob of both stages carries its own shape beside its
+    // caption - MIX, THRESHOLD, RATIO, RELEASE, RANGE on the expander
+    // (GAIN on the compressor) and the sidechain pair - the same
+    // v2.60 language as the row-1 columns
+    const auto knobIcons = editor.getDynKnobIcons();
+    const CostesStripEditor::SectionIcon::Icon expectedKnobTypes[14] =
+    {
+        CostesStripEditor::SectionIcon::Icon::mix,
+        CostesStripEditor::SectionIcon::Icon::threshold,
+        CostesStripEditor::SectionIcon::Icon::ratio,
+        CostesStripEditor::SectionIcon::Icon::release,
+        CostesStripEditor::SectionIcon::Icon::range,
+        CostesStripEditor::SectionIcon::Icon::scHpf,
+        CostesStripEditor::SectionIcon::Icon::scLpf,
+        CostesStripEditor::SectionIcon::Icon::mix,
+        CostesStripEditor::SectionIcon::Icon::threshold,
+        CostesStripEditor::SectionIcon::Icon::ratio,
+        CostesStripEditor::SectionIcon::Icon::release,
+        CostesStripEditor::SectionIcon::Icon::gain,
+        CostesStripEditor::SectionIcon::Icon::scHpf,
+        CostesStripEditor::SectionIcon::Icon::scLpf
+    };
+
+    for (int i = 0; i < 14; ++i)
+    {
+        expectTrue (knobIcons[(size_t) i] != nullptr
+                        && knobIcons[(size_t) i]->type == expectedKnobTypes[i],
+                    "every dynamics knob carries its own glyph");
+        expectTrue (knobIcons[(size_t) i] != nullptr && knobIcons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (knobIcons[(size_t) i]->getBounds()),
+                    "every dynamics knob glyph is laid out inside the panel");
+    }
+
     // the fourteen dynamics sliders (v2.64.0, the sidechain pair grown
     // to four in v2.66.0): every knob and the sidechain selectors laid
     // out and visible inside the panel after the pass - the stable
@@ -5291,7 +5331,7 @@ void testCostesStripSectionIcons()
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 1040, 800 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 911 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -5313,6 +5353,11 @@ void testCostesStripSectionIcons()
             for (auto* icon : dynIcons)
                 icon->paint (g);
 
+            // the dynamics knob glyphs paint against whatever bounds
+            // the layout hands them too (v2.67.0)
+            for (auto* icon : editor.getDynKnobIcons())
+                icon->paint (g);
+
             // the meters paint against degenerate bounds too - an
             // empty ladder, never a division
             for (auto* meter : meters)
@@ -5322,7 +5367,29 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (1040, 800);
+    // the peak hold (v2.67.0, Clement's remark): every ladder takes
+    // its reading's own extreme from the first paint and holds it - a
+    // fresh strip holds silence (the IN and OUT ladders) and unity
+    // (the GR ladders). The degenerate sizes above paint nothing
+    // (the early return), so the first real paint here arms the hold
+    {
+        juce::Image canvas (juce::Image::ARGB, 860, 911, true);
+        juce::Graphics g (canvas);
+
+        for (int i = 0; i < 6; ++i)
+        {
+            meters[(size_t) i]->paint (g);
+
+            const float expected = (i % 3 == 2) ? 0.0f : -120.0f;
+
+            expectTrue (meters[(size_t) i]->holdSet,
+                        "every ladder takes its first peak from its first paint");
+            expectTrue (std::abs (meters[(size_t) i]->getPeakHoldDb() - expected) < 0.01f,
+                        "a fresh strip holds silence on the IN and OUT ladders, unity on the GR ladders");
+        }
+    }
+
+    editor.setSize (860, 911);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5823,6 +5890,49 @@ void testCostesStripDynamics()
                 "a 100 Hz SC LPF lifts the tone out of the detector - the gate floors at its RANGE");
     setParam ("expScLpf", 24000.0f);
 
+    // ---- the expander's FAST ATTACK plate (v2.67.0, Clement's
+    // spec): 120 blocks of silence park the detector at its floor and
+    // close the gate at its RANGE, then a single 480-sample tone block
+    // lands. The block's RMS reads how far the gate re-opened inside
+    // its own 10 ms: the sim says -0.44 dB with the 0.3 ms fast attack
+    // (the gate snaps open almost before the tone is through) and
+    // -6.15 dB with the 3 ms slow one ----
+    setParam ("expThreshold", -35.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    setParam ("expRelease", 0.1f);
+    setParam ("expMix", 100.0f);
+
+    auto expOnsetRmsDb = [&] (bool fastAttack) -> double
+    {
+        setParam ("expFastAttack", fastAttack);
+
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 120; ++i)
+            proc.processBlock (silence, noMidi);
+
+        SineSource src (1000.0, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 480);
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double energy = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            energy += (double) block.getSample (0, i) * block.getSample (0, i);
+
+        return juce::Decibels::gainToDecibels (std::sqrt (energy / 480.0)
+                                              / (0.25 / std::sqrt (2.0)));
+    };
+
+    expectNear (expOnsetRmsDb (true), -0.4, 1.2,
+                "the expander's FAST attack (0.3 ms) re-opens the gate almost inside the first 10 ms (the sim says -0.44 dB)");
+    expectNear (expOnsetRmsDb (false), -6.2, 1.2,
+                "the expander's SLOW attack (3 ms) lets the tone through half-closed (the sim says -6.15 dB)");
+    setParam ("expRelease", 0.3f);
+
     // back to the parked expander: range 0 is the true bypass
     setParam ("expThreshold", -50.0f);
     setParam ("expRange", 0.0f);
@@ -5933,6 +6043,103 @@ void testCostesStripDynamics()
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.5,
                 "a 100 Hz SC LPF lifts the tone out of the compressor's detector - it opens");
     setParam ("compScLpf", 24000.0f);
+
+    // ---- the honest IN ladders (v2.67.0, Clement's remark): the
+    // sidechain corners shape the detector and its GR curve, never
+    // the IN meter - it reads the TRUE full-band input in its own
+    // 10 ms one-pole. A corner that lifts the tone out of the
+    // detector (the old detector-view IN reading sat ~48 dB down)
+    // leaves the IN ladder at the tone's own level ----
+    {
+        setParam ("expScHpf", 1600.0f);
+
+        juce::AudioBuffer<float> tone (2, 480);
+        SineSource (100.0, 48000.0, 0.25f).fill (tone);
+
+        for (int i = 0; i < 10; ++i)
+            proc.processBlock (tone, noMidi);
+
+        expectNear (strip->getExpInDb(), -15.05, 0.6,
+                    "the expander's IN ladder reads the true full-band input - the SC corner never touches it");
+        setParam ("expScHpf", 16.0f);
+
+        setParam ("compScLpf", 100.0f);
+
+        SineSource (1000.0, 48000.0, 0.25f).fill (tone);
+
+        for (int i = 0; i < 10; ++i)
+            proc.processBlock (tone, noMidi);
+
+        expectNear (strip->getCompInDb(), -15.05, 0.6,
+                    "the compressor's IN ladder reads the true full-band input too");
+        setParam ("compScLpf", 24000.0f);
+    }
+
+    // ---- the dry/wet mix is a linear, phase-coherent interpolation
+    // (v2.67.0, Clement's remark): dry and wet are the SAME signal in
+    // phase, so the blend is plain gain-domain arithmetic - out = dry
+    // * (1 - m) + wet * m - and with the wet untouched (the gate open
+    // above its threshold, the compressor below its own) the blend
+    // collapses to exactly 1 at ANY mix position. The proof rides the
+    // harness's own lock-in: the settled amplitude at mix 50 reads
+    // against the same tone at mix 100, and an equal-power law would
+    // sit a full +3.01 dB up instead of the 0.00 dB the linear blend
+    // pins ----
+    {
+        // the expander's half: the loud tone holds the gate open, the
+        // compressor's plate is off so only the expander's blend runs
+        setParam ("compOn", false);
+        setParam ("expThreshold", -35.0f);
+        setParam ("expRange", 40.0f);
+        setParam ("expRatio", 12.0f);
+        setParam ("expMix", 100.0f);
+
+        const double wetRef1k = measureAmplitude (1000.0, 1000.0, 0.25);
+
+        setParam ("expMix", 50.0f);
+
+        expectNear (juce::Decibels::gainToDecibels (
+                        measureAmplitude (1000.0, 1000.0, 0.25) / wetRef1k),
+                    0.0, 0.01,
+                    "the expander's 50 % dry/wet mix leaves the level mathematically constant with the gate open - no equal-power bump");
+
+        // the compressor's half: a quiet tone sits below the
+        // threshold, the reduction is zero, and the same arithmetic
+        // holds on the compressor's own blend
+        setParam ("expRange", 0.0f);
+        setParam ("expMix", 100.0f);
+
+        setParam ("compOn", true);
+        setParam ("compThreshold", -30.0f);
+        setParam ("compRatio", 2.0f);
+        setParam ("compMix", 100.0f);
+
+        const double quietRef1k = measureAmplitude (1000.0, 1000.0, 0.005);
+
+        setParam ("compMix", 50.0f);
+
+        expectNear (juce::Decibels::gainToDecibels (
+                        measureAmplitude (1000.0, 1000.0, 0.005) / quietRef1k),
+                    0.0, 0.01,
+                    "the compressor's 50 % dry/wet mix leaves the level mathematically constant below its threshold - the phase-coherent level never moves");
+    }
+
+    // ---- the strip's own GR reaches Studio One (v2.67.0, Clement's
+    // remark): the forwarder hands the host the console's value PLUS
+    // the strip compressor's per-block snapshot - with no console
+    // hosted the strip's own value is the whole answer, and a reset
+    // to 0 never lets a stale reading leak across a voice swap ----
+    {
+        GRForwarder forwarder;
+        expectNear (forwarder.pullGainReductionDb(), 0.0, 0.0001,
+                    "a fresh forwarder reports silence (the PreSonus contract)");
+        forwarder.reportStripGainReductionDb (-5.5f);
+        expectNear (forwarder.pullGainReductionDb(), -5.5, 0.0001,
+                    "the strip compressor's gain reduction is forwarded to the host");
+        forwarder.reportStripGainReductionDb (0.0f);
+        expectNear (forwarder.pullGainReductionDb(), 0.0, 0.0001,
+                    "the report resets with the voice - a stale reduction never leaks");
+    }
 
     // ---- the LISTEN plates (v2.66.0, Clement's remark A): while a
     // plate is lit the strip's voice becomes its own sidechain - the

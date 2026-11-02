@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.66.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.67.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,41 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.67.0** — *The stages read like the hardware they imitate.*
+  Following Clement's remarks on the v2.66 layout:
+  - **Honest IN ladders.** The IN meters now read the TRUE full-band
+    level each stage receives, in their own 10 ms one-pole - the
+    sidechain corners still shape the detector (and the GR curve),
+    but an IN ladder can no longer read below its OUT twin just
+    because a corner shaved the detector's band.
+  - **Peak hold.** Every ladder (IN, OUT and GR) holds its extreme
+    - the loudest level, the deepest reduction - for 3 s, then
+    glides back to the live reading at 20 dB/s. The marker is a
+    cream hairline across the ladder, bending at the hinge on the
+    two-half GR scale.
+  - **The knob skirt.** Every full-size knob prints its range's end
+    values at the arc's own ends, SSL silkscreen style - bare
+    numbers trimmed from the knob's own value formatting ("+10",
+    "12:1", "16 Hz" reads "16"). The little sidechain selectors
+    keep their clean skirts.
+  - **A glyph on every dynamics knob.** MIX, THRESHOLD, RATIO,
+    RELEASE, RANGE, GAIN and the sidechain pair each carry their
+    own 16 px vector glyph beside their caption - the same language
+    as the row-1 knobs, so both stages identify at a glance.
+  - **The strip compressor's GR reaches Studio One.** The shell
+    already forwarded the hosted console's gain reduction through
+    PreSonus' IGainReductionInfo extension; its own compressor now
+    joins it - the strip reports its per-block GR, summed with the
+    console's per the PreSonus contract, reset to 0 the moment
+    another voice takes the slot.
+  - **The expander's attack plate speaks the J.** FAST is now
+    0.3 ms and SLOW 3 ms (the compressor keeps its own 3 ms / 30 ms
+    pair - the gate has to beat it to the punch).
+  - **The panel adopts the shell's own minimum size**, 860 x 911 -
+    the footprint of the consoles it hosts, so switching between
+    the strip and a console keeps the desk stable. The taller stages
+    breathe for it.
 
 - **2.66.0** — *The two dynamics stages speak the same language.*
   Following Clement's remarks A to F on the v2.65 layout:

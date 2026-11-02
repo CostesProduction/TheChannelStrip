@@ -48,9 +48,18 @@ public:
     // destructor). Idempotent.
     void disconnect();
 
+    // v2.67.0 (Clement's remark): the shell's own compressor joins the
+    // forwarding. The processor calls this once per processed block with
+    // the Costes strip's current GR (0.0 whenever the strip is not the
+    // hosted voice), and pullGainReductionDb() reports the console's GR
+    // PLUS this value - the PreSonus contract asks for the sum when
+    // several stages reduce gain. The store is a relaxed atomic: the
+    // audio thread writes, the host's metering thread reads
+    void reportStripGainReductionDb (float grDb);
+
     // The value our own IGainReductionInfo hands to the host: the console's
-    // current GR, or 0.0 when nothing is connected. Called on the host's
-    // metering thread.
+    // current GR plus the strip compressor's (v2.67.0), or 0.0 when
+    // nothing is connected. Called on the host's metering thread.
     double pullGainReductionDb() const;
 
     // Hook for AudioProcessor::getVST3ClientExtensions(): the JUCE VST3
