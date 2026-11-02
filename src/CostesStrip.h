@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.62.0 (roadmap C2)
+// src/CostesStrip.h - v2.63.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
@@ -11,6 +11,14 @@
 // hosting path as the consoles, it inherits the click-free 50 ms crossfade,
 // the per-ident settings memory, the session save/restore and the parameter
 // relay without a single extra wire.
+//
+// v2.63.0 (Clement's remarks 1-2-4): the seven legal EQ widths are now
+// 0.4 / 0.7 / 1.0 / 1.5 / 2.0 / 3.0 / 4.0 octaves (still seven equal
+// knob positions; a stale v2.62 width snaps to the nearest legal one,
+// ties to the narrower), and a COMMAND-CLICK on any knob or slider
+// parks it back on its default - the same default as double-click,
+// now wired into the four linear selectors too. The HIGH CUT knob
+// joins the EQ's HF band on the pastel red cap.
 //
 // v2.62.0 (Clement's remarks 2-5): the mid bells' bandwidth sweeps now
 // run 0.1 to 3.0 octaves and hold exactly seven legal widths (0.1, 0.3,
@@ -307,6 +315,42 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    // v2.63.0 (Clement's remark 2): a command-click parks any knob or
+    // slider back on its DEFAULT - the same default double-click
+    // already used, now wired into the linear selectors too. Public so
+    // the offline test harness can name the type and drive the path
+    struct CostesSlider : public juce::Slider
+    {
+        // the value a command-click restores (setUpKnob/setUpSlope set
+        // it from the same constant as the double-click default)
+        float cmdClickDefault = 0.0f;
+
+        // with the command key down the click jumps straight to the
+        // default and the drag never starts; without it the normal JUCE
+        // drag runs untouched
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+
+        // what a command-click does - public so the offline harness can
+        // exercise the exact path the mouse takes
+        void applyCmdClickDefault();
+
+    private:
+        bool cmdDefaultActive = false;
+    };
+
+    // every knob and slider of the strip, in a stable order for the
+    // offline test harness: the five row-1 knobs, the two cut slopes,
+    // then the EQ's FREQ/GAIN knobs and width sweeps band by band
+    std::array<CostesSlider*, 17> getStripSliders()
+    {
+        return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
+                 &lowCutSlope, &highCutSlope,
+                 &eq1HzKnob, &eq1GainKnob, &eq2HzKnob, &eq2GainKnob, &eq2OctSlider,
+                 &eq3HzKnob, &eq3GainKnob, &eq3OctSlider, &eq4HzKnob, &eq4GainKnob };
+    }
+
     // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
     // to the left of its caption in the engraved silkscreen colour - the
     // five shapes read at a glance without any text. Public so the offline
@@ -345,8 +389,8 @@ public:
 private:
     CostesStrip& owner;
 
-    juce::Slider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
-    juce::Slider lowCutSlope, highCutSlope;
+    CostesSlider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
+    CostesSlider lowCutSlope, highCutSlope;
     juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
 
     SectionIcon trimIcon   { SectionIcon::Icon::trim };
@@ -367,11 +411,11 @@ private:
     // the EQ section (v2.61.0): eight knobs (a FREQ and a GAIN per band,
     // each with its own caption label), four band captions, two bandwidth
     // sliders (bands 2/3) and two bell/shelf plates (bands 1/4)
-    juce::Slider eq1HzKnob,   eq1GainKnob;
-    juce::Slider eq2HzKnob,   eq2GainKnob;
-    juce::Slider eq3HzKnob,   eq3GainKnob;
-    juce::Slider eq4HzKnob,   eq4GainKnob;
-    juce::Slider eq2OctSlider, eq3OctSlider;
+    CostesSlider eq1HzKnob,   eq1GainKnob;
+    CostesSlider eq2HzKnob,   eq2GainKnob;
+    CostesSlider eq3HzKnob,   eq3GainKnob;
+    CostesSlider eq4HzKnob,   eq4GainKnob;
+    CostesSlider eq2OctSlider, eq3OctSlider;
 
     juce::Label eq1HzLabel, eq1GainLabel;
     juce::Label eq2HzLabel, eq2GainLabel;

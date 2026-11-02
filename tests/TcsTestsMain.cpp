@@ -5256,6 +5256,83 @@ void testCostesStripSectionIcons()
     }
 }
 
+void testCostesStripKnobDefaultsAndCaps()
+{
+    beginTest ("v2.63.0: command-click defaults on every knob and slider, and the SSL cap colours");
+
+    CostesStrip stripProc;
+    stripProc.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editor (stripProc);
+
+    // every knob and slider of the strip, in the accessor's stable order:
+    // the five row-1 knobs, the two cut slopes, then the EQ's FREQ/GAIN
+    // knobs and width sweeps band by band
+    const auto sliders = editor.getStripSliders();
+
+    const char* paramIds[17] =
+    {
+        "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
+        "lowCutOrder", "highCutOrder",
+        "eq1Hz", "eq1Gain", "eq2Hz", "eq2Gain", "eq2Oct",
+        "eq3Hz", "eq3Gain", "eq3Oct", "eq4Hz", "eq4Gain"
+    };
+
+    const float expectedDefaults[17] =
+    {
+        0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
+        2.0f, 2.0f,
+        100.0f, 0.0f, 400.0f, 0.0f, 1.0f,
+        1600.0f, 0.0f, 1.0f, 7200.0f, 0.0f
+    };
+
+    // a legal non-default position per control, so the restore below is
+    // never a no-op
+    const float perturbed[17] =
+    {
+        3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
+        6.0f, 3.0f,
+        250.0f, -3.5f, 1000.0f, 4.0f, 3.0f,
+        2500.0f, -6.0f, 2.0f, 9000.0f, 7.5f
+    };
+
+    // ---- the command-click default (Clement's remark 2): every control
+    // knows its default, and the exact path the mouse takes - through
+    // the attachment, into the parameter tree - lands it there ----
+    for (int i = 0; i < 17; ++i)
+    {
+        expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
+                    "every knob and slider carries its command-click default");
+
+        stripProc.getApvts().getParameterAsValue (paramIds[i]).setValue (perturbed[i]);
+        sliders[(size_t) i]->applyCmdClickDefault();
+
+        expectNear (stripProc.getApvts().getRawParameterValue (paramIds[i])->load(),
+                    expectedDefaults[i], 0.0001,
+                    "a command-click restores the parameter's default through the attachment");
+    }
+
+    // ---- the cap colours (remark 4 + v2.62.0): the 13 rotary knobs
+    // carry their band's colour on the backgroundColourId - the row-1
+    // caps stay black EXCEPT the pastel red HIGH CUT (v2.63.0), the EQ
+    // bands speak the SSL colours. The four linear selectors draw no
+    // cap, so they are not in the loop ----
+    const int knobIndex[13] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16 };
+    const unsigned int knobCap[13] =
+    {
+        0xff23232au, 0xff23232au, 0xffd8a49cu, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au,
+        0xffaac6dfu, 0xffaac6dfu,
+        0xfff0e9d8u, 0xfff0e9d8u,
+        0xffd8a49cu, 0xffd8a49cu
+    };
+
+    for (int k = 0; k < 13; ++k)
+        expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
+                        == juce::Colour (knobCap[k]),
+                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white)");
+}
+
 void testCostesStripEq()
 {
     beginTest ("v2.61.0: the Costes strip's four-band SSL-style EQ - bells, shelves, octave bandwidths, the global plate");
@@ -5352,26 +5429,27 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), 6.0, 0.3,
                 "band 2 bell +6 dB reads +6 dB at its 400 Hz centre");
-    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.3f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 0.12, 0.4,
-                "a 0.3-octave band 2 bell reaches +0.12 dB one octave above its centre");
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.4f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 0.21, 0.4,
+                "a 0.4-octave band 2 bell reaches +0.21 dB one octave above its centre");
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 3.0, 0.4,
                 "a 2.0-octave band 2 bell reaches +3.00 dB one octave above its centre");
 
-    // v2.62.0 (Clement's remark 1): a VERY narrow bell still reads
+    // v2.62.0 (Clement's remark 1): a narrow bell still reads
     // exactly its gain at its centre - the widest and the narrowest
     // legal widths behave the same, an RBJ property. The dip Clement
     // saw reading ~-3 dB instead of -6 dB on the analyser is the
     // ANALYSER's own 31-bin frequency smoothing diluting dips narrower
     // than about half an octave - the filter itself is exact at any
-    // width, and this lock-in probe (immune to that smearing) proves it
-    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.1f);
+    // width, and this lock-in probe (immune to that smearing) proves it.
+    // v2.63.0 (remark 1): 0.4 octaves is the narrowest legal width now
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.4f);
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), -6.0, 0.3,
-                "a 0.1-octave band 2 bell at -6 dB still reads EXACTLY -6 dB at its centre");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), -0.01, 0.15,
-                "the same 0.1-octave dip is fully closed one octave above its centre");
+                "a 0.4-octave band 2 bell at -6 dB still reads EXACTLY -6 dB at its centre");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), -0.21, 0.15,
+                "the same 0.4-octave dip is nearly closed one octave above its centre");
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (0.0f);
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
 
@@ -5409,7 +5487,7 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
 
     // the readouts' own parse plumbing (v2.61.0): a typed "0.50 oct"
-    // lands on the 0.5-octave step, and the shape plate parses its
+    // lands on the nearest legal width, and the shape plate parses its
     // words - "shelf" switches band 1 off its bell, "bell" back on
     auto* eq2OctParam = dynamic_cast<juce::RangedAudioParameter*> (
         strip->getApvts().getParameter ("eq2Oct"));
@@ -5418,16 +5496,16 @@ void testCostesStripEq()
 
     if (eq2OctParam != nullptr)
     {
-        expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.5, 0.01,
-                    "a typed 0.50 oct parses to the 0.5-octave bandwidth");
+        expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.4, 0.01,
+                    "a typed 0.50 oct parses to the nearest legal width (0.4 oct)");
 
-        // v2.62.0 (Clement's remarks 2-3): the bandwidth sweep runs 0.1
-        // to 3.0 octaves and holds exactly seven legal widths, spread
-        // EQUALLY across the knob travel - the positions are i/6, not
-        // linear in value - and every legal width round-trips through
-        // its normalised step with no drift, so sessions load exactly
-        // as they were saved
-        const float legalWidths[] = { 0.1f, 0.3f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
+        // v2.62.0 (Clement's remarks 2-3) / v2.63.0 (remark 1): the
+        // bandwidth sweep runs 0.4 to 4.0 octaves and holds exactly
+        // seven legal widths, spread EQUALLY across the knob travel -
+        // the positions are i/6, not linear in value - and every legal
+        // width round-trips through its normalised step with no drift,
+        // so sessions load exactly as they were saved
+        const float legalWidths[] = { 0.4f, 0.7f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f };
 
         for (int i = 0; i < 7; ++i)
         {
@@ -5440,14 +5518,18 @@ void testCostesStripEq()
                         "every legal width round-trips through its knob step without drift");
         }
 
-        // a v2.61 session value outside the new set snaps to the nearest
+        // a session value outside the legal set snaps to the nearest
         // legal width on load - and a tie resolves to the NARROWER width
         strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.2f);
-        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.1, 0.0001,
-                    "an old 0.2-octave width snaps down to the 0.1-octave step");
-        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.7f);
-        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.5, 0.0001,
-                    "an old 0.7-octave width snaps to the 0.5-octave step");
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.4, 0.0001,
+                    "an old 0.2-octave width snaps up to the 0.4-octave step");
+        // 0.85 octaves is NOT an exact tie in float arithmetic
+        // (0.85f sits 6e-8 closer to 1.0f than to 0.7f), so the tie is
+        // proven with 1.25 instead: an EXACT float tie between the
+        // 1.0 and 1.5 steps that must resolve to the NARROWER 1.0
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.25f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 1.0, 0.0001,
+                    "a tie (1.25 oct) snaps to the NARROWER 1.0-octave step");
         strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.5f);
         expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 2.0, 0.0001,
                     "a tie (2.5 oct) snaps to the NARROWER 2.0-octave step");
@@ -5613,6 +5695,7 @@ int main (int argc, char* argv[])
     testCostesStripSession();
     testCostesStripMigration();
     testCostesStripSectionIcons();
+    testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();
 
     if (integration)

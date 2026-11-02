@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.62.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.63.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -93,16 +93,16 @@ namespace
         return best;
     }
 
-    // v2.62.0 (Clement's remarks 2-3): the mid bells' bandwidth knob now
-    // offers exactly seven legal widths, 0.1 / 0.3 / 0.5 / 1.0 / 1.5 /
-    // 2.0 / 3.0 octaves. This snaps any raw width to the nearest legal
-    // one, ties resolving to the narrower width (the same rule as the
-    // cut orders), so a stale or hand-edited v2.61 session value (the
-    // old knob swept 0.2 to 2.0 continuously) can never build an illegal
-    // width: 0.2 -> 0.1, 0.7 -> 0.5, 2.5 -> 2.0
+    // v2.62.0 (Clement's remarks 2-3) / v2.63.0 (Clement's remark 1):
+    // the mid bells' bandwidth knob offers exactly seven legal widths,
+    // 0.4 / 0.7 / 1.0 / 1.5 / 2.0 / 3.0 / 4.0 octaves. This snaps any
+    // raw width to the nearest legal one, ties resolving to the
+    // narrower width (the same rule as the cut orders), so a stale or
+    // hand-edited session value can never build an illegal width:
+    // 0.2 -> 0.4, 0.85 -> 0.7, 2.5 -> 2.0
     constexpr int numLegalEqOctaves = 7;
     const float legalEqOctaves[numLegalEqOctaves] =
-        { 0.1f, 0.3f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
+        { 0.4f, 0.7f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f };
 
     int nearestEqOctaveIndex (float v)
     {
@@ -433,8 +433,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // 500 Hz-12 kHz, default 1600 Hz. Band 4 (HF): bell or high shelf,
     // 600 Hz-18 kHz, default 7200 Hz. The bells sweep +/- 15 dB and read
     // exactly their gain at their centre; the mid bells' bandwidths run
-    // 0.1 to 3.0 octaves in seven legal widths (v2.62.0, Clement's
-    // remarks 2-3); the shelves use the RBJ Q form with Q = 1/sqrt(2)
+    // 0.4 to 4.0 octaves in seven legal widths (v2.62.0, v2.63.0:
+    // Clement's remarks); the shelves use the RBJ Q form with Q = 1/sqrt(2)
     // -----------------------------------------------------------------------
 
     // the global on/off plate: the section's true bypass. Sessions saved
@@ -535,16 +535,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
 
     // the bell's bandwidth in octaves (Clement's spec: the Q is presented
     // as the number of octaves concerned). v2.62.0 (Clement's remarks
-    // 2-3): the sweep now runs 0.1 to 3.0 octaves and holds exactly
-    // seven legal widths, spread EQUALLY across the knob travel - the
-    // positions are i/6, not linear in value - the same equal-step
-    // construction the cut slopes use. A v2.61 session width outside
-    // the set snaps to the nearest legal one on load (ties to the
-    // narrower)
+    // 2-3) / v2.63.0 (remark 1): the sweep now runs 0.4 to 4.0 octaves
+    // and holds exactly seven legal widths, spread EQUALLY across the
+    // knob travel - the positions are i/6, not linear in value - the
+    // same equal-step construction the cut slopes use. A session width
+    // outside the set snaps to the nearest legal one on load (ties to
+    // the narrower)
     const auto eqOctaveRange = []
     {
         return juce::NormalisableRange<float> (
-            0.1f, 3.0f,
+            0.4f, 4.0f,
             [] (float /*start*/, float /*end*/, float normalised)
             {
                 const int index = juce::jlimit (0, numLegalEqOctaves - 1,
@@ -554,7 +554,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             },
             [] (float /*start*/, float /*end*/, float value)
             {
-                return (float) nearestEqOctaveIndex (juce::jlimit (0.1f, 3.0f, value))
+                return (float) nearestEqOctaveIndex (juce::jlimit (0.4f, 4.0f, value))
                          / (float) (numLegalEqOctaves - 1);
             },
             [] (float start, float end, float value)
@@ -1288,10 +1288,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // touching the keyboard), double-click back to the default, and an
     // editable readout under the cap for exact typed values. v2.62.0
     // (Clement's remark 4): each knob also carries its cap colour on
-    // the backgroundColourId - the row-1 and LF caps stay the black
-    // aluminium disc, the other EQ bands wear their SSL pastels, and
-    // drawRotarySlider builds the disc around it
-    const auto setUpKnob = [this] (juce::Slider& knob, juce::Label& label,
+    // the backgroundColourId. v2.63.0 (Clement's remarks 2-4): a
+    // COMMAND-CLICK parks the knob on its default too (CostesSlider),
+    // and the HIGH CUT knob joins the HF band on the pastel red cap
+    const auto setUpKnob = [this] (CostesSlider& knob, juce::Label& label,
                                    const juce::String& labelText, float defaultValue,
                                    const juce::Colour& capColour)
     {
@@ -1305,6 +1305,7 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
         knob.setMouseDragSensitivity (320);
         knob.setDoubleClickReturnValue (true, defaultValue);
+        knob.cmdClickDefault = defaultValue;
         // 76 x 18 (v2.59.0, Clement's remark 1): the old 74 x 16 box sat
         // its descenders on the clip - the wider, taller box keeps every
         // readout fully inside the panel
@@ -1326,7 +1327,9 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     setUpKnob (trimInKnob,  trimInLabel,  "TRIM IN",  0.0f,    knobDisc);
     setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  16.0f,   knobDisc);
-    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f, knobDisc);
+    // v2.63.0 (Clement's remark 4): the HIGH CUT knob wears the same
+    // pastel red cap as the EQ's HF band
+    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f, eqHfDisc);
     setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f,    knobDisc);
     setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
@@ -1391,14 +1394,19 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.59.0): a horizontal slider from 6 to 72 dB/oct. "off" moved to
     // the on/off plate on the left, so the sweep holds only legal
     // Butterworth slopes - the readout is the parameter's own text
-    // ("6 dB/oct" ... "72 dB/oct"), so the label never drifts from the DSP
-    const auto setUpSlope = [this] (juce::Slider& slope)
+    // ("6 dB/oct" ... "72 dB/oct"), so the label never drifts from the DSP.
+    // v2.63.0 (Clement's remark 2): the linear selectors join the knobs
+    // on the default-on-command-click behaviour, and gain the
+    // double-click default they never had
+    const auto setUpSlope = [this] (CostesSlider& slope, float defaultValue)
     {
         slope.setSliderStyle (juce::Slider::LinearHorizontal);
         // 76 x 18 (v2.60.0, Clement's remark 3): the 72 x 16 box clipped
         // the bottom of "24 dB/oct" - the knob readouts' own 18 px height
         // fix, applied to the slopes too
         slope.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 76, 18);
+        slope.setDoubleClickReturnValue (true, defaultValue);
+        slope.cmdClickDefault = defaultValue;
         slope.setColour (juce::Slider::trackColourId, knobBezel);
         slope.setColour (juce::Slider::thumbColourId, valueArc);
         slope.setColour (juce::Slider::textBoxTextColourId, engraving);
@@ -1407,14 +1415,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         addAndMakeVisible (slope);
     };
 
-    setUpSlope (lowCutSlope);
-    setUpSlope (highCutSlope);
+    setUpSlope (lowCutSlope, 2.0f);
+    setUpSlope (highCutSlope, 2.0f);
 
     // the bandwidth sweeps of EQ bands 2/3 (v2.61.0): the same horizontal
     // selector the cuts use for their slopes, reading the bell's width in
-    // octaves ("0.10 oct" ... "3.00 oct" since v2.62.0)
-    setUpSlope (eq2OctSlider);
-    setUpSlope (eq3OctSlider);
+    // octaves ("0.40 oct" ... "4.00 oct" since v2.63.0)
+    setUpSlope (eq2OctSlider, 1.0f);
+    setUpSlope (eq3OctSlider, 1.0f);
 
     // the oversampling switch, an SSL-style illuminated plate under the
     // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
@@ -1527,6 +1535,53 @@ CostesStripEditor::~CostesStripEditor()
     eq4ModeAttachment.reset();
 
     setLookAndFeel (nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// CostesSlider - the command-click default (v2.63.0, Clement's remark 2).
+// With the command key down, a click parks the control on its default and
+// the drag never starts; every other gesture runs the normal JUCE path.
+// The default itself travels through setValue with a synchronous
+// notification, so the SliderAttachment carries it into the parameter
+// tree immediately - the exact path a drag uses
+// ---------------------------------------------------------------------------
+
+void CostesStripEditor::CostesSlider::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isCommandDown())
+    {
+        cmdDefaultActive = true;
+        applyCmdClickDefault();
+        return;
+    }
+
+    juce::Slider::mouseDown (e);
+}
+
+void CostesStripEditor::CostesSlider::mouseDrag (const juce::MouseEvent& e)
+{
+    // a command-click swallowed the press, so the drag that follows must
+    // not move the value either
+    if (cmdDefaultActive)
+        return;
+
+    juce::Slider::mouseDrag (e);
+}
+
+void CostesStripEditor::CostesSlider::mouseUp (const juce::MouseEvent& e)
+{
+    if (cmdDefaultActive)
+    {
+        cmdDefaultActive = false;
+        return;
+    }
+
+    juce::Slider::mouseUp (e);
+}
+
+void CostesStripEditor::CostesSlider::applyCmdClickDefault()
+{
+    setValue (cmdClickDefault, juce::sendNotificationSync);
 }
 
 void CostesStripEditor::paint (juce::Graphics& g)

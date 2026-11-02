@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.62.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.63.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -151,12 +151,13 @@ them in a clean, focused workflow:
   plugin is actually visible and usable. The layout is a **condensed left
   sidebar + centre column, nothing else** (v2.4): the sidebar reads as
   one column of four blocks with an identical vertical space between
-  them (v2.39.0) — (1) the shell's title, PRESETS and the nine console
-  buttons pinned at the top; (2) the frame-free Costes logo (which
-  opens a contact card) with the ANALYSER section right under it (its
-  toggle carries the heading: "ANALYSER" and the spectrum glyph share
-  the button — since v2.52.0 it is the section's only control: the
-  tilt and response-speed buttons live on the analyser strip itself); (3) GAIN STAGING
+  them (v2.39.0) — (1) the ANALYSER button (v2.63.0: pinned at the very
+  top of the sidebar; its toggle carries the heading: "ANALYSER" and
+  the spectrum glyph share the button — since v2.52.0 the tilt and
+  response-speed buttons live on the analyser strip itself), the
+  shell's title, PRESETS and the nine console buttons pinned at the
+  top; (2) the frame-free Costes logo (which
+  opens a contact card); (3) GAIN STAGING
   (LUFS/delta readouts); (4) the hosted name with its alarm zone glued
   to the Rescan / Doctor row at the bottom; the centre column is used only by the
   analyzer strip and the hosted plugin itself. The frame around
@@ -309,6 +310,31 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.63.1**
+  - **Test-only patch, no behaviour change.** The bandwidth tie test
+    used 0.85 octaves, which is *not* an exact tie in float arithmetic
+    (0.85f is 6e-8 closer to 1.0f than to 0.7f), so the snap to 1.0 was
+    legitimate and the expectation wrong. The tie now rests on 1.25
+    octaves — an exact float tie between 1.0 and 1.5 — and still
+    resolves to the **narrower** 1.0 step, alongside the existing
+    exact 2.5 → 2.0 tie.
+- **2.63.0**
+  - **New bandwidth steps.** The Costes strip's EQ width selector now
+    holds **0.4 / 0.7 / 1 / 1.5 / 2 / 3 / 4 octaves** — the same seven
+    equal knob positions, re-centred on the useful widths (a stale
+    session width snaps to the nearest legal one; an exact tie resolves
+    to the narrower step).
+  - **Command-click back to default.** A **cmd-click** on any knob or
+    slider of the Costes strip parks it back on its default value —
+    the same default as double-click, and the linear selectors
+    (slopes, bandwidths) gain the behaviour too.
+  - **The diploma year on the contact card.** Clicking the logo now
+    reads « Ingénieur Centrale Nantes **2014** — Certifié DJ Network
+    2022 » (and its English translation).
+  - **The HIGH CUT knob wears the pastel red cap**, matching the EQ's
+    HF band.
+  - **The ANALYSER button moved to the very top of the sidebar** — the
+    title follows right under it, the rest of the order is untouched.
 - **2.62.0**
   - **Seven equal bandwidth steps on the Costes strip's EQ.** The mid
     bells' Q knob now runs **0.1 to 3.0 octaves** in exactly seven legal
