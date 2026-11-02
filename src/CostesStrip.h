@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.61.0 (roadmap C2)
+// src/CostesStrip.h - v2.62.0 (roadmap C2)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
@@ -11,6 +11,15 @@
 // hosting path as the consoles, it inherits the click-free 50 ms crossfade,
 // the per-ident settings memory, the session save/restore and the parameter
 // relay without a single extra wire.
+//
+// v2.62.0 (Clement's remarks 2-5): the mid bells' bandwidth sweeps now
+// run 0.1 to 3.0 octaves and hold exactly seven legal widths (0.1, 0.3,
+// 0.5, 1.0, 1.5, 2.0, 3.0 oct) at seven EQUAL knob positions, like the
+// cut slopes - a stale v2.61 width snaps to the nearest legal one on
+// load. The EQ band caps speak SSL colours (LF keeps its black disc,
+// LO MID pastel blue, HI MID off-white, HF pastel red) with an
+// adaptive pointer, and each band carries its own small glyph under
+// its selector: a low-shelf response, two bells, a high shelf.
 //
 // v2.61.0 (Clement's spec): a four-band SSL-style EQ between the cuts and
 // the tilt. Band 1 (LF): bell or low shelf, 20-600 Hz, default 100 Hz. Band
@@ -304,7 +313,7 @@ public:
     // test harness can name the types and count the instances
     struct SectionIcon : public juce::Component
     {
-        enum class Icon { trim, lowCut, highCut, tilt, drive, eq };
+        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
 
         explicit SectionIcon (Icon iconType) : type (iconType) {}
 
@@ -324,6 +333,15 @@ public:
     // caption - the harness reaches it through this
     SectionIcon* getEqIcon() { return &eqIcon; }
 
+    // the four band glyphs (v2.62.0, Clement's remark 5), one small icon
+    // per band under its selector - LF and HF speak their shelf-capable
+    // shapes, the two mids reuse the bell bump. In band order for the
+    // offline test harness
+    std::array<SectionIcon*, 4> getEqBandIcons()
+    {
+        return { &eqBand1Icon, &eqBand2Icon, &eqBand3Icon, &eqBand4Icon };
+    }
+
 private:
     CostesStrip& owner;
 
@@ -337,6 +355,14 @@ private:
     SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
     SectionIcon driveIcon  { SectionIcon::Icon::drive };
     SectionIcon eqIcon    { SectionIcon::Icon::eq };   // v2.61.0
+
+    // the four band glyphs (v2.62.0, Clement's remark 5): the LF band's
+    // low-shelf response, the two mid bells' shared bump and the HF
+    // band's high shelf, one under each band's selector
+    SectionIcon eqBand1Icon { SectionIcon::Icon::lowShelf };
+    SectionIcon eqBand2Icon { SectionIcon::Icon::eq };
+    SectionIcon eqBand3Icon { SectionIcon::Icon::eq };
+    SectionIcon eqBand4Icon { SectionIcon::Icon::highShelf };
 
     // the EQ section (v2.61.0): eight knobs (a FREQ and a GAIN per band,
     // each with its own caption label), four band captions, two bandwidth

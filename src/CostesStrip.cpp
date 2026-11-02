@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.cpp - v2.61.0 (roadmap C2)
+// src/CostesStrip.cpp - v2.62.0 (roadmap C2)
 //
 // The internal Costes channel strip's DSP and its cream SSL-style editor.
 // See CostesStrip.h for the design notes.
@@ -93,6 +93,42 @@ namespace
         return best;
     }
 
+    // v2.62.0 (Clement's remarks 2-3): the mid bells' bandwidth knob now
+    // offers exactly seven legal widths, 0.1 / 0.3 / 0.5 / 1.0 / 1.5 /
+    // 2.0 / 3.0 octaves. This snaps any raw width to the nearest legal
+    // one, ties resolving to the narrower width (the same rule as the
+    // cut orders), so a stale or hand-edited v2.61 session value (the
+    // old knob swept 0.2 to 2.0 continuously) can never build an illegal
+    // width: 0.2 -> 0.1, 0.7 -> 0.5, 2.5 -> 2.0
+    constexpr int numLegalEqOctaves = 7;
+    const float legalEqOctaves[numLegalEqOctaves] =
+        { 0.1f, 0.3f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
+
+    int nearestEqOctaveIndex (float v)
+    {
+        int best = 0;
+        float bestDist = std::abs (v - legalEqOctaves[0]);
+
+        for (int i = 1; i < numLegalEqOctaves; ++i)
+        {
+            const float d = std::abs (v - legalEqOctaves[i]);
+
+            // strict < keeps the earlier (narrower) entry on a tie
+            if (d < bestDist)
+            {
+                best = i;
+                bestDist = d;
+            }
+        }
+
+        return best;
+    }
+
+    float snapEqOctavesToLegal (float v)
+    {
+        return legalEqOctaves[nearestEqOctaveIndex (v)];
+    }
+
     // the drive: the knob is decibels of input gain into the tanh, 0 to
     // +15.6 dB (the old normalised "amount" mapped the same sweep onto
     // g = 1 + slope * amount, up to 6x - and 20 log10 (6) = 15.56 dB, so
@@ -113,6 +149,16 @@ namespace
     const juce::Colour knobDisc     (0xff23232a);
     const juce::Colour knobDiscLite (0xff42424e);
     const juce::Colour knobPointer  (0xfff5f2e8);
+
+    // v2.62.0 (Clement's remark 4): the EQ band caps speak SSL - the LF
+    // band keeps its black aluminium disc (knobDisc above), the LO MID
+    // band wears a pastel blue cap, the HI MID an off-white and the HF
+    // a pastel red. Each knob carries its cap colour on the slider's
+    // backgroundColourId, and drawRotarySlider builds the disc's sheen
+    // around it (the pointer flips dark on the bright caps)
+    const juce::Colour eqLoMidDisc (0xffaac6df);
+    const juce::Colour eqHiMidDisc (0xfff0e9d8);
+    const juce::Colour eqHfDisc    (0xffd8a49c);
     const juce::Colour valueArc     (0xffe2a14f);
     const juce::Colour plateFill    (0xff26221b);
     const juce::Colour plateText    (0xffe8dcbf);
@@ -386,8 +432,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // octaves, 60-3000 Hz, default 400 Hz. Band 3 (HI MID): the same,
     // 500 Hz-12 kHz, default 1600 Hz. Band 4 (HF): bell or high shelf,
     // 600 Hz-18 kHz, default 7200 Hz. The bells sweep +/- 15 dB and read
-    // exactly their gain at their centre; the bandwidths run 0.2 to 2.0
-    // octaves; the shelves use the RBJ Q form with Q = 1/sqrt(2)
+    // exactly their gain at their centre; the mid bells' bandwidths run
+    // 0.1 to 3.0 octaves in seven legal widths (v2.62.0, Clement's
+    // remarks 2-3); the shelves use the RBJ Q form with Q = 1/sqrt(2)
     // -----------------------------------------------------------------------
 
     // the global on/off plate: the section's true bypass. Sessions saved
@@ -487,10 +534,38 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withValueFromStringFunction (dbParse)));
 
     // the bell's bandwidth in octaves (Clement's spec: the Q is presented
-    // as the number of octaves concerned). 0.2 to 2.0, default 1.0
+    // as the number of octaves concerned). v2.62.0 (Clement's remarks
+    // 2-3): the sweep now runs 0.1 to 3.0 octaves and holds exactly
+    // seven legal widths, spread EQUALLY across the knob travel - the
+    // positions are i/6, not linear in value - the same equal-step
+    // construction the cut slopes use. A v2.61 session width outside
+    // the set snaps to the nearest legal one on load (ties to the
+    // narrower)
+    const auto eqOctaveRange = []
+    {
+        return juce::NormalisableRange<float> (
+            0.1f, 3.0f,
+            [] (float /*start*/, float /*end*/, float normalised)
+            {
+                const int index = juce::jlimit (0, numLegalEqOctaves - 1,
+                                                juce::roundToInt (normalised
+                                                    * (float) (numLegalEqOctaves - 1)));
+                return legalEqOctaves[index];
+            },
+            [] (float /*start*/, float /*end*/, float value)
+            {
+                return (float) nearestEqOctaveIndex (juce::jlimit (0.1f, 3.0f, value))
+                         / (float) (numLegalEqOctaves - 1);
+            },
+            [] (float start, float end, float value)
+            {
+                return snapEqOctavesToLegal (juce::jlimit (start, end, value));
+            });
+    };
+
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq2Oct", 1 }, "EQ 2 Width",
-        juce::NormalisableRange<float> (0.2f, 2.0f, 0.05f), 1.0f,
+        eqOctaveRange(), 1.0f,
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction ([] (float value, int)
             {
@@ -540,9 +615,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
 
+    // band 3's own width (v2.62.0): the same seven equal-step widths
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq3Oct", 1 }, "EQ 3 Width",
-        juce::NormalisableRange<float> (0.2f, 2.0f, 0.05f), 1.0f,
+        eqOctaveRange(), 1.0f,
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction ([] (float value, int)
             {
@@ -1210,9 +1286,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // the ergonomic knob setup shared by all five: horizontal-or-vertical
     // rotary drag, a wide 320 px travel (fine adjustments without
     // touching the keyboard), double-click back to the default, and an
-    // editable readout under the cap for exact typed values
+    // editable readout under the cap for exact typed values. v2.62.0
+    // (Clement's remark 4): each knob also carries its cap colour on
+    // the backgroundColourId - the row-1 and LF caps stay the black
+    // aluminium disc, the other EQ bands wear their SSL pastels, and
+    // drawRotarySlider builds the disc around it
     const auto setUpKnob = [this] (juce::Slider& knob, juce::Label& label,
-                                   const juce::String& labelText, float defaultValue)
+                                   const juce::String& labelText, float defaultValue,
+                                   const juce::Colour& capColour)
     {
         knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
 
@@ -1228,6 +1309,7 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         // its descenders on the clip - the wider, taller box keeps every
         // readout fully inside the panel
         knob.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 76, 18);
+        knob.setColour (juce::Slider::backgroundColourId, capColour);
         knob.setColour (juce::Slider::rotarySliderFillColourId, plateText);
         knob.setColour (juce::Slider::rotarySliderOutlineColourId, knobBezel);
         knob.setColour (juce::Slider::textBoxTextColourId, engraving);
@@ -1242,23 +1324,25 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         addAndMakeVisible (label);
     };
 
-    setUpKnob (trimInKnob,  trimInLabel,  "TRIM IN",  0.0f);
-    setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  16.0f);
-    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f);
-    setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f);
-    setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f);
+    setUpKnob (trimInKnob,  trimInLabel,  "TRIM IN",  0.0f,    knobDisc);
+    setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  16.0f,   knobDisc);
+    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f, knobDisc);
+    setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f,    knobDisc);
+    setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
     // the EQ knobs (v2.61.0): the same ergonomics, one FREQ and one GAIN
     // per band - double-click parks each band on its SSL-style starting
-    // point (100 Hz, 400 Hz, 1600 Hz, 7200 Hz) or 0 dB
-    setUpKnob (eq1HzKnob,   eq1HzLabel,   "FREQ", 100.0f);
-    setUpKnob (eq1GainKnob, eq1GainLabel, "GAIN", 0.0f);
-    setUpKnob (eq2HzKnob,   eq2HzLabel,   "FREQ", 400.0f);
-    setUpKnob (eq2GainKnob, eq2GainLabel, "GAIN", 0.0f);
-    setUpKnob (eq3HzKnob,   eq3HzLabel,   "FREQ", 1600.0f);
-    setUpKnob (eq3GainKnob, eq3GainLabel, "GAIN", 0.0f);
-    setUpKnob (eq4HzKnob,   eq4HzLabel,   "FREQ", 7200.0f);
-    setUpKnob (eq4GainKnob, eq4GainLabel, "GAIN", 0.0f);
+    // point (100 Hz, 400 Hz, 1600 Hz, 7200 Hz) or 0 dB. v2.62.0 (remark
+    // 4): the caps speak the SSL band colours - LF keeps the black
+    // aluminium, LO MID pastel blue, HI MID off-white, HF pastel red
+    setUpKnob (eq1HzKnob,   eq1HzLabel,   "FREQ", 100.0f,  knobDisc);
+    setUpKnob (eq1GainKnob, eq1GainLabel, "GAIN", 0.0f,    knobDisc);
+    setUpKnob (eq2HzKnob,   eq2HzLabel,   "FREQ", 400.0f,  eqLoMidDisc);
+    setUpKnob (eq2GainKnob, eq2GainLabel, "GAIN", 0.0f,    eqLoMidDisc);
+    setUpKnob (eq3HzKnob,   eq3HzLabel,   "FREQ", 1600.0f, eqHiMidDisc);
+    setUpKnob (eq3GainKnob, eq3GainLabel, "GAIN", 0.0f,    eqHiMidDisc);
+    setUpKnob (eq4HzKnob,   eq4HzLabel,   "FREQ", 7200.0f, eqHfDisc);
+    setUpKnob (eq4GainKnob, eq4GainLabel, "GAIN", 0.0f,    eqHfDisc);
 
     // the section glyphs (v2.60.0, Clement's remark): each icon sits at
     // the left of its caption and paints itself - nothing to add here
@@ -1269,6 +1353,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (tiltIcon);
     addAndMakeVisible (driveIcon);
     addAndMakeVisible (eqIcon);   // v2.61.0: the EQ header's bell glyph
+
+    // the four band glyphs (v2.62.0, Clement's remark 5): one small icon
+    // per band, under its selector - the LF band's low-shelf response,
+    // the two mid bells' shared bump and the HF band's high shelf
+    addAndMakeVisible (eqBand1Icon);
+    addAndMakeVisible (eqBand2Icon);
+    addAndMakeVisible (eqBand3Icon);
+    addAndMakeVisible (eqBand4Icon);
 
     // the EQ section header (v2.61.0): the caption is a label so the
     // icon can hug its left edge with the same geometry the knob
@@ -1320,7 +1412,7 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // the bandwidth sweeps of EQ bands 2/3 (v2.61.0): the same horizontal
     // selector the cuts use for their slopes, reading the bell's width in
-    // octaves ("0.20 oct" ... "2.00 oct")
+    // octaves ("0.10 oct" ... "3.00 oct" since v2.62.0)
     setUpSlope (eq2OctSlider);
     setUpSlope (eq3OctSlider);
 
@@ -1399,9 +1491,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     eq4ModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "eq4Bell", eq4ModeButton);
 
-    // v2.61.0: the second row adds 180 px - the EQ header (20) plus the
-    // band columns (152) plus the breathing room between them
-    setSize (880, 380);
+    // v2.61.0: the second row added its header (20) plus the band
+    // columns (152) plus the breathing room between them. v2.62.0
+    // (Clement's remark 5): each band column also hosts its own 16 px
+    // glyph under the selector, so the row grows to 200 px
+    setSize (880, 400);
 }
 
 CostesStripEditor::~CostesStripEditor()
@@ -1599,9 +1693,11 @@ void CostesStripEditor::resized()
                       eqHeader.getY() + 2, 16, 16);
 
     // the four band columns: a caption above, the FREQ and GAIN knobs
-    // side by side with their own small captions, and the band's own
+    // side by side with their own small captions, the band's own
     // selector underneath - the bandwidth sweep for the mid bells, the
-    // BELL/SHELF plate for the outer bands
+    // BELL/SHELF plate for the outer bands - and (v2.62.0, Clement's
+    // remark 5) a 16 px glyph in a final row: the LF band's low-shelf
+    // response, the two mid bells' bump and the HF band's high shelf
     const int eqColumnWidth = eqArea.getWidth() / 4;
 
     for (int i = 0; i < 4; ++i)
@@ -1615,30 +1711,40 @@ void CostesStripEditor::resized()
         auto* gainLabel = &eq1GainLabel;
         juce::Slider* octSlider   = nullptr;
         ShelfModeToggle* modeButton = &eq1ModeButton;
+        SectionIcon* bandIcon = &eqBand1Icon;
 
         if (i == 1)
         {
             bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
             gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
             octSlider = &eq2OctSlider; modeButton = nullptr;
+            bandIcon  = &eqBand2Icon;
         }
         else if (i == 2)
         {
             bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
             gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
             octSlider = &eq3OctSlider; modeButton = nullptr;
+            bandIcon  = &eqBand3Icon;
         }
         else if (i == 3)
         {
             bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
             gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
             modeButton = &eq4ModeButton;
+            bandIcon  = &eqBand4Icon;
         }
 
         bandLabel->setBounds (column.removeFromTop (16));
         column.removeFromTop (4);   // a breath under the band caption
 
-        auto bottom = column.removeFromBottom (28);
+        // the bottom band hosts the selector (26 px) and the band glyph
+        // beneath it (v2.62.0): a centred 16 x 16 icon
+        auto bottom = column.removeFromBottom (44);
+        auto iconRow = bottom.removeFromBottom (18);
+        bandIcon->setBounds (iconRow.withSizeKeepingCentre (16, 16));
+        auto control = bottom;
+
         auto knobRow = column;
 
         const int half = knobRow.getWidth() / 2;
@@ -1654,13 +1760,13 @@ void CostesStripEditor::resized()
         {
             // the mid bells' bandwidth sweep - the cuts' own selector
             // geometry, one band width wide
-            octSlider->setBounds (bottom.reduced (1, 1));
+            octSlider->setBounds (control.reduced (1, 1));
         }
         else if (modeButton != nullptr)
         {
             // the outer bands' BELL/SHELF plate, centred under its band
-            modeButton->setBounds (bottom.withSizeKeepingCentre (
-                juce::jmin (bottom.getWidth(), 76), 20));
+            modeButton->setBounds (control.withSizeKeepingCentre (
+                juce::jmin (control.getWidth(), 76), 20));
         }
     }
 }
@@ -1800,7 +1906,7 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
 void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
 {
     // the glyphs (v2.60.0, Clement's remark; the EQ bell joined in
-    // v2.61.0): clean single-stroke
+    // v2.61.0, the two shelf plateaus in v2.62.0): clean single-stroke
     // vector shapes in the engraved silkscreen colour, drawn on a 16 x
     // 16 design grid scaled to the component's bounds so a degenerate
     // resize can never divide by anything. Every shape is drawn to be
@@ -1884,6 +1990,29 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
             p.quadraticTo (X (11.5f), Y (3.0f), X (14.0f), Y (12.5f));
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
+
+        // LOW SHELF (v2.62.0, Clement's remark 5): the band-1 glyph under
+        // the LF selector - flat at the bottom, the knee rising to the
+        // high PLATEAU, flat at the top. Distinct from the low cut's
+        // open-ended rise: the shelf settles, it does not climb away
+        case Icon::lowShelf:
+            p.startNewSubPath (X (2.0f), Y (12.5f));
+            p.lineTo (X (5.0f), Y (12.5f));
+            p.quadraticTo (X (9.0f), Y (12.5f), X (11.0f), Y (3.5f));
+            p.lineTo (X (14.0f), Y (3.5f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
+
+        // HIGH SHELF (v2.62.0, Clement's remark 5): the band-4 glyph, the
+        // low shelf's mirror - flat at the top, the knee falling to the
+        // low plateau, flat at the bottom
+        case Icon::highShelf:
+            p.startNewSubPath (X (2.0f), Y (3.5f));
+            p.lineTo (X (5.0f), Y (3.5f));
+            p.quadraticTo (X (7.0f), Y (3.5f), X (9.0f), Y (12.5f));
+            p.lineTo (X (14.0f), Y (12.5f));
+            g.strokePath (p, juce::PathStrokeType (stroke));
+            break;
     }
 }
 
@@ -1892,7 +2021,7 @@ void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,
                                                             float sliderPos,
                                                             float rotaryStartAngle,
                                                             float rotaryEndAngle,
-                                                            juce::Slider&)
+                                                            juce::Slider& slider)
 {
     const auto bounds = juce::Rectangle<float> ((float) x, (float) y,
                                                 (float) w, (float) h);
@@ -1943,18 +2072,28 @@ void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,
     g.setColour (juce::Colour (0xff6f6650));
     g.drawEllipse (centre.x - bezel, centre.y - bezel, bezel * 2.0f, bezel * 2.0f, 1.0f);
 
-    // dark aluminium disc with a soft radial sheen
+    // the cap's own colour rides the backgroundColourId the knob setup
+    // gives it (v2.62.0, Clement's remark 4): the row-1 and LF knobs
+    // stay the black aluminium disc - the exact v2.60 gradient, kept
+    // bit-for-bit - and the other EQ bands wear their SSL pastels,
+    // with the same sheen built around their own base colour
+    const juce::Colour discBase = slider.findColour (juce::Slider::backgroundColourId, true);
+    const bool classicDisc = (discBase == knobDisc);
+    const juce::Colour discLite = classicDisc ? knobDiscLite : discBase.brighter (0.18f);
+    const juce::Colour discDark = classicDisc ? knobDisc     : discBase.darker (0.22f);
+
     const float inner = radius * 0.62f;
-    juce::ColourGradient disc (knobDiscLite, centre.x - inner * 0.4f, centre.y - inner * 0.4f,
-                               knobDisc, centre.x + inner * 0.4f, centre.y + inner * 0.4f, false);
+    juce::ColourGradient disc (discLite, centre.x - inner * 0.4f, centre.y - inner * 0.4f,
+                               discDark, centre.x + inner * 0.4f, centre.y + inner * 0.4f, false);
     g.setGradientFill (disc);
     g.fillEllipse (centre.x - inner, centre.y - inner, inner * 2.0f, inner * 2.0f);
 
-    // white pointer line, SSL style
+    // the pointer line, SSL style: white on the dark discs, a warm dark
+    // on the bright pastel caps, so it always reads
     const float pointerLength = radius * 0.52f;
     const auto tip = juce::Point<float> (centre.x + std::sin (angle) * pointerLength,
                                          centre.y - std::cos (angle) * pointerLength);
 
-    g.setColour (knobPointer);
+    g.setColour (discBase.getPerceivedBrightness() > 0.55f ? engraving : knobPointer);
     g.drawLine (juce::Line<float> (centre, tip), radius * 0.09f);
 }

@@ -4999,10 +4999,11 @@ void testCostesStripSession()
 
     // the EQ section (v2.61.0): a recognisable position on every band -
     // a moved corner on band 1, a gain and a bandwidth on band 2, and
-    // band 4 switched to its shelf
+    // band 4 switched to its shelf. v2.62.0: the bandwidth is one of
+    // the seven legal widths now, so the round-trip is exact
     strip->getApvts().getParameterAsValue ("eq1Hz").setValue (250.0f);
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-3.5f);
-    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.7f);
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.5f);
     strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
 
     juce::MemoryBlock state;
@@ -5048,7 +5049,7 @@ void testCostesStripSession()
                     "the EQ band 1 corner restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq2Gain")->load(), -3.5, 0.01,
                     "the EQ band 2 gain restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.7, 0.01,
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Oct")->load(), 1.5, 0.01,
                     "the EQ band 2 bandwidth restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq4Bell")->load(), 0.0, 0.01,
                     "the EQ band 4 shelf mode restores");
@@ -5177,10 +5178,33 @@ void testCostesStripSectionIcons()
                     && editor.getLocalBounds().contains (eqIcon->getBounds()),
                 "the EQ glyph is laid out inside the panel");
 
+    // the four band glyphs (v2.62.0, Clement's remark 5): one small icon
+    // per band under its selector - the LF and HF bands speak their
+    // shelf-capable shapes, the two mids reuse the bell bump - with the
+    // same visibility and containment rules
+    const auto bandIcons = editor.getEqBandIcons();
+    const CostesStripEditor::SectionIcon::Icon expectedBandTypes[4] =
+    {
+        CostesStripEditor::SectionIcon::Icon::lowShelf,
+        CostesStripEditor::SectionIcon::Icon::eq,
+        CostesStripEditor::SectionIcon::Icon::eq,
+        CostesStripEditor::SectionIcon::Icon::highShelf
+    };
+
+    for (int i = 0; i < 4; ++i)
+    {
+        expectTrue (bandIcons[(size_t) i] != nullptr
+                        && bandIcons[(size_t) i]->type == expectedBandTypes[i],
+                    "each EQ band carries its own glyph (low shelf, bell, bell, high shelf)");
+        expectTrue (bandIcons[(size_t) i] != nullptr && bandIcons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (bandIcons[(size_t) i]->getBounds()),
+                    "every band glyph is laid out inside the panel");
+    }
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 880, 380 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+        const int testSizes[][2] = { { 880, 400 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
 
         for (const auto& size : testSizes)
         {
@@ -5196,11 +5220,14 @@ void testCostesStripSectionIcons()
             if (eqIcon != nullptr)
                 eqIcon->paint (g);
 
+            for (auto* icon : bandIcons)
+                icon->paint (g);
+
             editor.paint (g);
         }
     }
 
-    editor.setSize (880, 380);
+    editor.setSize (880, 400);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5331,6 +5358,20 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 3.0, 0.4,
                 "a 2.0-octave band 2 bell reaches +3.00 dB one octave above its centre");
+
+    // v2.62.0 (Clement's remark 1): a VERY narrow bell still reads
+    // exactly its gain at its centre - the widest and the narrowest
+    // legal widths behave the same, an RBJ property. The dip Clement
+    // saw reading ~-3 dB instead of -6 dB on the analyser is the
+    // ANALYSER's own 31-bin frequency smoothing diluting dips narrower
+    // than about half an octave - the filter itself is exact at any
+    // width, and this lock-in probe (immune to that smearing) proves it
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.1f);
+    strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), -6.0, 0.3,
+                "a 0.1-octave band 2 bell at -6 dB still reads EXACTLY -6 dB at its centre");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), -0.01, 0.15,
+                "the same 0.1-octave dip is fully closed one octave above its centre");
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (0.0f);
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
 
@@ -5376,8 +5417,44 @@ void testCostesStripEq()
                 "the band 2 bandwidth parameter is a ranged parameter");
 
     if (eq2OctParam != nullptr)
+    {
         expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.5, 0.01,
                     "a typed 0.50 oct parses to the 0.5-octave bandwidth");
+
+        // v2.62.0 (Clement's remarks 2-3): the bandwidth sweep runs 0.1
+        // to 3.0 octaves and holds exactly seven legal widths, spread
+        // EQUALLY across the knob travel - the positions are i/6, not
+        // linear in value - and every legal width round-trips through
+        // its normalised step with no drift, so sessions load exactly
+        // as they were saved
+        const float legalWidths[] = { 0.1f, 0.3f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
+
+        for (int i = 0; i < 7; ++i)
+        {
+            strip->getApvts().getParameterAsValue ("eq2Oct").setValue (legalWidths[i]);
+
+            expectNear (eq2OctParam->getValue(), (float) i / 6.0f, 0.001,
+                        "the seven legal widths sit at seven EQUAL knob positions (spacing 1/6)");
+            expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(),
+                        legalWidths[i], 0.0001,
+                        "every legal width round-trips through its knob step without drift");
+        }
+
+        // a v2.61 session value outside the new set snaps to the nearest
+        // legal width on load - and a tie resolves to the NARROWER width
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.2f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.1, 0.0001,
+                    "an old 0.2-octave width snaps down to the 0.1-octave step");
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.7f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.5, 0.0001,
+                    "an old 0.7-octave width snaps to the 0.5-octave step");
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.5f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 2.0, 0.0001,
+                    "a tie (2.5 oct) snaps to the NARROWER 2.0-octave step");
+
+        // park the bandwidth back on its default
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
+    }
 
     auto* eq1BellParam = dynamic_cast<juce::RangedAudioParameter*> (
         strip->getApvts().getParameter ("eq1Bell"));

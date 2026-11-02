@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.61.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.62.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,26 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.62.0**
+  - **Seven equal bandwidth steps on the Costes strip's EQ.** The mid
+    bells' Q knob now runs **0.1 to 3.0 octaves** in exactly seven legal
+    widths — **0.1, 0.3, 0.5, 1, 1.5, 2, 3 oct** — spread **equally
+    across the knob travel** (the positions are i/6, not linear in
+    value), the same equal-step construction the cut slopes use.
+    Sessions saved by 2.61.x are safe: a bandwidth outside the new set
+    snaps to the nearest legal one on load (0.2 → 0.1, 0.7 → 0.5).
+  - **A very narrow bell is exact.** The narrow 0.1-octave step reads
+    exactly its gain at its centre (asserted by the harness): a dip that
+    *looks* shallower on the analyser is the analyser's own frequency
+    smoothing diluting dips narrower than about half an octave — the
+    filter itself is exact at any width.
+  - **SSL band colours.** The EQ knobs wear their band's colour: LF
+    keeps the black aluminium cap, LO MID a pastel blue, HI MID an
+    off-white, HF a pastel red, with a pointer that flips dark on the
+    bright caps.
+  - **Band glyphs.** Each EQ band carries a small engraved icon under
+    its selector: the LF low-shelf response, the two mid bells and the
+    HF high shelf.
 - **2.61.0**
   - **A four-band SSL-style EQ on the Costes strip.** The internal Costes
     channel strip grows an EQ section between its cuts and its tilt,
