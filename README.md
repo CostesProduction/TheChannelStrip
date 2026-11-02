@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.63.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.64.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,44 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.64.0** — *Roadmap C3: the strip grows its dynamics stage.* The
+  internal Costes channel strip gains a full dynamics row (a third
+  control row, panel resized to 1040x600) between its EQ and its tilt,
+  built as two classic halves:
+  - **Expander/gate.** THRESHOLD (-70 to 0 dB, default -50), RANGE
+    (0 to 40 dB, how far the gate can pull signal down at most),
+    ATTACK (0.5 to 100 ms, default 1 ms - a fast, controlled gate
+    needs its own attack so slow transients do not click open),
+    RELEASE (0.1 to 3 s, default 0.3), RATIO (1.2 to 12) and a MIX
+    knob (0-100 % wet, so the pull-down can be parallelled like an
+    upward expander blend). Detection is a true-RMS power detector
+    (one-pole, 10 ms time constant) on the stereo-linked signal:
+    unlike a peak or 2f-ripple detector it does not pump on bass.
+    The gain curve is the static expander law smoothed in the dB
+    domain with separate attack/release one-poles: below threshold,
+    the target is -(threshold - level) * (ratio - 1), clamped to
+    RANGE.
+  - **Compressor.** THRESHOLD (-60 to 0 dB), RATIO (1 to 20),
+    RELEASE (0.05 to 1.5 s, default 0.25), a **FAST attack plate**
+    (3 ms) versus the classic 30 mm-style slow program attack
+    (30 ms), MAKEUP GAIN (0 to +20 dB, applied to the compressed
+    path only), MIX (0-100 %) and a **sidechain HPF** (10 to
+    1000 Hz, Q = 1/sqrt(2) RBJ biquad on the detector path only,
+    default 10 Hz = honestly off) so big kick tails stop sucking
+    the bass out of the program. Same RMS stereo-linked detector;
+    gain engages with the attack time and recovers with the
+    release.
+  - **Honest bypass.** Both sections are bit-exact neutral at
+    their defaults (and for any pre-2.64 session, whose dynamics
+    parameters all read as defaults): when a section is off, its
+    range is zero or its mix is dry, its stage is skipped
+    entirely, so the strip processes sample-for-sample exactly
+    as v2.63 did.
+  - **Both halves get an ON/OFF plate** in the row header, new
+    engraved section glyphs (expander and compressor transfer
+    curves), and full cmd-click-to-default + session persistence
+    on every new control. The check relay now reports **38
+    checks** (up from 23; 709 in the test suite).
 - **2.63.1**
   - **Test-only patch, no behaviour change.** The bandwidth tie test
     used 0.85 octaves, which is *not* an exact tie in float arithmetic

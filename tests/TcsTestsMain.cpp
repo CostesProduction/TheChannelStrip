@@ -4566,12 +4566,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 23,
-                "the strip's twenty-three parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 38,
+                "the strip's thirty-eight parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 23,
-                "the strip exposes exactly twenty-three parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 38,
+                "the strip exposes exactly thirty-eight parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5006,6 +5006,15 @@ void testCostesStripSession()
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.5f);
     strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
 
+    // the dynamics section (v2.64.0): a recognisable position on both
+    // halves - a moved expander threshold and range, and a compressor
+    // ratio, a switched-on FAST ATTACK plate and a moved mix
+    strip->getApvts().getParameterAsValue ("expThreshold").setValue (-35.0f);
+    strip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+    strip->getApvts().getParameterAsValue ("compRatio").setValue (4.0f);
+    strip->getApvts().getParameterAsValue ("compFastAttack").setValue (true);
+    strip->getApvts().getParameterAsValue ("compMix").setValue (60.0f);
+
     juce::MemoryBlock state;
     proc.getStateInformation (state);
     expectTrue (state.getSize() > 0, "the session state is non-empty");
@@ -5053,10 +5062,20 @@ void testCostesStripSession()
                     "the EQ band 2 bandwidth restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq4Bell")->load(), 0.0, 0.01,
                     "the EQ band 4 shelf mode restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("expThreshold")->load(), -35.0, 0.01,
+                    "the expander threshold restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                    "the expander range restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compRatio")->load(), 4.0, 0.01,
+                    "the compressor ratio restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compFastAttack")->load(), 1.0, 0.01,
+                    "the compressor's FAST ATTACK plate restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compMix")->load(), 60.0, 0.01,
+                    "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 23,
-                "the restored strip's twenty-three parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 38,
+                "the restored strip's thirty-eight parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5201,10 +5220,41 @@ void testCostesStripSectionIcons()
                     "every band glyph is laid out inside the panel");
     }
 
+    // the two dynamics glyphs (v2.64.0): the expander's and the
+    // compressor's transfer curves, beside their section captions - the
+    // same type, visibility and containment rules as the five knob
+    // icons and the EQ's own
+    const auto dynIcons = editor.getDynIcons();
+    const CostesStripEditor::SectionIcon::Icon expectedDynTypes[2] =
+    {
+        CostesStripEditor::SectionIcon::Icon::expander,
+        CostesStripEditor::SectionIcon::Icon::compressor
+    };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        expectTrue (dynIcons[(size_t) i] != nullptr
+                        && dynIcons[(size_t) i]->type == expectedDynTypes[i],
+                    "each dynamics half carries its own transfer-curve glyph");
+        expectTrue (dynIcons[(size_t) i] != nullptr && dynIcons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (dynIcons[(size_t) i]->getBounds()),
+                    "every dynamics glyph is laid out inside the panel");
+    }
+
+    // the twelve dynamics sliders (v2.64.0): every knob and the sidechain
+    // selector laid out and visible inside the panel after the pass -
+    // the stable slider order's indices 17 to 28
+    const auto sliders = editor.getStripSliders();
+
+    for (int i = 17; i < 29; ++i)
+        expectTrue (sliders[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (sliders[(size_t) i]->getBounds()),
+                    "every dynamics knob and slider is laid out inside the panel");
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 880, 400 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+        const int testSizes[][2] = { { 1040, 600 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
 
         for (const auto& size : testSizes)
         {
@@ -5223,11 +5273,14 @@ void testCostesStripSectionIcons()
             for (auto* icon : bandIcons)
                 icon->paint (g);
 
+            for (auto* icon : dynIcons)
+                icon->paint (g);
+
             editor.paint (g);
         }
     }
 
-    editor.setSize (880, 400);
+    editor.setSize (1040, 600);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5266,40 +5319,47 @@ void testCostesStripKnobDefaultsAndCaps()
     CostesStripEditor editor (stripProc);
 
     // every knob and slider of the strip, in the accessor's stable order:
-    // the five row-1 knobs, the two cut slopes, then the EQ's FREQ/GAIN
-    // knobs and width sweeps band by band
+    // the five row-1 knobs, the two cut slopes, the EQ's FREQ/GAIN knobs
+    // and width sweeps band by band, then the expander's six knobs and
+    // the compressor's five knobs plus its SC HPF slider (v2.64.0)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[17] =
+    const char* paramIds[29] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
         "eq1Hz", "eq1Gain", "eq2Hz", "eq2Gain", "eq2Oct",
-        "eq3Hz", "eq3Gain", "eq3Oct", "eq4Hz", "eq4Gain"
+        "eq3Hz", "eq3Gain", "eq3Oct", "eq4Hz", "eq4Gain",
+        "expThreshold", "expRange", "expAttack", "expRelease", "expRatio", "expMix",
+        "compThreshold", "compRatio", "compRelease", "compGain", "compMix", "compHpf"
     };
 
-    const float expectedDefaults[17] =
+    const float expectedDefaults[29] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
         100.0f, 0.0f, 400.0f, 0.0f, 1.0f,
-        1600.0f, 0.0f, 1.0f, 7200.0f, 0.0f
+        1600.0f, 0.0f, 1.0f, 7200.0f, 0.0f,
+        -50.0f, 0.0f, 0.001f, 0.3f, 2.0f, 100.0f,
+        0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 10.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[17] =
+    const float perturbed[29] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
         250.0f, -3.5f, 1000.0f, 4.0f, 3.0f,
-        2500.0f, -6.0f, 2.0f, 9000.0f, 7.5f
+        2500.0f, -6.0f, 2.0f, 9000.0f, 7.5f,
+        -22.5f, 18.0f, 0.02f, 1.4f, 7.0f, 35.0f,
+        -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 17; ++i)
+    for (int i = 0; i < 29; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -5312,25 +5372,32 @@ void testCostesStripKnobDefaultsAndCaps()
                     "a command-click restores the parameter's default through the attachment");
     }
 
-    // ---- the cap colours (remark 4 + v2.62.0): the 13 rotary knobs
+    // ---- the cap colours (remark 4 + v2.62.0): the 24 rotary knobs
     // carry their band's colour on the backgroundColourId - the row-1
     // caps stay black EXCEPT the pastel red HIGH CUT (v2.63.0), the EQ
-    // bands speak the SSL colours. The four linear selectors draw no
-    // cap, so they are not in the loop ----
-    const int knobIndex[13] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16 };
-    const unsigned int knobCap[13] =
+    // bands speak the SSL colours, and the eleven dynamics knobs
+    // (v2.64.0) wear the row-1 black aluminium: the SSL dynamics
+    // modules carry no colour. The five linear selectors draw no cap,
+    // so they are not in the loop ----
+    const int knobIndex[24] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
+                                17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
+    const unsigned int knobCap[24] =
     {
         0xff23232au, 0xff23232au, 0xffd8a49cu, 0xff23232au, 0xff23232au,
         0xff23232au, 0xff23232au,
         0xffaac6dfu, 0xffaac6dfu,
         0xfff0e9d8u, 0xfff0e9d8u,
-        0xffd8a49cu, 0xffd8a49cu
+        0xffd8a49cu, 0xffd8a49cu,
+        0xff23232au, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au
     };
 
-    for (int k = 0; k < 13; ++k)
+    for (int k = 0; k < 24; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white)");
+                    "each rotary knob wears its band's cap colour (high cut and HF pastel red, LO MID blue, HI MID off-white, the dynamics black)");
 }
 
 void testCostesStripEq()
@@ -5552,6 +5619,300 @@ void testCostesStripEq()
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.64.0 (Clement's spec, roadmap C3): the dynamics section - the
+// gate/expander and the classic compressor. Every expected value is the
+// float64 simulation of the exact DSP (the 10 ms RMS power detector,
+// the static curves, the attack/release one-poles), measured the
+// harness way: the coherent lock-in on a settled tone. The settle runs
+// 240 blocks (2.4 s) - the expander's release reaches 3 s, so the audio
+// test's short 24-block settle would leave the gain a full
+// time-constant short of its steady state
+// ---------------------------------------------------------------------------
+void testCostesStripDynamics()
+{
+    beginTest ("v2.64.0: the dynamics - expander range/ratio/mix, compressor ratio/gain/mix, the FAST ATTACK plate, the sidechain HPF");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    const int lockinBlocks = 240;
+
+    auto measureAmplitude = [&] (double frequencyHz, double probeHz,
+                                  double amplitude) -> double
+    {
+        SineSource src (frequencyHz, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < lockinBlocks; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        // the source phase at the measured block start: omega times
+        // the total number of samples filled before it
+        const double probeOmega = juce::MathConstants<double>::twoPi * probeHz / 48000.0;
+        const double phase0 = probeOmega * (double) (lockinBlocks * 480);
+
+        double c = 0.0, s = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+        {
+            const double phase = phase0 + probeOmega * (double) i;
+            const double sample = block.getSample (0, i);
+            c += sample * std::cos (phase);
+            s += sample * std::sin (phase);
+        }
+
+        return 2.0 * std::sqrt (c * c + s * s) / 480.0;
+    };
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // the parked defaults are the strip's own identity: the expander
+    // parks at range 0 and the compressor at threshold 0, both halves
+    // are skipped wholesale, and a 1 kHz tone comes out at its own
+    // amplitude (the parked cuts and the identity EQ move 1 kHz by
+    // less than a thousandth of a dB)
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / 0.25), 0.0, 0.2,
+                "the parked dynamics section is a true bypass (bit-skipped at range 0 and threshold 0)");
+
+    // the bypassed references the ratios below read against
+    const double flatRef1k  = measureAmplitude (1000.0, 1000.0, 0.25);
+    const double flatRef05  = measureAmplitude (1000.0, 1000.0, 0.05);
+    const double flatRef100 = measureAmplitude (100.0, 100.0, 0.25);
+
+    // ---- the EXPANDER: a loud tone (-15.05 dB RMS) rides above a -35
+    // dB threshold and must pass untouched even at the deepest gate
+    // settings; a quiet one (-29.03 dB RMS) sits 9.03 dB under the -20
+    // dB threshold, and the expansion reads the ratio arithmetic, the
+    // range clamp and the mix blend straight off the static curve ----
+    setParam ("expThreshold", -35.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.3,
+                "the expander stays fully open above its threshold");
+
+    setParam ("expThreshold", -20.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -40.0, 1.0,
+                "deep under the threshold the expander floors at its RANGE (40 dB)");
+
+    setParam ("expRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -9.0, 0.6,
+                "a 2:1 expansion turns 9 dB under the threshold into 9 dB down");
+
+    setParam ("expRatio", 4.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -27.0, 0.8,
+                "a 4:1 expansion turns 9 dB under the threshold into 27 dB down");
+
+    setParam ("expRatio", 1.2f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -1.8, 0.4,
+                "the gentlest 1.2:1 slope still expands (1.8 dB down)");
+
+    setParam ("expRatio", 2.0f);
+    setParam ("expRange", 5.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -5.0, 0.5,
+                "the RANGE clamps the expansion at its own 5 dB floor");
+
+    setParam ("expRange", 40.0f);
+    setParam ("expMix", 50.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -3.4, 0.5,
+                "a 50 % mix halves the expansion in the blend (the sim says -3.38 dB)");
+    setParam ("expMix", 100.0f);
+
+    setParam ("expRatio", 12.0f);
+    setParam ("expOn", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), 0.0, 0.3,
+                "the expander's OFF plate bypasses the whole section");
+    setParam ("expOn", true);
+
+    // back to the parked expander: range 0 is the true bypass
+    setParam ("expThreshold", -50.0f);
+    setParam ("expRange", 0.0f);
+    setParam ("expRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
+                "the parked expander (range 0) is a true bypass");
+
+    // ---- the COMPRESSOR: the loud tone (-15.05 dB RMS) sits 9.95 dB
+    // over a -25 dB threshold, and the reduction reads the ratio
+    // arithmetic straight off the static curve ----
+    setParam ("compThreshold", -25.0f);
+    setParam ("compRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -5.0, 0.6,
+                "a 2:1 compressor turns 9.95 dB over threshold into 4.97 dB down");
+
+    setParam ("compRatio", 20.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -9.5, 0.6,
+                "a 20:1 compressor limits 9.95 dB over threshold to 9.48 dB down");
+
+    setParam ("compRatio", 10.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -9.0, 0.6,
+                "a 10:1 compressor reads between the two");
+
+    setParam ("compRatio", 2.0f);
+    setParam ("compGain", 6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 1.0, 0.7,
+                "the make-up gain rides the wet half (+6 dB on a -4.97 dB reduction)");
+    setParam ("compGain", 0.0f);
+
+    setParam ("compMix", 50.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -2.1, 0.5,
+                "a 50 % mix halves the reduction in the blend (the sim says -2.14 dB)");
+    setParam ("compMix", 100.0f);
+
+    setParam ("compRatio", 20.0f);
+    setParam ("compOn", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.3,
+                "the compressor's OFF plate bypasses the whole section");
+    setParam ("compOn", true);
+
+    // ---- the FAST ATTACK plate (Clement's spec): 120 blocks of
+    // silence park the detector at its floor and the gain open, then a
+    // single 480-sample tone block lands. The block's RMS reads how
+    // much of the reduction engaged inside its own 10 ms: the sim says
+    // -4.6 dB with the 3 ms fast attack and -1.1 dB with the classic
+    // 30 ms - the FAST plate clamps the transient, the SLOW one lets
+    // its point through ----
+    setParam ("compThreshold", -30.0f);
+    setParam ("compRatio", 20.0f);
+    setParam ("compHpf", 10.0f);
+
+    auto onsetRmsDb = [&] (bool fastAttack) -> double
+    {
+        setParam ("compFastAttack", fastAttack);
+
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 120; ++i)
+            proc.processBlock (silence, noMidi);
+
+        SineSource src (1000.0, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 480);
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double energy = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            energy += (double) block.getSample (0, i) * block.getSample (0, i);
+
+        return juce::Decibels::gainToDecibels (std::sqrt (energy / 480.0)
+                                              / (0.25 / std::sqrt (2.0)));
+    };
+
+    expectNear (onsetRmsDb (true), -4.6, 1.2,
+                "the FAST attack engages most of the reduction inside the first 10 ms (the sim says -4.6 dB)");
+    expectNear (onsetRmsDb (false), -1.1, 1.2,
+                "the SLOW attack lets most of the transient through (the sim says -1.1 dB)");
+
+    // both plates converge on the same steady reduction: 14.95 dB over
+    // threshold at 20:1 is 14.2 dB down (the sim says -14.23)
+    setParam ("compFastAttack", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -14.2, 0.8,
+                "the fast attack settles on the full 14.2 dB reduction");
+    setParam ("compFastAttack", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -14.2, 0.8,
+                "the slow attack settles on the same 14.2 dB reduction");
+
+    // ---- the sidechain HPF (Clement's spec): a 100 Hz tone at -25 dB
+    // threshold and 20:1 compresses with the corner parked at 10 Hz
+    // (the honest "off"), but a 1000 Hz corner removes it from the
+    // detector and the compressor opens. The sim pins the exact
+    // reading, Jensen ripple included: -9.86 dB ----
+    setParam ("compThreshold", -25.0f);
+    setParam ("compHpf", 10.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -9.9, 0.9,
+                "the sidechain HPF parked at 10 Hz leaves the bass in the detector");
+
+    setParam ("compHpf", 1000.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), 0.0, 0.5,
+                "a 1000 Hz sidechain corner frees the bass from the detector");
+
+    // ---- the readouts' own parse plumbing: the knob speaks its format
+    // and a typed value lands through the parameter's text functions ----
+    {
+        auto* ratioParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compRatio"));
+        expectTrue (ratioParam != nullptr,
+                    "the compressor ratio parameter is a ranged parameter");
+
+        if (ratioParam != nullptr)
+            expectNear (ratioParam->convertFrom0to1 (ratioParam->getValueForText ("8 : 1")), 8.0, 0.01,
+                        "a typed 8 : 1 ratio parses to 8.0");
+
+        auto* releaseParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compRelease"));
+        expectTrue (releaseParam != nullptr,
+                    "the compressor release parameter is a ranged parameter");
+
+        if (releaseParam != nullptr)
+            expectNear (releaseParam->convertFrom0to1 (releaseParam->getValueForText ("0.50 s")), 0.5, 0.001,
+                        "a typed 0.50 s release parses to half a second");
+
+        auto* attackParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expAttack"));
+        expectTrue (attackParam != nullptr,
+                    "the expander attack parameter is a ranged parameter");
+
+        if (attackParam != nullptr)
+            expectNear (attackParam->convertFrom0to1 (attackParam->getValueForText ("5 ms")), 0.005, 0.0001,
+                        "a typed 5 ms attack parses to 5 milliseconds");
+
+        auto* hpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compHpf"));
+        expectTrue (hpfParam != nullptr,
+                    "the sidechain HPF parameter is a ranged parameter");
+
+        if (hpfParam != nullptr)
+            expectNear (hpfParam->convertFrom0to1 (hpfParam->getValueForText ("400 Hz")), 400.0, 0.01,
+                        "a typed 400 Hz sidechain corner parses to 400 Hz");
+
+        auto* mixParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expMix"));
+        expectTrue (mixParam != nullptr,
+                    "the expander mix parameter is a ranged parameter");
+
+        if (mixParam != nullptr)
+            expectNear (mixParam->convertFrom0to1 (mixParam->getValueForText ("45 %")), 45.0, 0.01,
+                        "a typed 45 % mix parses to 45");
+
+        auto* thresholdParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expThreshold"));
+        expectTrue (thresholdParam != nullptr,
+                    "the expander threshold parameter is a ranged parameter");
+
+        if (thresholdParam != nullptr)
+            expectNear (thresholdParam->convertFrom0to1 (thresholdParam->getValueForText ("-12 dB")), -12.0, 0.01,
+                        "a typed -12 dB threshold parses to -12 dB");
+    }
+
+    // ---- back to the parked defaults: threshold 0, ratio 2, mix 100,
+    // HPF 10 - the compressor is skipped wholesale again ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compHpf", 10.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
+                "the parked compressor (threshold 0) is a true bypass");
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -5697,6 +6058,7 @@ int main (int argc, char* argv[])
     testCostesStripSectionIcons();
     testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();
+    testCostesStripDynamics();
 
     if (integration)
         testIntegrationRealConsole();

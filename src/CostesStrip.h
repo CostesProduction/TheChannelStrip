@@ -1,16 +1,35 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.63.0 (roadmap C2)
+// src/CostesStrip.h - v2.64.0 (roadmap C3)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
 // consoles (TheChannelStripAudioProcessor::selectCostesStrip). Signal path:
 // trim in -> variable-order Butterworth low cut -> variable-order Butterworth
-// high cut -> the four-band EQ -> tilt -> drive (tanh saturation with an
-// invisible auto-makeup calibrated on a -12 dBFS sine) -> optional 2x
-// oversampling around the drive stage. Because it rides the exact same
-// hosting path as the consoles, it inherits the click-free 50 ms crossfade,
-// the per-ident settings memory, the session save/restore and the parameter
-// relay without a single extra wire.
+// high cut -> the four-band EQ -> the expander -> the compressor -> tilt ->
+// drive (tanh saturation with an invisible auto-makeup calibrated on a
+// -12 dBFS sine) -> optional 2x oversampling around the drive stage. Because
+// it rides the exact same hosting path as the consoles, it inherits the
+// click-free 50 ms crossfade, the per-ident settings memory, the session
+// save/restore and the parameter relay without a single extra wire.
+//
+// v2.64.0 (Clement's spec, roadmap C3): the DYNAMICS section - a
+// gate/expander and a classic compressor between the EQ and the tilt,
+// exactly where an SSL channel puts them. The expander: threshold
+// (-70 to 0 dB), range (0 to 40 dB, the maximum attenuation - 0 dB is a
+// true bypass), attack (0.5 to 100 ms, added: a gate needs its opening
+// speed for click-free transients), release (0.1 to 3 s), ratio (1.2 to 12)
+// and a mix knob (0 to 100 % wet). The compressor: threshold (-60 to 0 dB),
+// ratio (1 to 20), release (0.05 to 1.5 s), a FAST ATTACK plate (3 ms lit /
+// 30 ms dark), gain (0 to +20 dB of make-up), a mix knob and a sidechain
+// HPF (10 to 1000 Hz) that filters only what the detector hears. Both
+// halves sit behind their own on/off plates (the section language of the
+// cuts and the EQ), both are stereo-linked (one detector for L and R, so
+// the image never shifts), and both detectors are a 10 ms true-RMS power
+// ballistics - the dbx-style smoothing that keeps low tones from pumping
+// the gain at twice their frequency. At the DEFAULTS (range 0, threshold
+// 0, ratio 2, mix 100) both halves are skipped wholesale: the strip is
+// bit-for-bit the strip of v2.63. Sessions saved by earlier versions find
+// no dynamics children and load those neutral defaults.
 //
 // v2.63.0 (Clement's remarks 1-2-4): the seven legal EQ widths are now
 // 0.4 / 0.7 / 1.0 / 1.5 / 2.0 / 3.0 / 4.0 octaves (still seven equal
@@ -82,7 +101,7 @@
 // plug-in cannot report: the strip stays at zero reported latency (and
 // the harness asserts it).
 //
-// Roadmap: C3 will add the compressor, C4 a transient designer.
+// Roadmap: C4 will add a transient designer.
 // ---------------------------------------------------------------------------
 
 #pragma once
@@ -212,6 +231,26 @@ private:
     std::atomic<float>* eq4Gain = nullptr;
     std::atomic<float>* eq4Bell = nullptr; // 0.0 / 1.0 (shelf / bell)
 
+    // the dynamics section (v2.64.0): the expander's seven parameters and
+    // the compressor's eight. Thresholds and range read in dBFS of the
+    // RMS detector, the attack/release times in seconds, the mix in %
+    // wet, and the two on/off plates own each half's true bypass
+    std::atomic<float>* expOn         = nullptr; // 0.0 / 1.0
+    std::atomic<float>* expThreshold  = nullptr;
+    std::atomic<float>* expRange      = nullptr;
+    std::atomic<float>* expAttack     = nullptr;
+    std::atomic<float>* expRelease    = nullptr;
+    std::atomic<float>* expRatio      = nullptr;
+    std::atomic<float>* expMix        = nullptr;
+    std::atomic<float>* compOn        = nullptr; // 0.0 / 1.0
+    std::atomic<float>* compThreshold = nullptr;
+    std::atomic<float>* compRatio     = nullptr;
+    std::atomic<float>* compRelease   = nullptr;
+    std::atomic<float>* compFastAttack= nullptr; // 0.0 / 1.0
+    std::atomic<float>* compGain      = nullptr;
+    std::atomic<float>* compMix       = nullptr;
+    std::atomic<float>* compHpf       = nullptr;
+
     double currentSampleRate = 48000.0;
 
     // the trim moves as a smoothed linear gain (20 ms); the cut corners
@@ -245,6 +284,23 @@ private:
     float lastEqN[4]    = { -1.0f, -1.0f, -1.0f, -1.0f };
     bool  lastEqBell[4] = { false, false, false, false };
     int   lastEqOn      = -1;
+
+    // the dynamics state (v2.64.0): one stereo-linked RMS power envelope
+    // and one smoothed dB gain per half, plus the compressor's sidechain
+    // high-pass (a biquad the AUDIO never hears - only the detector). The
+    // 10 ms detector coefficient is rebuilt in prepareToPlay; the attack
+    // and release one-poles are per-block constants from the parameters.
+    // The gains live in the dB domain so the static curves stay plain
+    // arithmetic, and a neutral section (range 0, threshold 0) is skipped
+    // before a single multiply touches the samples
+    static constexpr float detectorFloorPower = 1.0e-12f;  // -120 dB
+    float expDetectorPower = 0.0f;
+    float expGainDb        = 0.0f;    // 0 = open, negative = expanded
+    float compDetectorPower = 0.0f;
+    float compGainDb       = 0.0f;    // 0 = unity, negative = compressed
+    float detectorCoef     = 0.0f;    // 10 ms RMS ballistics, per sample
+    Biquad compSidechain[2] = {};     // the SC HPF, one per channel
+    float lastCompHpf      = -1.0f;   // the sidechain corner's cache
 
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
@@ -305,6 +361,15 @@ private:
 // side by side. Bands 1/4 switch between bell and shelf with a dedicated
 // BELL/SHELF plate, bands 2/3 sweep their bandwidth in octaves with the
 // same horizontal slider the cuts use for their slopes.
+//
+// v2.64.0 (Clement's spec, roadmap C3): the panel grows a third row - the
+// DYNAMICS, twice thirteen columns wide. The left half is the EXPANDER
+// (THRESH, RANGE, ATTACK, RELEASE, RATIO, MIX), the right half the
+// COMPRESSOR (THRESH, RATIO, RELEASE, the FAST/SLOW attack plate, GAIN,
+// MIX and the SC HPF slider). Each half owns its on/off plate and its
+// transfer-curve glyph beside its caption, every knob keeps the
+// command-click default and the caps stay the black aluminium of the
+// row-1 knobs - the SSL dynamics modules wear no colour.
 // ---------------------------------------------------------------------------
 class CostesStripEditor : public juce::AudioProcessorEditor
 {
@@ -342,13 +407,19 @@ public:
 
     // every knob and slider of the strip, in a stable order for the
     // offline test harness: the five row-1 knobs, the two cut slopes,
-    // then the EQ's FREQ/GAIN knobs and width sweeps band by band
-    std::array<CostesSlider*, 17> getStripSliders()
+    // the EQ's FREQ/GAIN knobs and width sweeps band by band, then the
+    // expander's six knobs and the compressor's five knobs plus its
+    // sidechain HPF slider (the attack plate is a button, not a slider)
+    std::array<CostesSlider*, 29> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
                  &eq1HzKnob, &eq1GainKnob, &eq2HzKnob, &eq2GainKnob, &eq2OctSlider,
-                 &eq3HzKnob, &eq3GainKnob, &eq3OctSlider, &eq4HzKnob, &eq4GainKnob };
+                 &eq3HzKnob, &eq3GainKnob, &eq3OctSlider, &eq4HzKnob, &eq4GainKnob,
+                 &expThresholdKnob, &expRangeKnob, &expAttackKnob,
+                 &expReleaseKnob, &expRatioKnob, &expMixKnob,
+                 &compThresholdKnob, &compRatioKnob, &compReleaseKnob,
+                 &compGainKnob, &compMixKnob, &compHpfSlider };
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
@@ -357,7 +428,8 @@ public:
     // test harness can name the types and count the instances
     struct SectionIcon : public juce::Component
     {
-        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
+        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf,
+                           expander, compressor };
 
         explicit SectionIcon (Icon iconType) : type (iconType) {}
 
@@ -384,6 +456,14 @@ public:
     std::array<SectionIcon*, 4> getEqBandIcons()
     {
         return { &eqBand1Icon, &eqBand2Icon, &eqBand3Icon, &eqBand4Icon };
+    }
+
+    // the two dynamics glyphs (v2.64.0): the expander's and the
+    // compressor's transfer curves, beside their section captions - for
+    // the offline test harness, in half order
+    std::array<SectionIcon*, 2> getDynIcons()
+    {
+        return { &expIcon, &compIcon };
     }
 
 private:
@@ -424,6 +504,25 @@ private:
     juce::Label eqBand1Label, eqBand2Label, eqBand3Label, eqBand4Label;
     juce::Label eqSectionLabel;
 
+    // the dynamics section (v2.64.0, Clement's spec): eleven knobs and one
+    // sidechain slider - the expander's THRESH, RANGE, ATTACK, RELEASE,
+    // RATIO and MIX, then the compressor's THRESH, RATIO, RELEASE, GAIN
+    // and MIX plus its SC HPF - each with its own caption label, the two
+    // section captions and the two transfer-curve glyphs
+    CostesSlider expThresholdKnob, expRangeKnob, expAttackKnob;
+    CostesSlider expReleaseKnob,  expRatioKnob,  expMixKnob;
+    CostesSlider compThresholdKnob, compRatioKnob, compReleaseKnob;
+    CostesSlider compGainKnob,     compMixKnob,   compHpfSlider;
+
+    juce::Label expThresholdLabel, expRangeLabel, expAttackLabel;
+    juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
+    juce::Label compThresholdLabel, compRatioLabel, compReleaseLabel;
+    juce::Label compAttackLabel, compGainLabel, compMixLabel, compHpfLabel;
+    juce::Label expSectionLabel, compSectionLabel;
+
+    SectionIcon expIcon  { SectionIcon::Icon::expander };    // v2.64.0
+    SectionIcon compIcon { SectionIcon::Icon::compressor }; // v2.64.0
+
     // the oversampling switch: a ToggleButton that paints its own plate
     // (lit amber + LED when on, dark + dim LED when off) - the default
     // checkbox tick was too quiet to read (v2.57.0, Clement's remark 2).
@@ -448,6 +547,17 @@ private:
 
     ShelfModeToggle eq1ModeButton, eq4ModeButton;
 
+    // the compressor's attack plate (v2.64.0): lit amber "FAST" (a 3 ms
+    // attack that clamps a transient almost before it lands) or dark
+    // "SLOW" (the classic 30 ms that lets a drum's point through) - the
+    // same plate language as the BELL/SHELF switch
+    struct FastAtkToggle : public juce::ToggleButton
+    {
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    FastAtkToggle compFastAttackButton;
+
     // the cut on/off plates (v2.59.0, Clement's remark 2): one ToggleButton
     // per cut, painted like the oversampling switch but vertical - a
     // horizontal bar with an LED at the top and an ON/OFF caption below.
@@ -458,6 +568,10 @@ private:
     };
 
     CutOnToggle lowCutOnButton, highCutOnButton;
+
+    // the dynamics' own on/off plates (v2.64.0): the same "NAME ON" /
+    // "NAME OFF" plates as the EQ's global switch, one per half
+    PlateToggle expOnButton, compOnButton;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
@@ -484,6 +598,24 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq4HzAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> eq4GainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> eq4ModeAttachment;
+
+    // the dynamics attachments (v2.64.0): twelve sliders and three
+    // plates wired to the APVTS
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> expOnAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expThresholdAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expRangeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expAttackAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expReleaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expRatioAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expMixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compOnAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compThresholdAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compRatioAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compReleaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compFastAttackAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compGainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compMixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compHpfAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
