@@ -164,6 +164,13 @@ namespace
     const juce::Colour plateText    (0xffe8dcbf);
     const juce::Colour screwColour  (0xff8a7d63);
 
+    // v2.65.0: the dynamics meters' LEDs. The IN ladders speak the
+    // console's green with an amber top (the over-region of a level
+    // meter); the GR ladders speak the classic reduction orange - the
+    // colour a real SSL's GR meter glows
+    const juce::Colour meterGreen   (0xff4d9c55);
+    const juce::Colour meterGrOrange (0xffd97a2b);
+
     // a true logarithmic sweep for the cut corners: every octave of the
     // range spans the same knob travel, and the optional snap lambda lands
     // every knob position on a legal value (whole Hz for the low cut, tens
@@ -1066,6 +1073,14 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     compGainDb        = 0.0f;
     detectorCoef      = 1.0f - std::exp (-1.0f / (0.010f * (float) currentSampleRate));
 
+    // v2.65.0: the meters start at the detector's floor (an empty IN
+    // ladder) and at unity (an empty GR ladder) - a fresh strip never
+    // lies about the silence it has not heard yet
+    expMeterInDb.store  (-120.0f, std::memory_order_relaxed);
+    expMeterGrDb.store  (0.0f,    std::memory_order_relaxed);
+    compMeterInDb.store (-120.0f, std::memory_order_relaxed);
+    compMeterGrDb.store (0.0f,    std::memory_order_relaxed);
+
     for (auto& section : compSidechain)
         section.reset();
 
@@ -1440,8 +1455,12 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // evaluated here, once - the process loop below only runs plain
     // arithmetic per sample. A neutral half (its plate off, or range /
     // threshold / mix at a value that mathematically cannot move a
-    // sample) is skipped wholesale: not a single multiply touches the
-    // audio, so the parked strip is bit-for-bit the strip of v2.63
+    // sample) applies not a single multiply to the audio, so the parked
+    // strip is bit-for-bit the strip of v2.63. v2.65.0: the DETECTORS
+    // now run unconditionally - the meters must tell the truth even
+    // while the plates are off - but they only read the samples, never
+    // write them, so the parked strip still processes sample for
+    // sample exactly as before
     // ------------------------------------------------------------------
     const float expThresholdDb = expThreshold->load();
     const float expRangeDb     = expRange->load();
@@ -1472,8 +1491,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
     // the sidechain corner rides the same per-block cache discipline as
     // the cuts: the biquad coefficients rebuild only when the knob moves
-    // (10 to 1000 Hz always sits under the Nyquist guard)
-    if (compActive)
+    // (10 to 1000 Hz always sits under the Nyquist guard). v2.65.0: the
+    // rebuild left the compActive gate - the detector always listens
+    // through the sidechain now, so the IN meter shows the level the
+    // compressor will actually act on, corner or no corner
     {
         const float hpfHz = juce::jlimit (10.0f, 1000.0f, compHpf->load());
 
@@ -1537,13 +1558,16 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         }
 
         // stage 2, the EXPANDER: the 10 ms RMS detector rides the louder
-        // channel, the static curve (below the threshold expand by
+        // channel (one detector for L and R, so the image never
+        // shifts), the static curve (below the threshold expand by
         // over * (ratio - 1), never past the range floor) is evaluated
         // in the dB domain, and the gain one-pole opens on the attack
-        // and closes on the release. A NaN sample fails the rectify
-        // compare and leaves the detector untouched - the documented
-        // limit of the whole shell, no worse here
-        if (expActive)
+        // and closes on the release. v2.65.0: the detector runs even
+        // when the section is parked - the IN meter must read the level
+        // that sits at the gate - and a parked gain snaps open so the
+        // GR meter never carries a stale reading. A NaN sample fails
+        // the rectify compare and leaves the detector untouched - the
+        // documented limit of the whole shell, no worse here
         {
             float rectified = 0.0f;
 
@@ -1552,23 +1576,30 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             expDetectorPower += (rectified * rectified - expDetectorPower) * detectorCoef;
 
-            const float levelDb = 10.0f * std::log10 (
-                juce::jmax (expDetectorPower, detectorFloorPower));
+            if (expActive)
+            {
+                const float levelDb = 10.0f * std::log10 (
+                    juce::jmax (expDetectorPower, detectorFloorPower));
 
-            float targetDb = 0.0f;
+                float targetDb = 0.0f;
 
-            if (levelDb < expThresholdDb)
-                targetDb = -juce::jmin ((expThresholdDb - levelDb) * expCurveSlope,
-                                        expRangeDb);
+                if (levelDb < expThresholdDb)
+                    targetDb = -juce::jmin ((expThresholdDb - levelDb) * expCurveSlope,
+                                            expRangeDb);
 
-            expGainDb += (targetDb - expGainDb)
-                * ((targetDb > expGainDb) ? expAttackCoef : expReleaseCoef);
+                expGainDb += (targetDb - expGainDb)
+                    * ((targetDb > expGainDb) ? expAttackCoef : expReleaseCoef);
 
-            const float wet = std::pow (10.0f, expGainDb * 0.05f);
-            const float blend = 1.0f - expMixNorm + expMixNorm * wet;
+                const float wet = std::pow (10.0f, expGainDb * 0.05f);
+                const float blend = 1.0f - expMixNorm + expMixNorm * wet;
 
-            for (int ch = 0; ch < numChannels; ++ch)
-                channels[ch][i] *= blend;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    channels[ch][i] *= blend;
+            }
+            else
+            {
+                expGainDb = 0.0f;
+            }
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -1576,8 +1607,9 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // path only - the audio never hears it), the static curve
         // above the threshold, the gain one-pole ENGAGING on the attack
         // and RECOVERING on the release, and the make-up riding the wet
-        // half only so the mix knob stays honest
-        if (compActive)
+        // half only so the mix knob stays honest. v2.65.0: the detector
+        // (and its sidechain) runs even when the section is parked, and
+        // a parked gain snaps back to unity for the GR meter
         {
             float rectified = 0.0f;
 
@@ -1587,22 +1619,29 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             compDetectorPower += (rectified * rectified - compDetectorPower) * detectorCoef;
 
-            const float levelDb = 10.0f * std::log10 (
-                juce::jmax (compDetectorPower, detectorFloorPower));
+            if (compActive)
+            {
+                const float levelDb = 10.0f * std::log10 (
+                    juce::jmax (compDetectorPower, detectorFloorPower));
 
-            float targetDb = 0.0f;
+                float targetDb = 0.0f;
 
-            if (levelDb > compThresholdDb)
-                targetDb = -(levelDb - compThresholdDb) * compCurveSlope;
+                if (levelDb > compThresholdDb)
+                    targetDb = -(levelDb - compThresholdDb) * compCurveSlope;
 
-            compGainDb += (targetDb - compGainDb)
-                * ((targetDb < compGainDb) ? compAttackCoef : compReleaseCoef);
+                compGainDb += (targetDb - compGainDb)
+                    * ((targetDb < compGainDb) ? compAttackCoef : compReleaseCoef);
 
-            const float wet = compMakeupGain * std::pow (10.0f, compGainDb * 0.05f);
-            const float blend = 1.0f - compMixNorm + compMixNorm * wet;
+                const float wet = compMakeupGain * std::pow (10.0f, compGainDb * 0.05f);
+                const float blend = 1.0f - compMixNorm + compMixNorm * wet;
 
-            for (int ch = 0; ch < numChannels; ++ch)
-                channels[ch][i] *= blend;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    channels[ch][i] *= blend;
+            }
+            else
+            {
+                compGainDb = 0.0f;
+            }
         }
 
         // stage 3: the tilt cascade and its flat centring companion
@@ -1618,6 +1657,20 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             channels[ch][i] = sample;
         }
     }
+
+    // v2.65.0: the meters' per-block snapshot, stored after the loop so
+    // the ladders read the state at the block's last sample. The IN
+    // meters speak the detectors' RMS level (the floor parks an empty
+    // ladder), the GR meters speak the gain each half applies right
+    // now - 0 by construction when the half is parked
+    expMeterInDb.store (10.0f * std::log10 (
+                           juce::jmax (expDetectorPower, detectorFloorPower)),
+                       std::memory_order_relaxed);
+    expMeterGrDb.store (expGainDb, std::memory_order_relaxed);
+    compMeterInDb.store (10.0f * std::log10 (
+                            juce::jmax (compDetectorPower, detectorFloorPower)),
+                        std::memory_order_relaxed);
+    compMeterGrDb.store (compGainDb, std::memory_order_relaxed);
 
     if (drive <= 0.0f)
         return;   // the blend term vanishes: drive 0 is bit-exactly clean
@@ -1952,6 +2005,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (compOnButton);
     addAndMakeVisible (compFastAttackButton);
 
+    // the dynamics meters (v2.65.0): the SSL J's own language - an IN
+    // ladder and a GR ladder per stage, painted from the processor's
+    // per-block snapshots
+    addAndMakeVisible (expInMeter);
+    addAndMakeVisible (expGrMeter);
+    addAndMakeVisible (compInMeter);
+    addAndMakeVisible (compGrMeter);
+
     trimInAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "trimInDb", trimInKnob);
     lowCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -2036,14 +2097,25 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // columns (152) plus the breathing room between them. v2.62.0
     // (Clement's remark 5): each band column also hosts its own 16 px
     // glyph under the selector, so the row grows to 200 px. v2.64.0:
-    // the dynamics row adds its own 200 px (a breath, a header and the
-    // thirteen columns) and the panel widens to host them: 13 columns
-    // of 80 px, the expander's six then the compressor's seven
-    setSize (1040, 600);
+    // the dynamics row added its own 200 px. v2.65.0 (Clement's
+    // photos of the SSL J): the dynamics split into TWO stages, the
+    // expander's row then the compressor's, each with its own 200 px -
+    // thirteen cramped columns became six and seven wide ones, and
+    // each stage hosts its IN ladder at the left (beside the THRESH
+    // knob) and its GR ladder at the right (the section's payoff)
+    setSize (1040, 800);
+
+    // the meters repaint at 30 Hz - the detectors are already smoothed
+    // (a 10 ms RMS envelope, attack and release one-poles), so a
+    // straight read paints a steady ladder without any display ballistics
+    startTimerHz (30);
 }
 
 CostesStripEditor::~CostesStripEditor()
 {
+    // the meter timer stops before anything it repaints goes away
+    stopTimer();
+
     // detach the controls before the LookAndFeel member goes away
     trimInAttachment.reset();
     lowCutAttachment.reset();
@@ -2193,8 +2265,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.drawLine (14.0f, 224.0f, (float) width - 14.0f, 224.0f, 1.0f);
 
     // the dynamics' own divider (v2.64.0): the same engraved rule under
-    // the EQ block, so the third row reads as its own band too
+    // the EQ block, so the third row reads as its own band too. v2.65.0:
+    // a second rule between the two stages - the expander's row and
+    // the compressor's read as the SSL J's own two dynamics halves,
+    // separated by the silkscreen line
     g.drawLine (14.0f, 394.0f, (float) width - 14.0f, 394.0f, 1.0f);
+    g.drawLine (14.0f, 594.0f, (float) width - 14.0f, 594.0f, 1.0f);
 
     // the four corner screws of the module front
     for (int i = 0; i < 4; ++i)
@@ -2209,6 +2285,17 @@ void CostesStripEditor::paint (juce::Graphics& g)
     }
 }
 
+void CostesStripEditor::timerCallback()
+{
+    // v2.65.0: the dynamics ladders repaint themselves - the detectors
+    // are already smoothed, so the straight read of the per-block
+    // snapshots is the display ballistics
+    expInMeter.repaint();
+    expGrMeter.repaint();
+    compInMeter.repaint();
+    compGrMeter.repaint();
+}
+
 void CostesStripEditor::resized()
 {
     auto area = getLocalBounds();
@@ -2219,10 +2306,14 @@ void CostesStripEditor::resized()
     // row 1 (v2.61.0): the original five-knob band keeps its own 150 px,
     // so every column sits exactly where it sat on the v2.60 panel.
     // v2.64.0: the EQ takes its own fixed 200 px (a breath, its header
-    // and the band columns) and the new dynamics row owns what is left
+    // and the band columns) and the dynamics owned what was left.
+    // v2.65.0: the dynamics split in two - the expander's stage then
+    // the compressor's, 200 px each, so the two halves breathe like
+    // the J's own silkscreened sections
     auto row1 = area.removeFromTop (150);
     auto eqArea = area.removeFromTop (200);
-    auto dynArea = area;
+    auto expArea = area.removeFromTop (200);
+    auto compArea = area;
 
     // five equal columns: knob above, caption below; the cut columns also
     // carry their slope slider under the caption, and the drive column
@@ -2383,86 +2474,231 @@ void CostesStripEditor::resized()
         }
     }
 
-    // ---- the dynamics section (v2.64.0, Clement's spec) ----
-    // the same header language as the EQ: a breath, then the on/off
-    // plate at the left of each half and the section caption centred
-    // over its half, its transfer-curve glyph hugging the text's left
-    // edge with the geometry the knob captions use for their icons
-    dynArea.removeFromTop (8);
-    auto dynHeader = dynArea.removeFromTop (20);
-
-    const int expHalfWidth = (dynHeader.getWidth() / 13) * 6;
-    const int compHalfStart = dynHeader.getX() + expHalfWidth;
-
-    expOnButton.setBounds (dynHeader.getX() + 14, dynHeader.getY() + 1, 76, 18);
-    compOnButton.setBounds (compHalfStart + 14, dynHeader.getY() + 1, 76, 18);
-
-    auto expHeaderBounds = dynHeader.removeFromLeft (expHalfWidth);
-    expSectionLabel.setBounds (expHeaderBounds);
-    compSectionLabel.setBounds (dynHeader);
-
-    const int expTextWidth = expSectionLabel.getFont()
-                                  .getStringWidth (expSectionLabel.getText());
-    expIcon.setBounds (expHeaderBounds.getCentreX() - expTextWidth / 2 - 21,
-                       expHeaderBounds.getY() + 2, 16, 16);
-
-    const int compTextWidth = compSectionLabel.getFont()
-                                  .getStringWidth (compSectionLabel.getText());
-    compIcon.setBounds (compSectionLabel.getBounds().getCentreX() - compTextWidth / 2 - 21,
-                        compSectionLabel.getBounds().getY() + 2, 16, 16);
-
-    // thirteen columns of equal width: the expander's THRESH, RANGE,
-    // ATTACK, RELEASE, RATIO and MIX, then the compressor's THRESH,
-    // RATIO, RELEASE, the FAST/SLOW plate, GAIN, MIX and the SC HPF
-    // slider. A knob column is a knob above its caption; the plate
-    // column centres its plate over the caption; the slider column
-    // keeps the cuts' selector geometry
-    const int dynColumnWidth = dynArea.getWidth() / 13;
-
-    for (int i = 0; i < 13; ++i)
+    // ---- the dynamics, stage by stage (v2.65.0, Clement's photos of
+    // the SSL J): the expander and the compressor each own a FULL row -
+    // six and seven wide columns instead of the thirteen cramped ones -
+    // with the IN ladder at the left (the stereo-linked RMS level the
+    // section hears, sitting right beside the THRESHOLD knob so the
+    // setting reads naturally) and the GR ladder at the right (the
+    // section's payoff, 0 dB at the top). The stage chrome is shared:
+    // a breath, the on/off plate at the left, the section caption
+    // centred with its transfer-curve glyph hugging the text, then
+    // the meters and the knob columns
+    auto layoutStageChrome = [] (juce::Rectangle<int> stageArea,
+                                     PlateToggle& onButton,
+                                     juce::Label& sectionLabel,
+                                     SectionIcon& sectionIcon,
+                                     DynamicsMeter& inMeter,
+                                     DynamicsMeter& grMeter)
+        -> juce::Rectangle<int>
     {
-        auto column = dynArea.removeFromLeft (dynColumnWidth).reduced (4, 2);
+        stageArea.removeFromTop (8);
+        auto header = stageArea.removeFromTop (20);
 
-        auto* knob = &expThresholdKnob;
-        auto* caption = &expThresholdLabel;
+        // the two ladders flank the stage: IN at the left edge, GR at
+        // the right - 80 px each, the full height of the stage
+        auto meterLeft  = stageArea.removeFromLeft (80);
+        auto meterRight = stageArea.removeFromRight (80);
 
-        if (i == 1)      { knob = &expRangeKnob;    caption = &expRangeLabel; }
-        else if (i == 2) { knob = &expAttackKnob;  caption = &expAttackLabel; }
-        else if (i == 3) { knob = &expReleaseKnob; caption = &expReleaseLabel; }
-        else if (i == 4) { knob = &expRatioKnob;   caption = &expRatioLabel; }
-        else if (i == 5) { knob = &expMixKnob;     caption = &expMixLabel; }
-        else if (i == 6) { knob = &compThresholdKnob; caption = &compThresholdLabel; }
-        else if (i == 7) { knob = &compRatioKnob;     caption = &compRatioLabel; }
-        else if (i == 8) { knob = &compReleaseKnob;   caption = &compReleaseLabel; }
-        else if (i == 9) { caption = &compAttackLabel; }
-        else if (i == 10) { knob = &compGainKnob;  caption = &compGainLabel; }
-        else if (i == 11) { knob = &compMixKnob;   caption = &compMixLabel; }
-        else if (i == 12) { caption = &compHpfLabel; }
+        onButton.setBounds (header.getX() + 14, header.getY() + 1, 76, 18);
+        sectionLabel.setBounds (header);
 
-        // the caption sits at the bottom of the column, every control
-        // above it - the same geometry as the row-1 columns
-        auto captionBounds = column.removeFromBottom (18);
-        caption->setBounds (captionBounds);
-        auto controlArea = column;
+        const int textWidth = sectionLabel.getFont()
+                                  .getStringWidth (sectionLabel.getText());
+        sectionIcon.setBounds (header.getCentreX() - textWidth / 2 - 21,
+                               header.getY() + 2, 16, 16);
 
-        if (i == 9)
+        inMeter.setBounds (meterLeft.reduced (2, 2));
+        grMeter.setBounds (meterRight.reduced (2, 2));
+
+        return stageArea;   // what is left: the knob columns
+    };
+
+    // ---- the EXPANDER's stage: THRESH, RANGE, ATTACK, RELEASE, RATIO
+    // and MIX, six wide columns - a knob above its caption, the same
+    // geometry as the row-1 columns ----
+    {
+        auto expColumns = layoutStageChrome (expArea, expOnButton,
+                                                   expSectionLabel, expIcon,
+                                                   expInMeter, expGrMeter);
+
+        const int expColumnWidth = expColumns.getWidth() / 6;
+
+        CostesSlider* expKnobs[6] =
         {
-            // the FAST/SLOW attack plate, centred over its caption
-            compFastAttackButton.setBounds (
-                controlArea.withSizeKeepingCentre (
-                    juce::jmin (controlArea.getWidth(), 72), 24));
+            &expThresholdKnob, &expRangeKnob, &expAttackKnob,
+            &expReleaseKnob,  &expRatioKnob,  &expMixKnob
+        };
+        juce::Label* expCaptions[6] =
+        {
+            &expThresholdLabel, &expRangeLabel, &expAttackLabel,
+            &expReleaseLabel,  &expRatioLabel,  &expMixLabel
+        };
+
+        for (int i = 0; i < 6; ++i)
+        {
+            auto column = expColumns.removeFromLeft (expColumnWidth).reduced (4, 2);
+
+            // the caption sits at the bottom of the column, the knob
+            // above it - the same geometry as the row-1 columns
+            auto captionBounds = column.removeFromBottom (18);
+            expCaptions[i]->setBounds (captionBounds);
+            expKnobs[i]->setBounds (column);
         }
-        else if (i == 12)
+    }
+
+    // ---- the COMPRESSOR's stage: THRESH, RATIO, RELEASE, the
+    // FAST/SLOW plate, GAIN, MIX and the SC HPF slider - the plate
+    // column centres its plate over the caption, the slider column
+    // keeps the cuts' selector geometry ----
+    {
+        auto compColumns = layoutStageChrome (compArea, compOnButton,
+                                                    compSectionLabel, compIcon,
+                                                    compInMeter, compGrMeter);
+
+        const int compColumnWidth = compColumns.getWidth() / 7;
+
+        for (int i = 0; i < 7; ++i)
         {
-            // the sidechain HPF: the cuts' own selector geometry,
-            // centred in the column
-            compHpfSlider.setBounds (
-                controlArea.withSizeKeepingCentre (controlArea.getWidth(), 44));
+            auto column = compColumns.removeFromLeft (compColumnWidth).reduced (4, 2);
+
+            auto* knob = &compThresholdKnob;
+            auto* caption = &compThresholdLabel;
+
+            if (i == 1)      { knob = &compRatioKnob;   caption = &compRatioLabel; }
+            else if (i == 2) { knob = &compReleaseKnob; caption = &compReleaseLabel; }
+            else if (i == 3) { caption = &compAttackLabel; }
+            else if (i == 4) { knob = &compGainKnob;  caption = &compGainLabel; }
+            else if (i == 5) { knob = &compMixKnob;   caption = &compMixLabel; }
+            else if (i == 6) { caption = &compHpfLabel; }
+
+            auto captionBounds = column.removeFromBottom (18);
+            caption->setBounds (captionBounds);
+            auto controlArea = column;
+
+            if (i == 3)
+            {
+                // the FAST/SLOW attack plate, centred over its caption
+                compFastAttackButton.setBounds (
+                    controlArea.withSizeKeepingCentre (
+                        juce::jmin (controlArea.getWidth(), 72), 24));
+            }
+            else if (i == 6)
+            {
+                // the sidechain HPF: the cuts' own selector geometry,
+                // centred in the column
+                compHpfSlider.setBounds (
+                    controlArea.withSizeKeepingCentre (controlArea.getWidth(), 44));
+            }
+            else
+            {
+                knob->setBounds (controlArea);
+            }
+        }
+    }
+}
+void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
+{
+    // v2.65.0: the SSL J's own meter language, painted straight from
+    // the processor's per-block snapshots. An IN ladder lights from the
+    // BOTTOM up on the stereo-linked RMS level its detector hears
+    // (green, the top two segments amber - the over-region); a GR
+    // ladder lights from the TOP down in the classic reduction orange,
+    // 0 dB at the top. The component holds no state of its own: every
+    // paint reads the truth, and a degenerate resize paints nothing
+    // but the caption - there is no size small enough to divide by
+    auto b = getLocalBounds();
+
+    g.setColour (engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText (juce::String (caption), b.removeFromTop (14),
+                juce::Justification::centred);
+
+    auto body = b;
+    auto ladderArea = body.removeFromLeft (26).reduced (3, 0);
+
+    const float lx = (float) ladderArea.getX() + 1.0f;
+    const float lw = (float) ladderArea.getWidth() - 2.0f;
+    const float top = (float) ladderArea.getY() + 2.0f;
+    const float bottom = (float) ladderArea.getBottom() - 2.0f;
+    const float height = bottom - top;
+
+    if (height < 8.0f || leds < 1 || lw < 2.0f)
+        return;   // a degenerate resize never divides by anything
+
+    // the meter window's engraved frame
+    g.setColour (engravingDim.withAlpha (0.7f));
+    g.drawRect (juce::Rectangle<float> (lx - 1.0f, top - 2.0f, lw + 2.0f, height + 4.0f), 1.0f);
+
+    // the reading: the detector's RMS level for an IN ladder, the
+    // applied gain (sign-flipped into its reduction) for a GR ladder
+    float reading = 0.0f;
+
+    if (mode == Mode::input)
+        reading = expander ? owner.getExpInDb() : owner.getCompInDb();
+    else
+        reading = expander ? owner.getExpGrDb() : owner.getCompGrDb();
+
+    const float span = highDb - lowDb;
+    const float step = span / (float) leds;
+    const float seg = height / (float) leds;
+
+    // the LEDs: LED 0 is the lowest on an IN ladder, the highest on a
+    // GR ladder - both light towards the reading, never past it
+    for (int j = 0; j < leds; ++j)
+    {
+        float y = 0.0f;
+        bool lit = false;
+        juce::Colour colour (meterGreen);
+
+        if (mode == Mode::input)
+        {
+            y = bottom - (float) (j + 1) * seg + 1.0f;
+            lit = reading >= lowDb + (float) j * step;
+            colour = (j >= leds - 2) ? valueArc : meterGreen;
         }
         else
         {
-            knob->setBounds (controlArea);
+            y = top + (float) j * seg + 1.0f;
+            lit = (-reading) > (float) j * step;
+            colour = meterGrOrange;
         }
+
+        const juce::Rectangle<float> led (lx + 1.0f, y, lw - 2.0f,
+                                          juce::jmax (1.0f, seg - 2.0f));
+
+        if (lit)
+        {
+            g.setColour (colour.withMultipliedAlpha (0.35f));
+            g.fillRoundedRectangle (led.expanded (1.0f, 0.5f), 1.5f);
+            g.setColour (colour);
+            g.fillRoundedRectangle (led, 1.5f);
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff17150f));
+            g.fillRoundedRectangle (led, 1.5f);
+        }
+    }
+
+    // the dB scale, engraved beside the ladder: one mark every step of
+    // the meter's own scale (20 dB on an IN ladder, 10 on the
+    // expander's GR, 5 on the compressor's)
+    g.setColour (engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (8.0f)));
+
+    const float scaleRight = (float) body.getX() + 2.0f;
+
+    for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
+    {
+        const float value = highDb - (float) m * markStep;
+        const float y = top + (float) m * markStep / span * height;
+
+        g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
+        g.drawText (juce::String (juce::roundToInt (value)),
+                    juce::Rectangle<int> ((int) scaleRight, (int) (y - 5.0f),
+                                          juce::jmax (1, body.getWidth() - 2), 10),
+                    juce::Justification::centredLeft);
     }
 }
 

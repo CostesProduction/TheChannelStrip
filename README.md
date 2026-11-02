@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.64.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.65.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,34 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.65.0** — *The dynamics grow into two stages, each with its own
+  SSL meters.* Following Clement's photos of a real SSL 9000 J
+  dynamics section:
+  - **Two stages instead of one cramped row.** The expander and the
+    compressor each own a FULL row of the panel (six and seven wide
+    columns instead of the thirteen 80-px ones), separated by an
+    engraved silkscreen line like the J's own two dynamics halves.
+    The panel grows from 1040x600 to **1040x800**.
+  - **An IN ladder per stage.** A vertical LED meter at the LEFT of
+    each row - right beside the THRESHOLD knob, so setting a
+    threshold against the actual programme level reads naturally.
+    It shows the stereo-linked RMS level the section's own detector
+    hears, on a -70 to 0 dB scale (green, the top segments amber).
+    The compressor's IN ladder reads through its sidechain HPF, so
+    it shows the level the compressor will actually act on.
+  - **A GR ladder per stage.** The classic reduction meter at the
+    RIGHT of each row: 0 dB at the top, growing down in the SSL's
+    reduction orange - 40 dB of span for the expander (its RANGE),
+    20 for the compressor, one LED per 2 dB.
+  - **Metering never waits for the plates.** The detectors now run
+    unconditionally: a parked or OFF section still reads its input
+    level, and its GR ladder snaps to unity the moment the section
+    stops working - no stale readings. The gain arithmetic stays
+    gated exactly as before, so the parked strip still processes
+    sample-for-sample identically to v2.63.
+  - **The ladders repaint at 30 Hz** straight off the per-block
+    snapshots - the detectors are already smoothed (10 ms RMS,
+    attack/release one-poles), so no display ballistics are needed.
 - **2.64.0** — *Roadmap C3: the strip grows its dynamics stage.* The
   internal Costes channel strip gains a full dynamics row (a third
   control row, panel resized to 1040x600) between its EQ and its tilt,

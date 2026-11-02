@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// src/CostesStrip.h - v2.64.0 (roadmap C3)
+// src/CostesStrip.h - v2.65.0 (Clement's photos of a real SSL 9000 J)
 //
 // The shell's OWN channel strip: a small juce::AudioProcessor compiled INTO
 // the plugin and hosted on the very same HostedStrip as the third-party
@@ -11,6 +11,22 @@
 // it rides the exact same hosting path as the consoles, it inherits the
 // click-free 50 ms crossfade, the per-ident settings memory, the session
 // save/restore and the parameter relay without a single extra wire.
+//
+// v2.65.0 (Clement's request, from his photos of the SSL J's dynamics
+// section): the dynamics grow from one cramped thirteen-column row into
+// TWO STAGES - the EXPANDER on its own row, the COMPRESSOR on its own -
+// separated by an engraved divider like the J's own silkscreen, and each
+// stage gets the SSL's two meters: an IN ladder at the LEFT (the
+// stereo-linked RMS level the detector hears, scaled -70 to 0 dB, sitting
+// right beside the THRESHOLD knob so the setting reads naturally) and a
+// GR ladder at the RIGHT (0 dB at the top, growing down as the section
+// works: 40 dB of span for the expander, 20 for the compressor, the
+// classic orange). The meters ride four new atomics the process loop
+// stores once per block: the detectors now ALWAYS run - metering never
+// waits for a section to be engaged - while the gain arithmetic stays
+// gated behind the activity flags, so a parked strip still processes
+// sample-for-sample exactly as v2.63 did and the meters still tell the
+// truth. A 30 Hz timer repaints the ladders; the panel grows to 1040x800.
 //
 // v2.64.0 (Clement's spec, roadmap C3): the DYNAMICS section - a
 // gate/expander and a classic compressor between the EQ and the tilt,
@@ -155,6 +171,17 @@ public:
     // The editor (and the offline harness) reach the eight parameters
     // through this - everything else is private DSP plumbing.
     juce::AudioProcessorValueTreeState& getApvts() { return apvts; }
+
+    // v2.65.0: the dynamics meters read these four once per repaint -
+    // the stereo-linked RMS level each detector hears (an IN ladder)
+    // and the smoothed gain each half applies (a GR ladder). They are
+    // stored once per block at the end of processBlock, so a parked
+    // section reports 0 dB of reduction while its IN ladder still
+    // tells the truth - metering never waits for the plates
+    float getExpInDb()  const { return expMeterInDb.load  (std::memory_order_relaxed); }
+    float getExpGrDb()  const { return expMeterGrDb.load  (std::memory_order_relaxed); }
+    float getCompInDb() const { return compMeterInDb.load (std::memory_order_relaxed); }
+    float getCompGrDb() const { return compMeterGrDb.load (std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -302,6 +329,15 @@ private:
     Biquad compSidechain[2] = {};     // the SC HPF, one per channel
     float lastCompHpf      = -1.0f;   // the sidechain corner's cache
 
+    // the dynamics meters (v2.65.0): the per-block snapshots the four
+    // SSL ladders read. The IN meters start at the detector's floor
+    // (-120 dB - a fresh strip paints an empty ladder, never a lying
+    // 0 dB), the GR meters start at unity
+    std::atomic<float> expMeterInDb   { -120.0f };
+    std::atomic<float> expMeterGrDb   { 0.0f };
+    std::atomic<float> compMeterInDb  { -120.0f };
+    std::atomic<float> compMeterGrDb  { 0.0f };
+
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
     int   lastLowCutOrder  = -1;
@@ -371,7 +407,8 @@ private:
 // command-click default and the caps stay the black aluminium of the
 // row-1 knobs - the SSL dynamics modules wear no colour.
 // ---------------------------------------------------------------------------
-class CostesStripEditor : public juce::AudioProcessorEditor
+class CostesStripEditor : public juce::AudioProcessorEditor,
+                          private juce::Timer
 {
 public:
     explicit CostesStripEditor (CostesStrip& ownerProcessor);
@@ -379,6 +416,11 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    // v2.65.0: the dynamics meters repaint at 30 Hz - the detectors are
+    // already smoothed, so the straight read of the per-block
+    // snapshots is the display ballistics
+    void timerCallback() override;
 
     // v2.63.0 (Clement's remark 2): a command-click parks any knob or
     // slider back on its DEFAULT - the same default double-click
@@ -464,6 +506,44 @@ public:
     std::array<SectionIcon*, 2> getDynIcons()
     {
         return { &expIcon, &compIcon };
+    }
+
+    // the dynamics meters (v2.65.0): the SSL J's own language, one IN
+    // ladder and one GR ladder per stage. The IN ladder lights from the
+    // bottom up on the stereo-linked RMS level its detector hears; the
+    // GR ladder lights from the top down as the section works. The
+    // component polls the processor in its paint, so the meters never
+    // hold state of their own - a fresh paint is always the truth.
+    // Public so the offline harness can name the modes and drive the
+    // degenerate-size paint path
+    struct DynamicsMeter : public juce::Component
+    {
+        enum class Mode { input, gainReduction };
+
+        DynamicsMeter (CostesStrip& source, Mode meterMode, bool expanderSide,
+                       float lowScaleDb, float highScaleDb, int numLeds,
+                       float scaleMarkStep, const char* captionText)
+            : owner (source), mode (meterMode), expander (expanderSide),
+              lowDb (lowScaleDb), highDb (highScaleDb), leds (numLeds),
+              markStep (scaleMarkStep), caption (captionText) {}
+
+        void paint (juce::Graphics& g) override;
+
+        CostesStrip& owner;
+        Mode mode;
+        bool expander;
+        float lowDb;
+        float highDb;
+        int leds;
+        float markStep;
+        const char* caption;
+    };
+
+    // the four ladders in stage order - the expander's IN/GR pair then
+    // the compressor's - for the offline test harness
+    std::array<DynamicsMeter*, 4> getDynMeters()
+    {
+        return { &expInMeter, &expGrMeter, &compInMeter, &compGrMeter };
     }
 
 private:
@@ -572,6 +652,20 @@ private:
     // the dynamics' own on/off plates (v2.64.0): the same "NAME ON" /
     // "NAME OFF" plates as the EQ's global switch, one per half
     PlateToggle expOnButton, compOnButton;
+
+    // the dynamics meters' instances (v2.65.0) - the public struct and
+    // the harness accessor sit above; the expander's pair spans 70 dB
+    // of IN (marks every 20) and 40 of GR (marks every 10 - its RANGE
+    // runs 0 to 40), the compressor's 70 of IN and 20 of GR (marks
+    // every 5)
+    DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
+                                true, -70.0f, 0.0f, 14, 20.0f, "IN" };
+    DynamicsMeter expGrMeter { owner, DynamicsMeter::Mode::gainReduction,
+                                true, -40.0f, 0.0f, 20, 10.0f, "GR" };
+    DynamicsMeter compInMeter { owner, DynamicsMeter::Mode::input,
+                                false, -70.0f, 0.0f, 14, 20.0f, "IN" };
+    DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
+                                false, -20.0f, 0.0f, 10, 5.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;

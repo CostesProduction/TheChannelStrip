@@ -5251,10 +5251,35 @@ void testCostesStripSectionIcons()
                         && editor.getLocalBounds().contains (sliders[(size_t) i]->getBounds()),
                     "every dynamics knob and slider is laid out inside the panel");
 
+    // the four dynamics meters (v2.65.0): the expander's IN/GR pair then
+    // the compressor's, each laid out and visible inside the panel - the
+    // IN ladder beside the THRESHOLD knob, the GR ladder at the stage's
+    // right edge
+    const auto meters = editor.getDynMeters();
+
+    for (int i = 0; i < 4; ++i)
+        expectTrue (meters[(size_t) i] != nullptr && meters[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (meters[(size_t) i]->getBounds()),
+                    "every dynamics meter is laid out inside the panel");
+
+    expectTrue (meters[0] != nullptr && meters[0]->mode == CostesStripEditor::DynamicsMeter::Mode::input
+                    && meters[1] != nullptr && meters[1]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction
+                    && meters[2] != nullptr && meters[2]->mode == CostesStripEditor::DynamicsMeter::Mode::input
+                    && meters[3] != nullptr && meters[3]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction,
+                "the meters come as IN then GR, stage by stage");
+
+    expectTrue (meters[0] != nullptr && meters[0]->expander && meters[1] != nullptr && meters[1]->expander
+                    && meters[2] != nullptr && ! meters[2]->expander && meters[3] != nullptr && ! meters[3]->expander,
+                "the first pair reads the expander, the second the compressor");
+
+    expectTrue (meters[1] != nullptr && meters[1]->leds == 20
+                    && meters[3] != nullptr && meters[3]->leds == 10,
+                "the expander's GR ladder spans 40 dB in 2 dB LEDs, the compressor's 20 dB (2 dB LEDs)");
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 1040, 600 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+        const int testSizes[][2] = { { 1040, 800 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -5276,11 +5301,16 @@ void testCostesStripSectionIcons()
             for (auto* icon : dynIcons)
                 icon->paint (g);
 
+            // the meters paint against degenerate bounds too - an
+            // empty ladder, never a division
+            for (auto* meter : meters)
+                meter->paint (g);
+
             editor.paint (g);
         }
     }
 
-    editor.setSize (1040, 600);
+    editor.setSize (1040, 800);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5913,6 +5943,134 @@ void testCostesStripDynamics()
                 "the parked compressor (threshold 0) is a true bypass");
 }
 
+void testCostesStripDynamicsMeters()
+{
+    beginTest ("v2.65.0: the dynamics meters - the IN/GR ladders read the detectors' truth, parked or working");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    // the meter readings settle with the same discipline as the audio
+    // checks: 2.4 s of lock-in rides out the 0.3 s releases, and the
+    // meters snapshot the state at the very last sample of the final
+    // block - the sim pins each reading, ripple included
+    const int lockinBlocks = 240;
+
+    auto runTone = [&] (double frequencyHz, double amplitude)
+    {
+        SineSource src (frequencyHz, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < lockinBlocks; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    };
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- at rest: the IN ladders read the detector's floor (an
+    // EMPTY ladder, never a lying 0 dB) and the GR ladders read unity
+    {
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+        proc.processBlock (silence, noMidi);
+
+        expectNear ((double) strip->getExpInDb(),  -120.0, 0.01,
+                    "a fresh strip's IN ladder reads the detector's floor, never a lying 0 dB");
+        expectNear ((double) strip->getCompInDb(), -120.0, 0.01,
+                    "the compressor's IN ladder starts empty too");
+        expectNear ((double) strip->getExpGrDb(),    0.0, 0.01,
+                    "a fresh strip's GR ladder reads unity");
+        expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
+                    "the compressor's GR ladder starts at unity");
+    }
+
+    // ---- the PARKED defaults: the detectors run even while both
+    // halves are skipped, so the IN ladders track the -15 dB RMS tone
+    // while the GR ladders stay honestly at unity (the sim pins
+    // -15.05 dB, the 10 Hz sidechain's ripple included)
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getExpInDb(),  -15.05, 0.2,
+                "the IN ladder tracks the RMS level even while the section is parked");
+    expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
+                "the compressor's IN ladder hears the same level through its 10 Hz sidechain");
+    expectNear ((double) strip->getExpGrDb(),    0.0, 0.01,
+                "a parked expander reports no reduction");
+    expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
+                "a parked compressor reports no reduction");
+
+    // ---- the expander working: a -29 dB RMS tone sits 9 dB under
+    // the -20 dB threshold, the 2:1 expansion pulls 9 dB down, and the
+    // COMPRESSOR's IN ladder hears the gated signal - the stages
+    // cascade in the metering exactly as they do in the audio path
+    setParam ("expThreshold", -20.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 2.0f);
+    runTone (1000.0, 0.05);
+
+    expectNear ((double) strip->getExpInDb(), -29.03, 0.2,
+                "the IN ladder reads the quiet tone's RMS level");
+    expectNear ((double) strip->getExpGrDb(),  -9.0, 0.25,
+                "the GR ladder reads the 2:1 expansion working on a signal 9 dB under the threshold");
+    expectNear ((double) strip->getCompInDb(), -38.03, 0.25,
+                "the compressor's IN ladder hears the GATED signal - the stages cascade");
+    expectNear ((double) strip->getCompGrDb(), 0.0, 0.01,
+                "the parked compressor still reports no reduction while it listens");
+
+    // ---- the expander's OFF plate: the audio bypasses the section
+    // and the GR ladder snaps open with it - no stale reading
+    setParam ("expOn", false);
+    runTone (1000.0, 0.05);
+
+    expectNear ((double) strip->getExpGrDb(), 0.0, 0.01,
+                "the OFF plate snaps the GR ladder open - no stale reduction");
+    setParam ("expOn", true);
+    setParam ("expRange", 0.0f);
+
+    // ---- the compressor working: 9.95 dB over a -25 dB threshold at
+    // 2:1 is a 4.98 dB reduction (the sim pins -4.98, the detector's
+    // 2f ripple included)
+    setParam ("compThreshold", -25.0f);
+    setParam ("compRatio", 2.0f);
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getCompGrDb(), -4.98, 0.25,
+                "the GR ladder reads the 2:1 reduction");
+    expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
+                "the IN ladder still reads the level at the detector");
+
+    // ---- the compressor's OFF plate: the same snap to unity
+    setParam ("compOn", false);
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getCompGrDb(), 0.0, 0.01,
+                "the compressor's OFF plate snaps its GR ladder to unity");
+    setParam ("compOn", true);
+
+    // ---- back to the parked defaults ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -6059,6 +6217,7 @@ int main (int argc, char* argv[])
     testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();
     testCostesStripDynamics();
+    testCostesStripDynamicsMeters();
 
     if (integration)
         testIntegrationRealConsole();
