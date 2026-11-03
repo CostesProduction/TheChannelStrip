@@ -2792,13 +2792,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         }
     }
 
-    // v2.76.0 (Clement's remarks): the three-column console
-    // TIGHTENS - the front end reads two knobs a row, the dynamics
-    // stages return to their v2.74 height, the column-3 slots slim
-    // to 150 px - so the panel drops from 860 x 1144 to 860 x 964
-    // while keeping the shell's own width and the signal's own
-    // reading order
-    setSize (860, 964);
+    // v2.77.0 (Clement's remarks): the console TIGHTENS AGAIN - the
+    // little vertical airs of the front end (the band caption rows,
+    // the breaths, the header bands) give way, the EQ band names
+    // stand beside their knobs and the EQ reads SSL-style with the
+    // highs at the top - so the panel drops from 860 x 964 to
+    // 860 x 814, exactly the 150 px Clement asked to win back
+    setSize (860, 814);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2953,12 +2953,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
             { 45.0f, 10.0f }, { 50.0f, 10.0f }
         };
 
-        // v2.76.0: the signature rides the shorter panel's own middle
+        // v2.77.0: the signature rides the shorter panel's own middle
         // (the three-column grid starts at x = 28, so the rotated
         // drawing still owns the whole left margin)
         g.saveState();
         g.addTransform (juce::AffineTransform::rotation (
-            -juce::MathConstants<float>::halfPi, 17.0f, 482.0f));
+            -juce::MathConstants<float>::halfPi, 17.0f, 407.0f));
 
         // the seismic line at the signature's foot, the logo's own
         // 50 x 20 trace scaled to 24 px - a heartbeat running up the
@@ -2967,19 +2967,19 @@ void CostesStripEditor::paint (juce::Graphics& g)
 
         for (int i = 1; i < 14; ++i)
             g.drawLine (juce::Line<float> (17.0f + trace[i - 1][0] * 0.48f,
-                                           475.0f + trace[i - 1][1] * 0.48f,
+                                           400.0f + trace[i - 1][1] * 0.48f,
                                            17.0f + trace[i][0] * 0.48f,
-                                           475.0f + trace[i][1] * 0.48f), 1.8f);
+                                           400.0f + trace[i][1] * 0.48f), 1.8f);
 
         // the name itself: COSTES in engraving, a small tick, CONSOLE
         // in dim caps - the same stacked wording as the old top band
         g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText ("COSTES", juce::Rectangle<int> (45, 475, 66, 14),
+        g.drawText ("COSTES", juce::Rectangle<int> (45, 400, 66, 14),
                     juce::Justification::centredLeft);
         g.setColour (engravingDim.withAlpha (0.7f));
-        g.drawVerticalLine (115, 477.0f, 489.0f);
+        g.drawVerticalLine (115, 402.0f, 414.0f);
         g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 476, 66, 14),
+        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 401, 66, 14),
                     juce::Justification::centredLeft);
 
         g.restoreState();
@@ -2997,9 +2997,9 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.drawVerticalLine (248, 32.0f, (float) getHeight() - 12.0f);
     g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
 
-    g.drawLine (30.0f, 49.0f, 240.0f, 49.0f, 1.0f);
-    g.drawLine (30.0f, 187.0f, 240.0f, 187.0f, 1.0f);
-    g.drawLine (30.0f, 345.0f, 240.0f, 345.0f, 1.0f);
+    g.drawLine (30.0f, 47.0f, 240.0f, 47.0f, 1.0f);
+    g.drawLine (30.0f, 171.0f, 240.0f, 171.0f, 1.0f);
+    g.drawLine (30.0f, 315.0f, 240.0f, 315.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3088,14 +3088,17 @@ void CostesStripEditor::resized()
     // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
     // ROW - the INPUT band heads the column, TRIM and TILT share the
     // first line, the FILTERS band names the cuts' line under it,
-    // and the EQ closes the column as ever
-    auto inputSection = column1.removeFromTop (26);
-    inputSectionLabel.setBounds (inputSection.removeFromTop (20));
+    // and the EQ closes the column as ever. v2.77.0 (Clement's
+    // remarks): the little airs tighten - the header bands slim to
+    // 24 px, the rows to 96 and 112, the breaths to 4 - the front
+    // end gives the 150 px the shorter panel wins back
+    auto inputSection = column1.removeFromTop (24);
+    inputSectionLabel.setBounds (inputSection.removeFromTop (18));
 
     // the TRIM and TILT line: two cells of the same pattern - knob
     // above, caption below, the section glyph hugging the text's
     // left edge
-    auto inputRow = column1.removeFromTop (106);
+    auto inputRow = column1.removeFromTop (96);
     const int inputCellW = inputRow.getWidth() / 2;
 
     for (int i = 0; i < 2; ++i)
@@ -3118,17 +3121,17 @@ void CostesStripEditor::resized()
         knob->setBounds (column);
     }
 
-    column1.removeFromTop (6);   // a breath before the FILTERS band
+    column1.removeFromTop (4);   // a breath before the FILTERS band
 
     // FILTERS: the engraved band that names the cuts' line - LOW CUT
     // and HIGH CUT share one row, each column carrying the per-knob
     // geometry the cuts have kept since v2.59: the on/off plate at
     // the knob's top-left corner, the slope selector under it, the
     // caption and its glyph at the bottom
-    auto filtersSection = column1.removeFromTop (26);
-    filtersSectionLabel.setBounds (filtersSection.removeFromTop (20));
+    auto filtersSection = column1.removeFromTop (24);
+    filtersSectionLabel.setBounds (filtersSection.removeFromTop (18));
 
-    auto filtersRow = column1.removeFromTop (120);
+    auto filtersRow = column1.removeFromTop (112);
     const int filtersCellW = filtersRow.getWidth() / 2;
 
     for (int i = 0; i < 2; ++i)
@@ -3169,20 +3172,22 @@ void CostesStripEditor::resized()
         knob->setBounds (column.removeFromTop (knobHeight));
     }
 
-    column1.removeFromTop (6);  // a breath between the sections
+    column1.removeFromTop (4);  // a breath between the sections
 
     // ---- the EQ section (v2.61.0, Clement's spec; stacked in
-    // v2.75.0): the section closes column 1 and its four bands read
-    // as four stacked rows - LF, LO MID, HI MID, HF down the column,
-    // the sound's own order ----
+    // v2.75.0; SSL-ordered in v2.77.0, Clement's remark): the
+    // section closes column 1 and its four bands read as four
+    // stacked rows - HF, HI MID, LO MID, LF down the column, the
+    // SSL way - the HIGHS at the top of the stack, the lows at the
+    // bottom, the ear's own reading order ----
     // the header: the global on/off plate at the left and the section
     // caption centred, its bell glyph hugging the text's left edge
     // with the same geometry the knob captions use for their icons
     auto eqArea = column1;
-    eqArea.removeFromTop (6);
-    auto eqHeader = eqArea.removeFromTop (20);
+    eqArea.removeFromTop (4);
+    auto eqHeader = eqArea.removeFromTop (18);
 
-    eqOnButton.setBounds (eqHeader.getX() + 14, eqHeader.getY() + 1, 76, 18);
+    eqOnButton.setBounds (eqHeader.getX() + 14, eqHeader.getY(), 76, 18);
     eqSectionLabel.setBounds (eqHeader);
 
     const int eqTextWidth = eqSectionLabel.getFont()
@@ -3190,15 +3195,19 @@ void CostesStripEditor::resized()
     eqIcon.setBounds (eqHeader.getCentreX() - eqTextWidth / 2 - 21,
                       eqHeader.getY() + 2, 16, 16);
 
-    // the four band cells: a caption above, the FREQ and GAIN knobs
-    // side by side with their own small captions, the band's own
-    // selector underneath - the bandwidth sweep for the mid bells, the
+    // the four band cells: the FREQ and GAIN knobs side by side
+    // with their own small captions, the band's own selector
+    // underneath - the bandwidth sweep for the mid bells, the
     // BELL/SHELF plate for the outer bands - and (v2.62.0, Clement's
     // remark 5) a 16 px glyph in a final row: the LF band's low-shelf
-    // response, the two mid bells' bump and the HF band's high shelf
+    // response, the two mid bells' bump and the HF band's high shelf.
+    // v2.77.0 (Clement's remarks): the bands stack in the SSL's own
+    // order - HF first, LF last - and the band names stand in a
+    // slim margin column beside their knobs instead of owning
+    // caption rows of their own
     const int eqBandH = eqArea.getHeight() / 4;
 
-    for (int band = 0; band < 4; ++band)
+    for (int band = 3; band >= 0; --band)
     {
         auto column = eqArea.removeFromTop (eqBandH).reduced (4, 2);
 
@@ -3237,18 +3246,24 @@ void CostesStripEditor::resized()
             modeButton = &eq4ModeButton;
         }
 
-        bandLabel->setBounds (column.removeFromTop (16));
-        column.removeFromTop (4);   // a breath under the band caption
-
         // v2.72.0 (Clement's remark 1): the mid bells' width sweep
         // grew a full-sentence readout ("Width : 1.0 octave") - it
-        // owns the whole 44 px band now, the 18 px text box at its
-        // bottom with air above, so the words never clip the way
+        // owns the whole selector band now, the 18 px text box at
+        // its bottom with air above, so the words never clip the way
         // the old 76 px box did. The outer bands' shapes still live
         // in their BELL/SHELF plates; every knob above stays put
-        auto bottom = column.removeFromBottom (44);
+        auto bottom = column.removeFromBottom (40);
 
         auto knobRow = column;
+
+        // v2.77.0 (Clement's remark): the band's own NAME stands in
+        // a slim margin column at the row's left, LEVEL WITH ITS
+        // KNOBS - the caption row above the knobs is gone, so the
+        // name costs no vertical air any more (the 20 px it once
+        // took per band is part of the 150 px the shorter panel wins
+        // back). The knobs give the column's width but keep their
+        // disc - the rotary draws the circle of the smaller dimension
+        auto nameColumn = knobRow.removeFromLeft (48);
 
         const int half = knobRow.getWidth() / 2;
         auto freqCol = knobRow.removeFromLeft (half);
@@ -3258,6 +3273,12 @@ void CostesStripEditor::resized()
         freqKnob->setBounds (freqCol);
         gainLabel->setBounds (gainCol.removeFromBottom (14));
         gainKnob->setBounds (gainCol);
+
+        // the name strip keeps the knob's own height, so the words
+        // sit level with the knobs whatever the row's room (degenerate
+        // resizes included)
+        bandLabel->setBounds (nameColumn.removeFromTop (
+            freqKnob->getBounds().getHeight()));
 
         if (octSlider != nullptr)
         {
@@ -3483,16 +3504,17 @@ void CostesStripEditor::resized()
     }
 
     // ---- column 3: the output chain ----
-    // six 150 px slots (v2.76.0: the shorter panel's own slot): five
-    // of them stay RESERVED - engraved empty frames that name the
-    // sections the coming builds will fill (PHASE INVERT, STEREO
-    // PAN, STEREO WIDTH, MONO MAKER, OUTPUT TRIM) - and the fifth
-    // slot is DRIVE, the column's one live control today: the knob,
-    // its caption and glyph, the OS plate under it all, the same
-    // per-column pattern it has always carried
+    // six slots down the shorter panel (v2.77.0: the reserved slots
+    // slim to 120 px, DRIVE keeps its own 150): five of them stay
+    // RESERVED - engraved empty frames that name the sections the
+    // coming builds will fill (PHASE INVERT, STEREO PAN, STEREO
+    // WIDTH, MONO MAKER, OUTPUT TRIM) - and the fifth slot is DRIVE,
+    // the column's one live control today: the knob, its caption and
+    // glyph, the OS plate under it all, the same per-column pattern
+    // it has always carried
     for (int i = 0; i < 6; ++i)
     {
-        auto slot = column3.removeFromTop (150);
+        auto slot = column3.removeFromTop (i == 4 ? 150 : 120);
 
         if (i < 5)
             column3.removeFromTop (6);   // a breath between the slots

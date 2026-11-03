@@ -596,6 +596,15 @@ public:
     // harness can pin its engraved address
     juce::Label* getFiltersSectionLabel() { return &filtersSectionLabel; }
 
+    // v2.77.0 (Clement's remark): the four band names stand in a slim
+    // margin column at their rows' left now, level with their knobs,
+    // instead of owning caption rows above them. Public so the
+    // offline harness can pin their new address
+    std::array<juce::Label*, 4> getEqBandLabels()
+    {
+        return { &eqBand1Label, &eqBand2Label, &eqBand3Label, &eqBand4Label };
+    }
+
     // v2.75.0 (Clement's request): the reserved slots, public so the
     // offline harness can pin the three-column grid - the TRANSIENT
     // slot waits between the two dynamics stages, and the five

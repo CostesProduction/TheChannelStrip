@@ -5647,10 +5647,11 @@ void testCostesStripSectionIcons()
     CostesStripEditor editor (stripProc);
 
     // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // width - v2.76.0: the two-knob rows and the v2.74-height
-    // dynamics tighten the three-column console to 860 x 964
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 964,
-                "the strip panel opens as the tightened three-column console (860 x 964)");
+    // width - v2.77.0: the band names stand beside their knobs and
+    // the little vertical airs tighten, so the console sheds the
+    // 150 px Clement asked for - 860 x 814
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 814,
+                "the strip panel opens as the tightened three-column console (860 x 814)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5925,6 +5926,35 @@ void testCostesStripSectionIcons()
                     && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
                 "column 1 reads two knobs a row - TRIM and TILT on one line, the two cuts on the FILTERS line, the EQ under it");
 
+    // v2.77.0 (Clement's remark): the EQ reads SSL-style now - the
+    // HIGHS at the top of the stack, the lows at the bottom (15 is
+    // the HF band's FREQ, 12 HI MID's, 9 LO MID's, 7 the LF's) - and
+    // the four rows sit at one tight 123 px pitch, the air the old
+    // caption rows once took now won back
+    expectTrue (sliders[15] != nullptr && sliders[12] != nullptr
+                    && sliders[9] != nullptr && sliders[7] != nullptr
+                    && sliders[15]->getBounds().getY() < sliders[12]->getBounds().getY()
+                    && sliders[12]->getBounds().getY() < sliders[9]->getBounds().getY()
+                    && sliders[9]->getBounds().getY() < sliders[7]->getBounds().getY()
+                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 123
+                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 123
+                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 123,
+                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 123 px pitch");
+
+    // and the band names themselves (v2.77.0, Clement's remark): no
+    // caption row of their own any more - each name stands in a slim
+    // margin column at its row's left, LEVEL WITH ITS KNOBS (LO
+    // MID's name beside its FREQ knob, 9)
+    {
+        const auto bandLabels = editor.getEqBandLabels();
+        expectTrue (bandLabels[1] != nullptr && sliders[9] != nullptr
+                        && bandLabels[1]->getText() == "LO MID"
+                        && bandLabels[1]->getBounds().getRight() <= sliders[9]->getBounds().getX()
+                        && bandLabels[1]->getBounds().getY() >= sliders[9]->getBounds().getY()
+                        && bandLabels[1]->getBounds().getBottom() <= sliders[9]->getBounds().getBottom(),
+                    "the band names stand level with their knobs - LO MID engraved beside its FREQ knob");
+    }
+
     // and the FILTERS band (v2.76.0): the engraved intertitle that
     // names the cuts' line - it sits BETWEEN the TRIM/TILT row and
     // the cuts' row, exactly where the two lines meet
@@ -6003,7 +6033,7 @@ void testCostesStripSectionIcons()
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 860, 964 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 814 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -6039,7 +6069,7 @@ void testCostesStripSectionIcons()
     // (the GR ladders). The degenerate sizes above paint nothing
     // (the early return), so the first real paint here arms the hold
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 964, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 814, true);
         juce::Graphics g (canvas);
 
         for (int i = 0; i < 6; ++i)
@@ -6055,7 +6085,7 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (860, 964);
+    editor.setSize (860, 814);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions

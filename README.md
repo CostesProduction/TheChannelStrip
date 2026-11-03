@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.76.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.77.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,26 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.77.0** — *The console sheds 150 px - the EQ reads SSL-style,
+  the band names stand beside their knobs.*
+  - **The EQ reads the SSL way.** The four bands stack with the HIGHS
+    at the top and the lows at the bottom - HF, HI MID, LO MID, LF
+    down the column, the ear's own reading order.
+  - **The band names stand beside their knobs.** LF, LO MID, HI MID
+    and HF no longer own caption rows above their knobs - each name
+    stands in a slim margin column at its row's left, level with the
+    FREQ and GAIN knobs, so the words cost no vertical air any more.
+    The knobs keep their disc; the selector lines keep their exact
+    geometry.
+  - **150 px won back.** The little vertical airs tighten everywhere
+    - the section header bands slim to 24 px, the TRIM/TILT and cuts
+    lines to 96 and 112, the breaths to 4, the EQ rows to one tight
+    123 px pitch - so the panel drops from 860 x 964 to 860 x 814.
+    The reserved column-3 slots slim to 120 px (DRIVE keeps its 150
+    and its full 96 px knob), the dynamics stages keep their 245 px
+    height, and the signature rides the new middle of the spine.
+  - **DSP unchanged.** Layout only - the audio chain keeps its exact
+    order until the coming builds re-wire it for real.
 - **2.76.0** — *Two knobs a row on the front end, the dynamics back
   at their natural height - the console tightens.*
   - **The front end reads two knobs a row.** TRIM and TILT share the
