@@ -3168,21 +3168,19 @@ void CostesStripEditor::resized()
     column1.removeFromTop (24);   // the signature's own band
 
     // the front end's two lines (v2.81.0, Clement's remark 3, grown
-    // out of v2.80.0's remarks 1, 2 and 3): the GAINS at the left of
-    // their lines and the high frequencies at the top - TRIM with LPF
-    // on the first line, TILT with HPF under it - so the column reads
-    // the signal's own geography. Every cell the same shape, and the
-    // four knobs share ONE 107 x 72 square now - the 44 px discs the
-    // 62 px squares clipped them to were too small, so the lines
-    // grow 30 px each and the knobs' discs grow with them, 54 px.
-    // The cut cell reads centred: the merged HPF / LPF button in the
-    // cell's own horizontal middle, the curve glyph under it, then
-    // the knob square - the SAME y its line's gain knob owns, so the
-    // two discs of a line sit level - and the slope selector under
-    // the knob, the EQ selectors' own 52 x 38 geometry, centred too.
-    // Horizontally the line's lower band reads Clement's own words:
-    // the gain's own value ("0.5 dB"), then the little slope slider,
-    // then the cut's own ("24 kHz")
+    // out of v2.80.0's remarks 1, 2 and 3; rebuilt again in v2.82.0,
+    // Clement's remarks): the GAINS at the left of their lines and
+    // the high frequencies at the top - TRIM with LPF on the first
+    // line, TILT with HPF under it - so the column reads the
+    // signal's own geography. The cut cell reads NORTH-WEST now, in
+    // Clement's own words: the merged HPF / LPF button at the knob's
+    // own top-left corner, the slope selector directly under the
+    // plate, and the knob owning everything the column has left -
+    // 107 x 92, the 57 px discs the biggest room the line can give
+    // them. The curve glyph is off for now: the plate and the value
+    // speak the filter on their own. The gain cell keeps its own
+    // shape - air above, the same 107 x 92 knob, the caption with
+    // its glyph under it
     const auto frontEndLine = [] (juce::Rectangle<int> row,
                                   CostesSlider& gainKnob, juce::Label& gainCaption,
                                   SectionIcon& gainIcon,
@@ -3194,10 +3192,10 @@ void CostesStripEditor::resized()
         auto cutCell  = row.reduced (4, 2);
 
         // the gain cell: the air sits ABOVE so both knobs of the line
-        // share one square - the same 107 x 72, the same y - then the
-        // caption with its glyph hugging the text's left edge
+        // share one square - the same 107 x 92 - then the caption
+        // with its glyph hugging the text's left edge
         gainCell.removeFromTop (38);
-        gainKnob.setBounds (gainCell.removeFromTop (72));
+        gainKnob.setBounds (gainCell.removeFromTop (92));
         auto gainCaptionBounds = gainCell.removeFromTop (18);
         gainCaption.setBounds (gainCaptionBounds);
 
@@ -3205,31 +3203,26 @@ void CostesStripEditor::resized()
         gainIcon.setBounds (gainCaptionBounds.getCentreX() - textWidth / 2 - 21,
                             gainCaptionBounds.getY() + 1, 16, 16);
 
-        // the cut cell (v2.81.0, Clement's remark 3): the merged
-        // button IS the caption - "HPF" / "LPF" written on the plate
-        // itself, lit amber when the filter processes, black when it
-        // is bypassed - and it stands in the cell's own horizontal
-        // MIDDLE now
+        // the cut cell (v2.82.0, Clement's remarks): the merged button
+        // rides at the knob's own NORTH-WEST corner - top-left of the
+        // column, the plate and its word exactly where Clement wants
+        // them - the slope selector DIRECTLY under the plate, in the
+        // plate's own 56 px column, and the knob owns everything the
+        // column has left, 107 x 92, the biggest room the line can
+        // give it. The curve glyph is OFF for now (Clement's word):
+        // the plate and the value speak the filter on their own; the
+        // components stay, hidden, one remark away from coming back
         auto topStrip = cutCell.removeFromTop (18);
-        // the plate owns the 56 px its horizontal reading needs: the
-        // LED's 20 plus the word's own room - centred in the cell
-        cutButton.setBounds (topStrip.withSizeKeepingCentre (56, 18));
+        cutButton.setBounds (topStrip.removeFromLeft (56));
 
-        // the filter's own glyph rides DIRECTLY UNDER the merged
-        // button, in the cell's own middle too - the identity strip
-        // reads plate, curve, knob, one centred column
-        auto glyphStrip = cutCell.removeFromTop (16);
-        cutIcon.setBounds (glyphStrip.withSizeKeepingCentre (16, 16));
+        cutIcon.setVisible (false);
 
-        // the knob square - level with its line's gain knob, both
-        // 107 x 72, so the two 54 px discs of a line sit as one
-        cutCell.removeFromTop (4);
-        cutKnob.setBounds (cutCell.removeFromTop (72));
+        auto slopeStrip = cutCell.removeFromTop (38);
+        cutSlope.setBounds (slopeStrip.removeFromLeft (56)
+                               .withSizeKeepingCentre (52, 38));
 
-        // then the slope selector under the knob - the EQ selectors'
-        // own 52 x 38 geometry, centred, its "12 dB/oct" reading
-        // smaller inside the 52 px box
-        cutSlope.setBounds (cutCell.withSizeKeepingCentre (52, 38));
+        cutCell.removeFromTop (2);
+        cutKnob.setBounds (cutCell);
     };
 
     auto lineOne = column1.removeFromTop (154);

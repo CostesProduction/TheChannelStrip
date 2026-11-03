@@ -1110,9 +1110,31 @@ private:
 
             if (asCostes != nullptr)
             {
-                juce::Label* box = asCostes->hasReadoutGlyph
-                    ? static_cast<juce::Label*> (new GlyphReadoutLabel (asCostes->readoutGlyph))
-                    : juce::LookAndFeel_V4::createSliderTextBox (slider);
+                // v2.82.0 (Clement's remark 1): the glyph label now
+                // copies the slider's OWN textBoxTextColourId - exactly
+                // what JUCE's V2 factory does for its plain labels, and
+                // the one thing our factory forgot: JUCE never copies
+                // a slider colour onto the box itself (lookAndFeelChanged
+                // just recreates it, bare), so a factory that stays
+                // silent paints in the look-and-feel's DEFAULT - the
+                // dark scheme's WHITE, the colour the SC values read
+                // on screen in the v2.81.0 build. The colour is read
+                // at EVERY (re)creation of the box, so a later
+                // setColour lands too - colourChanged recreates the
+                // box through this very factory
+                juce::Label* box = nullptr;
+
+                if (asCostes->hasReadoutGlyph)
+                {
+                    auto* glyphBox = new GlyphReadoutLabel (asCostes->readoutGlyph);
+                    glyphBox->setColour (juce::Label::textColourId,
+                                         slider.findColour (juce::Slider::textBoxTextColourId));
+                    box = glyphBox;
+                }
+                else
+                {
+                    box = juce::LookAndFeel_V4::createSliderTextBox (slider);
+                }
 
                 if (asCostes->readoutFontHeight > 0.0f)
                     box->setFont (juce::Font (juce::FontOptions (asCostes->readoutFontHeight)));

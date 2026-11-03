@@ -5667,13 +5667,22 @@ void testCostesStripSectionIcons()
 
     for (int i = 0; i < 5; ++i)
     {
+        const bool cutGlyph = (i == 1 || i == 2);
+
         expectTrue (icons[(size_t) i] != nullptr,
                     "the editor exposes a section icon for every knob");
         expectTrue (icons[(size_t) i]->type == expectedTypes[i],
                     "the section icons sit in column order (trim, low cut, high cut, tilt, drive)");
-        expectTrue (icons[(size_t) i]->isVisible()
-                        && editor.getLocalBounds().contains (icons[(size_t) i]->getBounds()),
-                    "every section icon is laid out inside the panel");
+
+        // v2.82.0 (Clement's remark 2): the HPF and LPF curve glyphs
+        // are OFF for now - hidden, but still exposed, one remark
+        // away from coming back - while the trim, tilt and drive
+        // glyphs stay laid out on the panel
+        expectTrue (cutGlyph ? !icons[(size_t) i]->isVisible()
+                             : (icons[(size_t) i]->isVisible()
+                                    && editor.getLocalBounds().contains (icons[(size_t) i]->getBounds())),
+                    cutGlyph ? "the HPF and LPF curve glyphs are off for now - hidden"
+                             : "every live section icon is laid out inside the panel");
     }
 
     // v2.78.0 (Clement's remark 2): the EQ header carries NO caption
@@ -5948,12 +5957,15 @@ void testCostesStripSectionIcons()
     // SSL way - the GAINS at the left of their lines, the highs at
     // the top: TRIM and LPF (0 and 2) share the first line, TILT and
     // HPF (3 and 1) the one under it, then the EQ's first band (7)
-    // closes the column
+    // closes the column. v2.82.0 (Clement's remark 2): the cut knob
+    // rides 20 px UNDER its line's gain knob now - its button and
+    // slope column stand above it, so the knobs of a line no longer
+    // share one y, they share one COLUMN
     expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
                     && sliders[7] != nullptr
-                    && sliders[0]->getBounds().getY() == sliders[2]->getBounds().getY()
-                    && sliders[3]->getBounds().getY() == sliders[1]->getBounds().getY()
+                    && sliders[2]->getBounds().getY() - sliders[0]->getBounds().getY() == 20
+                    && sliders[1]->getBounds().getY() - sliders[3]->getBounds().getY() == 20
                     && sliders[1]->getBounds().getY() > sliders[0]->getBounds().getY()
                     && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
                 "column 1 reads the SSL way - TRIM and LPF on one line, TILT and HPF under it, the EQ under both");
@@ -5986,20 +5998,21 @@ void testCostesStripSectionIcons()
                     && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 105,
                 "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 105 px pitch");
 
-    // v2.81.0 (Clement's remark 3): the slope selectors ride UNDER
-    // their knobs still, centred - but they shrink to the EQ width
-    // sweeps' OWN 52 x 38 geometry now, and their "12 dB/oct" reads
-    // smaller inside the box (10 px, the factory's own font), so the
-    // fatter cut knobs own the room the 76 px box once took
+    // v2.81.0 (Clement's remark 3) grew the slopes to the EQ width
+    // sweeps' OWN 52 x 38 geometry. v2.82.0 (Clement's remark 2):
+    // the selectors ride DIRECTLY under their merged buttons now -
+    // in the plate's own 56 px column at the knob's left edge - and
+    // the KNOB owns everything below them, so the "12 dB/oct" reads
+    // above the knob, plate first
     expectTrue (sliders[5] != nullptr && sliders[1] != nullptr
                     && sliders[6] != nullptr && sliders[2] != nullptr
                     && sliders[5]->getWidth() == 52 && sliders[5]->getHeight() == 38
-                    && sliders[5]->getBounds().getCentreX() == sliders[1]->getBounds().getCentreX()
-                    && sliders[5]->getBounds().getY() >= sliders[1]->getBounds().getBottom()
+                    && sliders[5]->getBounds().getX() == sliders[1]->getBounds().getX() + 2
+                    && sliders[5]->getBounds().getBottom() <= sliders[1]->getBounds().getY()
                     && sliders[6]->getWidth() == 52 && sliders[6]->getHeight() == 38
-                    && sliders[6]->getBounds().getCentreX() == sliders[2]->getBounds().getCentreX()
-                    && sliders[6]->getBounds().getY() >= sliders[2]->getBounds().getBottom(),
-                "the HPF and LPF slope selectors ride under their knobs, centred, as small as the EQ's own width sweeps (52 x 38)");
+                    && sliders[6]->getBounds().getX() == sliders[2]->getBounds().getX() + 2
+                    && sliders[6]->getBounds().getBottom() <= sliders[2]->getBounds().getY(),
+                "the HPF and LPF slope selectors ride directly under their buttons, above their knobs - the EQ sweeps' own 52 x 38");
 
     // and the band names themselves: each name stands in a slim
     // margin column at its row's left, LEVEL WITH ITS KNOBS (LMF's
@@ -7795,22 +7808,22 @@ void testCostesStripKneeAndLayoutTightening()
     // v2.80.0 (Clement's remark 1): the ON plate and the filter's
     // caption are ONE button now - "HPF" / "LPF" written on the plate
     // itself, lit amber when the filter processes, black when it is
-    // bypassed (the BELL/SHELF plate's own language). v2.81.0
-    // (Clement's remark 3): the plate stands in its cell's own
-    // horizontal MIDDLE now, centred over the glyph, the knob and
-    // the slope selector below it - one centred column instead of
-    // the old top-left corner
+    // bypassed (the BELL/SHELF plate's own language). v2.81.0 put it
+    // in the cell's middle; v2.82.0 (Clement's remark 2) sends it to
+    // its knob's own NORTH-WEST corner - really top-left, in
+    // Clement's own words, with the slope selector riding directly
+    // under the plate
     expectTrue (cutPlates[0] != nullptr && sliders[1] != nullptr
                     && cutPlates[0]->getBounds().getWidth() == 56
-                    && cutPlates[0]->getBounds().getCentreX() == sliders[1]->getBounds().getCentreX()
-                    && cutPlates[0]->getBounds().getBottom() <= sliders[1]->getBounds().getY(),
-                "the HPF's merged button stands centred above its knob - the button IS the word HPF now");
+                    && cutPlates[0]->getBounds().getX() == sliders[1]->getBounds().getX()
+                    && cutPlates[0]->getBounds().getBottom() <= sliders[5]->getBounds().getY(),
+                "the HPF's merged button rides at its knob's own NORTH-WEST corner - top-left of the column");
 
     expectTrue (cutPlates[1] != nullptr && sliders[2] != nullptr
                     && cutPlates[1]->getBounds().getWidth() == 56
-                    && cutPlates[1]->getBounds().getCentreX() == sliders[2]->getBounds().getCentreX()
-                    && cutPlates[1]->getBounds().getBottom() <= sliders[2]->getBounds().getY(),
-                "the LPF's merged button stands centred above its knob too");
+                    && cutPlates[1]->getBounds().getX() == sliders[2]->getBounds().getX()
+                    && cutPlates[1]->getBounds().getBottom() <= sliders[6]->getBounds().getY(),
+                "the LPF's merged button rides at its knob's NORTH-WEST corner too");
 
     if (cutPlates[0] != nullptr && cutPlates[1] != nullptr)
     {
@@ -7834,32 +7847,20 @@ void testCostesStripKneeAndLayoutTightening()
                     "the merged buttons spell their filter's own name - HPF and LPF, lit when they process");
     }
 
-    // v2.79.0 (Clement's remark 3): the cut glyphs ride under their
-    // buttons now. v2.81.0 (Clement's remark 3): the curve stands
-    // DIRECTLY under the merged button, in the cell's own horizontal
-    // middle - the plate, the curve, the knob, one centred column,
-    // the 54 px disc owning the room the old corner trick spared
+    // v2.79.0 (Clement's remark 3) put the cut glyphs under their
+    // buttons; v2.82.0 (Clement's remark 2) takes them OFF for now -
+    // the plate and the value speak the filter on their own. The
+    // components stay (the harness still reads them), hidden, one
+    // remark away from coming back
     {
         const auto icons = editor.getSectionIcons();
         expectTrue (icons[(size_t) 1] != nullptr && sliders[1] != nullptr
-                        && cutPlates[0] != nullptr
-                        && icons[(size_t) 1]->getBounds().getCentreX()
-                            == sliders[1]->getBounds().getCentreX()
-                        && icons[(size_t) 1]->getBounds().getY()
-                            >= cutPlates[0]->getBounds().getBottom()
-                        && icons[(size_t) 1]->getBounds().getBottom()
-                            <= sliders[1]->getBounds().getY(),
-                    "the HPF's glyph stands directly under its merged button, centred over the knob");
+                        && !icons[(size_t) 1]->isVisible(),
+                    "the HPF's curve glyph is off for now - the plate and the value speak the filter on their own");
 
         expectTrue (icons[(size_t) 2] != nullptr && sliders[2] != nullptr
-                        && cutPlates[1] != nullptr
-                        && icons[(size_t) 2]->getBounds().getCentreX()
-                            == sliders[2]->getBounds().getCentreX()
-                        && icons[(size_t) 2]->getBounds().getY()
-                            >= cutPlates[1]->getBounds().getBottom()
-                        && icons[(size_t) 2]->getBounds().getBottom()
-                            <= sliders[2]->getBounds().getY(),
-                    "the LPF's glyph stands directly under its merged button too");
+                        && !icons[(size_t) 2]->isVisible(),
+                    "the LPF's curve glyph is off for now too");
     }
 
     // v2.79.0 (Clement's remark 5): the dynamics ON plates own the
@@ -7901,18 +7902,21 @@ void testV281FourRemarks()
     const auto modeButtons81 = editorForV281.getEqModeButtons();
 
     // ---- Clement's remark 3: the rebuilt filters cells ----
-    // the four front-end knobs share ONE fat square now - 107 x 72,
-    // the discs 54 px where the old 62 px squares clipped them to 44
-    // - and the two knobs of a line sit level, gain and cut alike
+    // the four front-end knobs share ONE square - 107 x 72 in
+    // v2.81.0, grown to 107 x 92 in v2.82.0 (Clement's remark 2: the
+    // knobs can take more room now the glyphs are off and the slope
+    // rides under the plate), the discs 57 px - and the cut knob
+    // rides 20 px UNDER its line's gain knob, the button + slope
+    // column above it
     expectTrue (sliders81[0] != nullptr && sliders81[1] != nullptr
                     && sliders81[2] != nullptr && sliders81[3] != nullptr
-                    && sliders81[0]->getWidth() == 107 && sliders81[0]->getHeight() == 72
-                    && sliders81[1]->getWidth() == 107 && sliders81[1]->getHeight() == 72
-                    && sliders81[2]->getWidth() == 107 && sliders81[2]->getHeight() == 72
-                    && sliders81[3]->getWidth() == 107 && sliders81[3]->getHeight() == 72
-                    && sliders81[0]->getBounds().getY() == sliders81[2]->getBounds().getY()
-                    && sliders81[3]->getBounds().getY() == sliders81[1]->getBounds().getY(),
-                "the four front-end knobs share one fat 107 x 72 square - level on their lines, the discs grown from 44 to 54 px");
+                    && sliders81[0]->getWidth() == 107 && sliders81[0]->getHeight() == 92
+                    && sliders81[1]->getWidth() == 107 && sliders81[1]->getHeight() == 92
+                    && sliders81[2]->getWidth() == 107 && sliders81[2]->getHeight() == 92
+                    && sliders81[3]->getWidth() == 107 && sliders81[3]->getHeight() == 92
+                    && sliders81[2]->getBounds().getY() - sliders81[0]->getBounds().getY() == 20
+                    && sliders81[1]->getBounds().getY() - sliders81[3]->getBounds().getY() == 20,
+                "the four front-end knobs share one fat 107 x 92 square - the discs grown to 57 px, the cut knobs riding 20 px under their lines' gains");
 
     // and the cut slopes' "12 dB/oct" reads SMALLER inside its 52 px
     // box - 10 px, the size the look-and-feel's factory stamps on
@@ -7985,6 +7989,69 @@ void testV281FourRemarks()
         expectTrue (probeAlpha() < 20,
                     "and the glyph returns to its bell when the plate turns back - the shape tracks the plate both ways");
     }
+}
+
+void testV282ThreeRemarks()
+{
+    beginTest ("v2.82.0: black SC readouts, the cut glyphs off, the NORTH-WEST cut cells");
+
+    CostesStrip stripForV282;
+    stripForV282.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editorForV282 (stripForV282);
+    editorForV282.setVisible (true);
+
+    const auto sliders82   = editorForV282.getStripSliders();
+    const auto scLabels82  = editorForV282.getScReadoutLabels();
+    const auto cutPlates82 = editorForV282.getCutPlateButtons();
+
+    // ---- Clement's remark 1: the SC values and their glyphs read BLACK ----
+    // the v2.81.0 factory built the glyph label but never gave it a
+    // colour, and JUCE copies NONE of the slider's box colours onto
+    // the readout (lookAndFeelChanged just recreates it, bare) - so
+    // the label answered the look-and-feel's own default, the dark
+    // scheme's WHITE, and the SC values read white on the cream. The
+    // factory copies the slider's textBoxTextColourId now, exactly
+    // what JUCE's own V2 factory does for its plain labels, so the
+    // values - and the glyph, which paints with the same colour -
+    // read the strip's own near-black silkscreen ink
+    for (int i = 0; i < 4; ++i)
+        expectTrue (scLabels82[(size_t) i] != nullptr
+                        && scLabels82[(size_t) i]->findColour (juce::Label::textColourId)
+                            == juce::Colour (0xff2b2620),
+                    "every SC readout - the value AND its curve glyph - speaks the strip's own black ink now (the v2.82.0 fix)");
+
+    // ---- Clement's remark 2: the HPF and LPF curve glyphs are OFF for now ----
+    // the components stay (the harness still reads their types), just
+    // hidden - one remark away from coming back
+    {
+        const auto icons82 = editorForV282.getSectionIcons();
+        expectTrue (icons82[(size_t) 1] != nullptr && icons82[(size_t) 2] != nullptr
+                        && !icons82[(size_t) 1]->isVisible()
+                        && !icons82[(size_t) 2]->isVisible(),
+                    "the HPF and LPF curve glyphs are off for now - hidden, one remark away from coming back");
+    }
+
+    // ---- and the cut cell reads NORTH-WEST, Clement's own words ----
+    // the button at the knob's own top-left corner, the slope selector
+    // DIRECTLY under the plate - its top touching the plate's bottom -
+    // and the knob owning everything below, the 107 x 92 the line can
+    // give it now the glyph is gone
+    expectTrue (cutPlates82[0] != nullptr && sliders82[1] != nullptr
+                    && sliders82[5] != nullptr
+                    && cutPlates82[0]->getBounds().getX() == sliders82[1]->getBounds().getX()
+                    && sliders82[5]->getBounds().getY() == cutPlates82[0]->getBounds().getBottom()
+                    && sliders82[5]->getBounds().getBottom() <= sliders82[1]->getBounds().getY()
+                    && sliders82[1]->getWidth() == 107 && sliders82[1]->getHeight() == 92,
+                "the HPF cell reads NORTH-WEST - the button at the knob's top-left corner, the slope directly under the plate, the knob 107 x 92 below");
+
+    expectTrue (cutPlates82[1] != nullptr && sliders82[2] != nullptr
+                    && sliders82[6] != nullptr
+                    && cutPlates82[1]->getBounds().getX() == sliders82[2]->getBounds().getX()
+                    && sliders82[6]->getBounds().getY() == cutPlates82[1]->getBounds().getBottom()
+                    && sliders82[6]->getBounds().getBottom() <= sliders82[2]->getBounds().getY()
+                    && sliders82[2]->getWidth() == 107 && sliders82[2]->getHeight() == 92,
+                "the LPF cell reads NORTH-WEST too - plate, slope, one fat knob under them");
 }
 
 void testIntegrationRealConsole()
@@ -8139,6 +8206,7 @@ int main (int argc, char* argv[])
     testCostesStripCompLinkAndGrTiers();
     testCostesStripKneeAndLayoutTightening();
     testV281FourRemarks();
+    testV282ThreeRemarks();
 
     if (integration)
         testIntegrationRealConsole();

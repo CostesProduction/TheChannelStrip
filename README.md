@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.81.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.82.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,24 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.82.0** — *Three remarks: the sidechain values speak black, the
+  cut cells read NORTH-WEST, and the HPF / LPF glyphs step aside.*
+  - **The SC readouts read the strip's black ink.** JUCE copies none of
+    a slider's text-box colours onto the readout label (it recreates the
+    box bare at every colour change), so the v2.81.0 glyph label painted
+    in the look-and-feel's default - white on the cream. The factory
+    copies the slider's own text colour onto the label now, exactly what
+    JUCE's V2 factory does for its plain labels: the values AND their
+    curve glyphs read the strip's near-black silkscreen.
+  - **The filters cells read NORTH-WEST.** The merged HPF / LPF button
+    rides at its knob's own top-left corner, the slope selector sits
+    directly under the plate (52 x 38, the EQ sweeps' geometry), and
+    the knob owns everything the column has left - 107 x 92, its disc
+    grown to 57 px. The HPF and LPF curve glyphs are off for now: the
+    plate and the value speak the filter on their own.
+  - 965 checks (958 + 7 new: the four SC readouts' ink, the glyphs'
+    absence, the two NORTH-WEST stacks).
 
 - **2.81.0** — *Four remarks, four fixes - the curve finally rides the
   sidechain readouts, the filters grow, and the EQ's glyphs follow
