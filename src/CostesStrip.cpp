@@ -2371,7 +2371,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // the backgroundColourId. v2.63.0 (Clement's remarks 2-4): a
     // COMMAND-CLICK parks the knob on its default too (CostesSlider),
     // and the HIGH CUT knob joins the HF band on the pastel red cap
-    const auto setUpKnob = [this] (CostesSlider& knob, juce::Label& label,
+    // v2.78.0 (Clement's remark 5): the caption label became optional
+    // - the EQ's FREQ/GAIN words are gone, its knobs speak through
+    // their readouts alone, so those eight pass nullptr here
+    const auto setUpKnob = [this] (CostesSlider& knob, juce::Label* label,
                                    const juce::String& labelText, float defaultValue,
                                    const juce::Colour& capColour)
     {
@@ -2398,34 +2401,45 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         knob.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0x00000000));
         addAndMakeVisible (knob);
 
-        label.setText (labelText, juce::dontSendNotification);
-        label.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-        label.setJustificationType (juce::Justification::centred);
-        label.setColour (juce::Label::textColourId, engraving);
-        addAndMakeVisible (label);
+        if (label != nullptr)
+        {
+            label->setText (labelText, juce::dontSendNotification);
+            label->setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+            label->setJustificationType (juce::Justification::centred);
+            label->setColour (juce::Label::textColourId, engraving);
+            addAndMakeVisible (*label);
+        }
     };
 
-    setUpKnob (trimInKnob,  trimInLabel,  "TRIM IN",  0.0f,    knobDisc);
-    setUpKnob (lowCutKnob,  lowCutLabel,  "LOW CUT",  16.0f,   knobDisc);
-    // v2.63.0 (Clement's remark 4): the HIGH CUT knob wears the same
+    setUpKnob (trimInKnob, &trimInLabel,  "TRIM IN",  0.0f,    knobDisc);
+    // v2.78.0 (Clement's remark 8): the cuts speak the console's own
+    // filter names - HPF and LPF - and their captions ride the cells'
+    // top-left corner now, so the words hang at the LEFT of the line
+    // their ON plate closes at the right
+    setUpKnob (lowCutKnob, &lowCutLabel,  "HPF",  16.0f,   knobDisc);
+    lowCutLabel.setJustificationType (juce::Justification::centredLeft);
+    // v2.63.0 (Clement's remark 4): the LPF knob wears the same
     // pastel red cap as the EQ's HF band
-    setUpKnob (highCutKnob, highCutLabel, "HIGH CUT", 24000.0f, eqHfDisc);
-    setUpKnob (tiltKnob,    tiltLabel,    "TILT",     0.0f,    knobDisc);
-    setUpKnob (driveKnob,   driveLabel,   "DRIVE",    0.0f,    knobDisc);
+    setUpKnob (highCutKnob, &highCutLabel, "LPF", 24000.0f, eqHfDisc);
+    highCutLabel.setJustificationType (juce::Justification::centredLeft);
+    setUpKnob (tiltKnob, &tiltLabel,    "TILT",     0.0f,    knobDisc);
+    setUpKnob (driveKnob, &driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
     // the EQ knobs (v2.61.0): the same ergonomics, one FREQ and one GAIN
     // per band - double-click parks each band on its SSL-style starting
     // point (100 Hz, 400 Hz, 1600 Hz, 7200 Hz) or 0 dB. v2.62.0 (remark
     // 4): the caps speak the SSL band colours - LF keeps the black
-    // aluminium, LO MID pastel blue, HI MID off-white, HF pastel red
-    setUpKnob (eq1HzKnob,   eq1HzLabel,   "FREQ", 100.0f,  knobDisc);
-    setUpKnob (eq1GainKnob, eq1GainLabel, "GAIN", 0.0f,    knobDisc);
-    setUpKnob (eq2HzKnob,   eq2HzLabel,   "FREQ", 400.0f,  eqLoMidDisc);
-    setUpKnob (eq2GainKnob, eq2GainLabel, "GAIN", 0.0f,    eqLoMidDisc);
-    setUpKnob (eq3HzKnob,   eq3HzLabel,   "FREQ", 1600.0f, eqHiMidDisc);
-    setUpKnob (eq3GainKnob, eq3GainLabel, "GAIN", 0.0f,    eqHiMidDisc);
-    setUpKnob (eq4HzKnob,   eq4HzLabel,   "FREQ", 7200.0f, eqHfDisc);
-    setUpKnob (eq4GainKnob, eq4GainLabel, "GAIN", 0.0f,    eqHfDisc);
+    // aluminium, LMF pastel blue, HMF off-white, HF pastel red.
+    // v2.78.0 (Clement's remark 5): no caption words any more - the
+    // knobs speak through their readouts alone
+    setUpKnob (eq1HzKnob,   nullptr, "", 100.0f,  knobDisc);
+    setUpKnob (eq1GainKnob, nullptr, "", 0.0f,    knobDisc);
+    setUpKnob (eq2HzKnob,   nullptr, "", 400.0f,  eqLoMidDisc);
+    setUpKnob (eq2GainKnob, nullptr, "", 0.0f,    eqLoMidDisc);
+    setUpKnob (eq3HzKnob,   nullptr, "", 1600.0f, eqHiMidDisc);
+    setUpKnob (eq3GainKnob, nullptr, "", 0.0f,    eqHiMidDisc);
+    setUpKnob (eq4HzKnob,   nullptr, "", 7200.0f, eqHfDisc);
+    setUpKnob (eq4GainKnob, nullptr, "", 0.0f,    eqHfDisc);
 
     // the section glyphs (v2.60.0, Clement's remark): each icon sits at
     // the left of its caption and paints itself - nothing to add here
@@ -2435,48 +2449,28 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (highCutIcon);
     addAndMakeVisible (tiltIcon);
     addAndMakeVisible (driveIcon);
-    addAndMakeVisible (eqIcon);   // v2.61.0: the EQ header's bell glyph
 
-    // the two mid bands' bell glyphs (v2.62.0; re-cut in v2.70.0,
-    // Clement's remark 9): the outer bands' shapes moved INTO their
-    // BELL/SHELF plates, so only the two bells remain as free icons,
-    // each sitting at the right of its Q readout's own "oct"
+    // the band glyphs (v2.62.0; re-cut in v2.78.0, Clement's remarks 4
+    // and 6): all four bands keep a free glyph under their names now -
+    // the two mid bells, and the outer bands' own shapes, which FOLLOW
+    // their BELL/SHELF plates and repaint with them (the icon picks its
+    // shape at paint time from the plate it shadows)
+    addAndMakeVisible (eqBand1Icon);
     addAndMakeVisible (eqBand2Icon);
     addAndMakeVisible (eqBand3Icon);
+    addAndMakeVisible (eqBand4Icon);
+    eqBand1Icon.follows = &eq1ModeButton;
+    eqBand4Icon.follows = &eq4ModeButton;
 
-    // the EQ section header (v2.61.0): the caption is a label so the
-    // icon can hug its left edge with the same geometry the knob
-    // captions use - the engraved silkscreen look, drawn as a component
-    eqSectionLabel.setText ("EQ", juce::dontSendNotification);
-    eqSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    eqSectionLabel.setJustificationType (juce::Justification::centred);
-    eqSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (eqSectionLabel);
+    // v2.78.0 (Clement's remark 1): the front end is ONE block now and
+    // its name is the console's own signature - COSTES, the trace,
+    // CONSOLE - painted across the top band where INPUT once read,
+    // the same wording that ran down the panel's left edge since
+    // v2.70.0. The signature lives in paint()
 
-    // v2.70.0 (Clement's remarks 5 and 7): the input conditioning block
-    // (TRIM, the cuts, TILT, DRIVE) carries its own written name -
-    // INPUT, the SSL idiom for the channel's front end - centred in
-    // the top band over the left half, naming the block the way the
-    // EQ header names the right one
-    inputSectionLabel.setText ("INPUT", juce::dontSendNotification);
-    inputSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    inputSectionLabel.setJustificationType (juce::Justification::centred);
-    inputSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (inputSectionLabel);
-
-    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
-    // ROW - the FILTERS band names the cuts' line between them, the
-    // same engraved style the INPUT header carries (the TILT knob
-    // speaks its own name through its caption, so it keeps no band
-    // of its own)
-    filtersSectionLabel.setText ("FILTERS", juce::dontSendNotification);
-    filtersSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    filtersSectionLabel.setJustificationType (juce::Justification::centred);
-    filtersSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (filtersSectionLabel);
-
-    // the four band captions (v2.61.0): LF, LO MID, HI MID, HF - the
-    // SSL E-series naming, each above its band's column
+    // the four band captions (v2.61.0; v2.78.0, Clement's remark 7):
+    // LF, LMF, HMF, HF - the SSL E-series naming, each in its band's
+    // margin column
     const auto setUpBandCaption = [this] (juce::Label& label, const juce::String& text)
     {
         label.setText (text, juce::dontSendNotification);
@@ -2487,8 +2481,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     };
 
     setUpBandCaption (eqBand1Label, "LF");
-    setUpBandCaption (eqBand2Label, "LO MID");
-    setUpBandCaption (eqBand3Label, "HI MID");
+    setUpBandCaption (eqBand2Label, "LMF");
+    setUpBandCaption (eqBand3Label, "HMF");
     setUpBandCaption (eqBand4Label, "HF");
 
     // the slope selectors under the cut knobs (v2.58.0, Clement's remark;
@@ -2542,17 +2536,17 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // expander, threshold 0 / ratio 2 on the compressor, mix 100 %,
     // every sidechain at rest)
     // ------------------------------------------------------------------
-    setUpKnob (expThresholdKnob, expThresholdLabel, "THRESH", -50.0f, expKnobDisc);
-    setUpKnob (expRangeKnob,     expRangeLabel,     "RANGE",    0.0f, expKnobDisc);
-    setUpKnob (expReleaseKnob,  expReleaseLabel,   "RELEASE",   0.3f, expKnobDisc);
-    setUpKnob (expRatioKnob,    expRatioLabel,      "RATIO",    2.0f, expKnobDisc);
-    setUpKnob (expMixKnob,      expMixLabel,        "MIX",     100.0f, expKnobDisc);
+    setUpKnob (expThresholdKnob, &expThresholdLabel, "THRESH", -50.0f, expKnobDisc);
+    setUpKnob (expRangeKnob, &expRangeLabel,     "RANGE",    0.0f, expKnobDisc);
+    setUpKnob (expReleaseKnob, &expReleaseLabel,   "RELEASE",   0.3f, expKnobDisc);
+    setUpKnob (expRatioKnob, &expRatioLabel,      "RATIO",    2.0f, expKnobDisc);
+    setUpKnob (expMixKnob, &expMixLabel,        "MIX",     100.0f, expKnobDisc);
 
-    setUpKnob (compThresholdKnob, compThresholdLabel, "THRESH",  0.0f, compKnobDisc);
-    setUpKnob (compRatioKnob,     compRatioLabel,     "RATIO",   2.0f, compKnobDisc);
-    setUpKnob (compReleaseKnob,   compReleaseLabel,  "RELEASE", 0.25f, compKnobDisc);
-    setUpKnob (compGainKnob,      compGainLabel,      "GAIN",    0.0f, compKnobDisc);
-    setUpKnob (compMixKnob,       compMixLabel,      "MIX",     100.0f, compKnobDisc);
+    setUpKnob (compThresholdKnob, &compThresholdLabel, "THRESH",  0.0f, compKnobDisc);
+    setUpKnob (compRatioKnob, &compRatioLabel,     "RATIO",   2.0f, compKnobDisc);
+    setUpKnob (compReleaseKnob, &compReleaseLabel,  "RELEASE", 0.25f, compKnobDisc);
+    setUpKnob (compGainKnob, &compGainLabel,      "GAIN",    0.0f, compKnobDisc);
+    setUpKnob (compMixKnob, &compMixLabel,      "MIX",     100.0f, compKnobDisc);
 
     // the sidechain pair of each stage rides the cuts' own horizontal
     // selector - the SC HPF parks at 16 Hz, the SC LPF at 24000 Hz,
@@ -2613,24 +2607,31 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     oversampleButton.caption = "OS 2x";
     addAndMakeVisible (oversampleButton);
 
-    // the EQ's global on/off plate (v2.61.0): beside the header, owning
-    // the whole section's bypass - "EQ ON" lit amber, "EQ OFF" dark
+    // the EQ's global on/off plate (v2.61.0): v2.78.0 (Clement's
+    // remark 2) made it the section's own NAME - centred in the
+    // header band where the EQ caption and its bell glyph once read,
+    // owning the whole section's bypass - "EQ ON" lit amber, "EQ
+    // OFF" dark
     eqOnButton.caption = "EQ";
     addAndMakeVisible (eqOnButton);
 
     // the band-1/4 shape plates (v2.61.0): lit "BELL" or dark "SHELF",
-    // one per outer band, under the band's knobs
-    // v2.70.0 (Clement's remark 9): each outer plate carries its own
-    // shelf shape inside the button - the low shelf on band 1, the
-    // high shelf on band 4 (the default member suits band 1)
+    // one per outer band. v2.78.0 (Clement's remark 4): the plates
+    // moved into their bands' margin columns - under the name and its
+    // glyph - and gave up the shape they carried inside (v2.70.0);
+    // the shape stands under the name now, follows the plate, and
+    // the shelfGlyph member still says which shelf the band speaks -
+    // the low shelf on band 1, the high shelf on band 4
     eq4ModeButton.shelfGlyph = CostesStripEditor::SectionIcon::Icon::highShelf;
     addAndMakeVisible (eq1ModeButton);
     addAndMakeVisible (eq4ModeButton);
 
-    // the cut on/off plates (v2.59.0, Clement's remark 2): the same SSL
-    // plate language as the oversampling switch, vertical, one per cut.
-    // They sit left of each cut's readout band and own the bypass - the
-    // slope sweep itself starts at 6 dB/oct
+    // the cut on/off plates (v2.59.0, Clement's remark 2; v2.78.0,
+    // Clement's remark 8): the same SSL plate language, turned
+    // HORIZONTAL now - an LED at the left, the state spelled at the
+    // right - riding the cells' top-RIGHT corner beside the filter's
+    // own glyph. They own the bypass; the slope sweep itself starts
+    // at 6 dB/oct
     addAndMakeVisible (lowCutOnButton);
     addAndMakeVisible (highCutOnButton);
 
@@ -2792,13 +2793,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         }
     }
 
-    // v2.77.0 (Clement's remarks): the console TIGHTENS AGAIN - the
-    // little vertical airs of the front end (the band caption rows,
-    // the breaths, the header bands) give way, the EQ band names
-    // stand beside their knobs and the EQ reads SSL-style with the
-    // highs at the top - so the panel drops from 860 x 964 to
-    // 860 x 814, exactly the 150 px Clement asked to win back
-    setSize (860, 814);
+    // v2.78.0 (Clement's remarks): the console TIGHTENS AGAIN - the
+    // signature moves from the left edge to the merged front-end
+    // block's own header, the EQ caption words and band intertitles
+    // are gone, and the panel drops from 860 x 814 to 860 x 764
+    setSize (860, 764);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2932,16 +2931,13 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.setColour (plateFill);
     g.drawRect (getLocalBounds(), 2);
 
-    // v2.70.0 (Clement's remark 7): the engraved console signature
-    // leaves the top band and reads along the LEFT EDGE - the way a
-    // real console silkscreens its name down the side of its input
-    // module. The trace, COSTES and CONSOLE are rotated a quarter
-    // turn so they read bottom-up: the seismic line at the foot, the
-    // name in dark engraving above it, CONSOLE in dim caps at the
-    // head. In the rotated frame the +x axis points up the edge and
-    // +y to the right, so the drawing below is the horizontal
-    // signature re-used along the panel's own left margin (the top
-    // band now belongs to the INPUT and EQ section names alone)
+    // v2.78.0 (Clement's remark 1): the engraved console signature
+    // comes BACK to the top band - horizontal now, naming the merged
+    // front-end block the way INPUT once did, centred over column 1.
+    // The trace, COSTES and CONSOLE read left to right: the seismic
+    // line, the name in dark engraving, a small tick, CONSOLE in dim
+    // caps - the same wording that ran down the panel's left edge
+    // from v2.70.0 to v2.77.0, and whose margin the columns now own
     const int width = getWidth();
     {
         const float trace[][2] =
@@ -2953,53 +2949,56 @@ void CostesStripEditor::paint (juce::Graphics& g)
             { 45.0f, 10.0f }, { 50.0f, 10.0f }
         };
 
-        // v2.77.0: the signature rides the shorter panel's own middle
-        // (the three-column grid starts at x = 28, so the rotated
-        // drawing still owns the whole left margin)
-        g.saveState();
-        g.addTransform (juce::AffineTransform::rotation (
-            -juce::MathConstants<float>::halfPi, 17.0f, 407.0f));
+        const auto costesFont = juce::Font (juce::FontOptions (13.0f, juce::Font::bold));
+        const auto consoleFont = juce::Font (juce::FontOptions (9.5f, juce::Font::bold));
+        const int costesW = costesFont.getStringWidth ("COSTES");
+        const int consoleW = consoleFont.getStringWidth ("CONSOLE");
 
-        // the seismic line at the signature's foot, the logo's own
-        // 50 x 20 trace scaled to 24 px - a heartbeat running up the
-        // console's spine
+        // the group centred over column 1: the trace, a breath, the
+        // name, the tick, a breath, CONSOLE
+        const int groupW = 24 + 6 + costesW + 3 + 1 + 3 + consoleW;
+        const int groupX = 12 + juce::jmax (0, (230 - groupW) / 2);
+        const int bandY = 26;
+        const int bandH = 18;
+
+        // the seismic line, the logo's own 50 x 20 trace scaled to
+        // 24 px - a heartbeat running under the console's name
         g.setColour (engraving);
 
         for (int i = 1; i < 14; ++i)
-            g.drawLine (juce::Line<float> (17.0f + trace[i - 1][0] * 0.48f,
-                                           400.0f + trace[i - 1][1] * 0.48f,
-                                           17.0f + trace[i][0] * 0.48f,
-                                           400.0f + trace[i][1] * 0.48f), 1.8f);
+            g.drawLine (juce::Line<float> (groupX + trace[i - 1][0] * 0.48f,
+                                           bandY + bandH * 0.5f + (trace[i - 1][1] - 10.0f) * 0.48f,
+                                           groupX + trace[i][0] * 0.48f,
+                                           bandY + bandH * 0.5f + (trace[i][1] - 10.0f) * 0.48f), 1.8f);
 
         // the name itself: COSTES in engraving, a small tick, CONSOLE
-        // in dim caps - the same stacked wording as the old top band
-        g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText ("COSTES", juce::Rectangle<int> (45, 400, 66, 14),
+        // in dim caps - the same stacked wording as ever
+        const int nameX = groupX + 24 + 6;
+        g.setFont (costesFont);
+        g.drawText ("COSTES", juce::Rectangle<int> (nameX, bandY, costesW, bandH),
                     juce::Justification::centredLeft);
         g.setColour (engravingDim.withAlpha (0.7f));
-        g.drawVerticalLine (115, 402.0f, 414.0f);
-        g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 401, 66, 14),
+        g.drawVerticalLine (nameX + costesW + 3, bandY + 3.0f, bandY + 15.0f);
+        g.setFont (consoleFont);
+        g.drawText ("CONSOLE", juce::Rectangle<int> (nameX + costesW + 7, bandY,
+                                                     consoleW, bandH),
                     juce::Justification::centredLeft);
-
-        g.restoreState();
     }
 
     // v2.75.0 (Clement's request): the silkscreen follows the three
     // columns - two long vertical dividers separate the front end
     // from the dynamics and the dynamics from the output chain, a
-    // short engraved rule names each of column 1's three bands
-    // (v2.76.0: INPUT, FILTERS, EQ), and the reserved slots draw
-    // their own empty frames with the section's name at the frame's
-    // head
+    // short engraved rule names each of column 1's two bands
+    // (v2.78.0: the COSTES CONSOLE block and the EQ), and the
+    // reserved slots draw their own empty frames with the section's
+    // name at the frame's head
     g.setColour (engravingDim.withAlpha (0.5f));
 
     g.drawVerticalLine (248, 32.0f, (float) getHeight() - 12.0f);
     g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
 
-    g.drawLine (30.0f, 47.0f, 240.0f, 47.0f, 1.0f);
-    g.drawLine (30.0f, 171.0f, 240.0f, 171.0f, 1.0f);
-    g.drawLine (30.0f, 315.0f, 240.0f, 315.0f, 1.0f);
+    g.drawLine (14.0f, 47.0f, 240.0f, 47.0f, 1.0f);
+    g.drawLine (14.0f, 291.0f, 240.0f, 291.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3071,29 +3070,28 @@ void CostesStripEditor::resized()
 
     // v2.75.0 (Clement's spec): the console reads as THREE vertical
     // columns and the sound flows through them - down column 1 (the
-    // front end: INPUT, TILT, FILTERS, EQ), down column 2 (the
-    // dynamics: EXPANDER, the reserved TRANSIENT slot, COMPRESSOR),
-    // down column 3 (the output chain: the reserved slots and
-    // DRIVE). The engraved signature keeps the left margin and the
-    // two painted dividers name the seams
-    area.removeFromLeft (28);   // the vertical signature's own margin
+    // front end: the COSTES CONSOLE block, the cuts, the EQ), down
+    // column 2 (the dynamics: EXPANDER, the reserved TRANSIENT slot,
+    // COMPRESSOR), down column 3 (the output chain: the reserved
+    // slots and DRIVE). v2.78.0 (Clement's remark 1): the signature
+    // left the left edge, so the margin it read down returns to the
+    // console - the columns start at x = 12 and the front end grows
+    // to 230 px
+    area.removeFromLeft (12);   // the grid's own left margin
 
-    auto column1 = area.removeFromLeft (214);
+    auto column1 = area.removeFromLeft (230);
     area.removeFromLeft (12);   // the first divider's seam
     auto column2 = area.removeFromLeft (440);
     area.removeFromLeft (12);   // the second divider's seam
     auto column3 = area;        // 142 wide, 12 of margin at the right
 
     // ---- column 1: the front end ----
-    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
-    // ROW - the INPUT band heads the column, TRIM and TILT share the
-    // first line, the FILTERS band names the cuts' line under it,
-    // and the EQ closes the column as ever. v2.77.0 (Clement's
-    // remarks): the little airs tighten - the header bands slim to
-    // 24 px, the rows to 96 and 112, the breaths to 4 - the front
-    // end gives the 150 px the shorter panel wins back
-    auto inputSection = column1.removeFromTop (24);
-    inputSectionLabel.setBounds (inputSection.removeFromTop (18));
+    // v2.78.0 (Clement's remark 1): ONE block now - the COSTES
+    // CONSOLE signature names it from the top band (painted in
+    // paint(), where INPUT once read), TRIM and TILT share the first
+    // line, the HPF and LPF line rides under it with no intertitle,
+    // and the EQ closes the column as ever
+    column1.removeFromTop (24);   // the signature's own band
 
     // the TRIM and TILT line: two cells of the same pattern - knob
     // above, caption below, the section glyph hugging the text's
@@ -3121,16 +3119,14 @@ void CostesStripEditor::resized()
         knob->setBounds (column);
     }
 
-    column1.removeFromTop (4);   // a breath before the FILTERS band
+    column1.removeFromTop (4);   // a breath between the lines
 
-    // FILTERS: the engraved band that names the cuts' line - LOW CUT
-    // and HIGH CUT share one row, each column carrying the per-knob
-    // geometry the cuts have kept since v2.59: the on/off plate at
-    // the knob's top-left corner, the slope selector under it, the
-    // caption and its glyph at the bottom
-    auto filtersSection = column1.removeFromTop (24);
-    filtersSectionLabel.setBounds (filtersSection.removeFromTop (18));
-
+    // the HPF and LPF line (v2.78.0, Clement's remark 8): the freed
+    // caption rides the cell's top-LEFT corner, the filter's glyph and
+    // its ON plate close the same line at the RIGHT, the knob stands
+    // under them and the slope selector keeps the bottom - the caption
+    // line the old bottom stack took is gone, so the knob keeps its
+    // own 62 px while the row reads tighter
     auto filtersRow = column1.removeFromTop (112);
     const int filtersCellW = filtersRow.getWidth() / 2;
 
@@ -3145,66 +3141,51 @@ void CostesStripEditor::resized()
 
         if (i == 1) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; icon = &highCutIcon; }
 
+        // the top strip: the caption at the left, then the glyph, then
+        // the on/off plate flush at the cell's right edge (v2.59.0;
+        // v2.73.0 at the top-left; v2.78.0 at the top-RIGHT, the cut's
+        // glyph riding beside it - the bounds below come from a copy:
+        // the knob's own square stays untouched)
+        auto topStrip = column.removeFromTop (20);
+        // the plate owns the 42 px its horizontal reading needs: the
+        // LED's 18 plus the widest word's own 20 (an OFF at 9.5 pt)
+        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (
+            topStrip.removeFromRight (42));
+        icon->setBounds (topStrip.removeFromRight (18)
+                             .withSizeKeepingCentre (16, 16));
+        caption->setBounds (topStrip);
+
         // the slope columns give their selector a 26 px band - the 18 px
         // readout box plus a slice of track above it (v2.60.0)
-        const int knobHeight = column.getHeight() - 46;
-
-        // the cut on/off plate (v2.59.0): v2.73.0 (Clement's remark 3)
-        // moved it from the bottom-left of the knob's square to its
-        // TOP-LEFT corner - the rotary disc leaves the corner empty,
-        // so the plate reads as its knob's own switch at a glance and
-        // steals none of the knob's room (the bounds below come from a
-        // copy: the knob's own square stays untouched)
-        auto plate = column;
-        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (
-            plate.removeFromTop (32).removeFromLeft (30));
-
         auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
         slope->setBounds (slopeBounds);
 
-        auto captionBounds = column.removeFromBottom (18);
-        caption->setBounds (captionBounds);
-
-        const int textWidth = caption->getFont().getStringWidth (caption->getText());
-        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
-                         captionBounds.getY() + 1, 16, 16);
-
-        knob->setBounds (column.removeFromTop (knobHeight));
+        // the knob owns everything the strip and the slope leave - 62 px
+        knob->setBounds (column);
     }
 
     column1.removeFromTop (4);  // a breath between the sections
 
     // ---- the EQ section (v2.61.0, Clement's spec; stacked in
-    // v2.75.0; SSL-ordered in v2.77.0, Clement's remark): the
-    // section closes column 1 and its four bands read as four
-    // stacked rows - HF, HI MID, LO MID, LF down the column, the
-    // SSL way - the HIGHS at the top of the stack, the lows at the
-    // bottom, the ear's own reading order ----
-    // the header: the global on/off plate at the left and the section
-    // caption centred, its bell glyph hugging the text's left edge
-    // with the same geometry the knob captions use for their icons
+    // v2.75.0; SSL-ordered in v2.77.0; v2.78.0, Clement's remarks):
+    // the section closes column 1 and its four bands read as four
+    // stacked rows - HF, HMF, LMF, LF down the column, the SSL way -
+    // and the EQ ON plate IS the section's name now, centred in the
+    // header band where the caption and its bell glyph once read
     auto eqArea = column1;
     eqArea.removeFromTop (4);
     auto eqHeader = eqArea.removeFromTop (18);
 
-    eqOnButton.setBounds (eqHeader.getX() + 14, eqHeader.getY(), 76, 18);
-    eqSectionLabel.setBounds (eqHeader);
+    eqOnButton.setBounds (eqHeader.withSizeKeepingCentre (76, 18));
 
-    const int eqTextWidth = eqSectionLabel.getFont()
-                                .getStringWidth (eqSectionLabel.getText());
-    eqIcon.setBounds (eqHeader.getCentreX() - eqTextWidth / 2 - 21,
-                      eqHeader.getY() + 2, 16, 16);
-
-    // the four band cells: the FREQ and GAIN knobs side by side
-    // with their own small captions, the band's own selector
-    // underneath - the bandwidth sweep for the mid bells, the
-    // BELL/SHELF plate for the outer bands - and (v2.62.0, Clement's
-    // remark 5) a 16 px glyph in a final row: the LF band's low-shelf
-    // response, the two mid bells' bump and the HF band's high shelf.
-    // v2.77.0 (Clement's remarks): the bands stack in the SSL's own
-    // order - HF first, LF last - and the band names stand in a
-    // slim margin column beside their knobs instead of owning
-    // caption rows of their own
+    // the four band cells: the GAIN knob at the LEFT of the row and
+    // the FREQ at its RIGHT (v2.78.0, Clement's remark 9 - the SSL's
+    // own reading), the band's margin column at the row's left
+    // carrying its name, its glyph and (on the outer bands) the
+    // BELL/SHELF plate, and the mid bells' width sweep on the
+    // selector line underneath (v2.72.0, Clement's remark 1: the
+    // full-sentence readout, "Width : 1.0 octave", owns the whole
+    // line - the 18 px text box at its bottom, the words never clip)
     const int eqBandH = eqArea.getHeight() / 4;
 
     for (int band = 3; band >= 0; --band)
@@ -3213,93 +3194,67 @@ void CostesStripEditor::resized()
 
         auto* bandLabel = &eqBand1Label;
         auto* freqKnob  = &eq1HzKnob;
-        auto* freqLabel = &eq1HzLabel;
         auto* gainKnob  = &eq1GainKnob;
-        auto* gainLabel = &eq1GainLabel;
         juce::Slider* octSlider   = nullptr;
         ShelfModeToggle* modeButton = &eq1ModeButton;
 
-        // v2.70.0 (Clement's remark 9): the outer bands' glyphs live
-        // inside their BELL/SHELF plates now, so the band icon is a
-        // mid-band-only concern - it is only ever read where the
-        // octSlider branch below runs
-        SectionIcon* bandIcon = nullptr;
+        // v2.78.0 (Clement's remarks 4 and 6): every band keeps a free
+        // glyph under its name now - the mid bells, and the outer
+        // bands' own shapes, which follow their BELL/SHELF plates
+        // (the follows member set in the constructor)
+        SectionIcon* bandGlyph = &eqBand1Icon;
 
         if (band == 1)
         {
-            bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
-            gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
+            bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;
+            gainKnob  = &eq2GainKnob;
             octSlider = &eq2OctSlider; modeButton = nullptr;
-            bandIcon  = &eqBand2Icon;
+            bandGlyph = &eqBand2Icon;
         }
         else if (band == 2)
         {
-            bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
-            gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
+            bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;
+            gainKnob  = &eq3GainKnob;
             octSlider = &eq3OctSlider; modeButton = nullptr;
-            bandIcon  = &eqBand3Icon;
+            bandGlyph = &eqBand3Icon;
         }
         else if (band == 3)
         {
-            bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
-            gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
+            bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;
+            gainKnob  = &eq4GainKnob;
             modeButton = &eq4ModeButton;
+            bandGlyph = &eqBand4Icon;
         }
 
-        // v2.72.0 (Clement's remark 1): the mid bells' width sweep
-        // grew a full-sentence readout ("Width : 1.0 octave") - it
-        // owns the whole selector band now, the 18 px text box at
-        // its bottom with air above, so the words never clip the way
-        // the old 76 px box did. The outer bands' shapes still live
-        // in their BELL/SHELF plates; every knob above stays put
+        // the selector line: the mids' width sweep alone - the outer
+        // bands' plates moved into the margin column
         auto bottom = column.removeFromBottom (40);
 
         auto knobRow = column;
 
-        // v2.77.0 (Clement's remark): the band's own NAME stands in
-        // a slim margin column at the row's left, LEVEL WITH ITS
-        // KNOBS - the caption row above the knobs is gone, so the
-        // name costs no vertical air any more (the 20 px it once
-        // took per band is part of the 150 px the shorter panel wins
-        // back). The knobs give the column's width but keep their
-        // disc - the rotary draws the circle of the smaller dimension
-        auto nameColumn = knobRow.removeFromLeft (48);
+        // the margin column (v2.77.0: the name; v2.78.0: the glyph
+        // under it, then the outer bands' BELL/SHELF plate under the
+        // glyph) - the whole band's identity in one slim strip at the
+        // row's left, level with its knobs
+        auto nameColumn = knobRow.removeFromLeft (56);
+        bandLabel->setBounds (nameColumn.removeFromTop (16));
+        bandGlyph->setBounds (nameColumn.removeFromTop (18)
+                                  .withSizeKeepingCentre (16, 16));
 
+        if (modeButton != nullptr)
+            modeButton->setBounds (nameColumn.removeFromTop (20));
+
+        // GAIN at the LEFT, FREQ at the RIGHT - no caption words any
+        // more (v2.78.0, Clement's remark 5), the readouts speak alone
         const int half = knobRow.getWidth() / 2;
-        auto freqCol = knobRow.removeFromLeft (half);
-        auto gainCol = knobRow;
-
-        freqLabel->setBounds (freqCol.removeFromBottom (14));
-        freqKnob->setBounds (freqCol);
-        gainLabel->setBounds (gainCol.removeFromBottom (14));
-        gainKnob->setBounds (gainCol);
-
-        // the name strip keeps the knob's own height, so the words
-        // sit level with the knobs whatever the row's room (degenerate
-        // resizes included)
-        bandLabel->setBounds (nameColumn.removeFromTop (
-            freqKnob->getBounds().getHeight()));
+        gainKnob->setBounds (knobRow.removeFromLeft (half));
+        freqKnob->setBounds (knobRow);
 
         if (octSlider != nullptr)
         {
             // the mid bells' bandwidth sweep - the cuts' own selector
             // geometry, one band width wide, riding the full band
             octSlider->setBounds (bottom.reduced (1, 1));
-
-            // and the bell glyph BEFORE the words (v2.72.0,
-            // Clement's remark 1): the text box is 150 px centred in
-            // the selector, so the glyph hugs its left edge and
-            // rides the same 18 px line the text sits in
-            bandIcon->setBounds (bottom.getCentreX() - 75 - 18,
-                                 bottom.getY() + 24, 16, 16);
-        }
-        else if (modeButton != nullptr)
-        {
-            // the outer bands' BELL/SHELF plate, centred under its
-            // band - the top 26 px of the band, as ever
-            auto control = bottom.removeFromTop (26);
-            modeButton->setBounds (control.withSizeKeepingCentre (
-                juce::jmin (control.getWidth(), 76), 20));
         }
     }
 
@@ -3504,8 +3459,8 @@ void CostesStripEditor::resized()
     }
 
     // ---- column 3: the output chain ----
-    // six slots down the shorter panel (v2.77.0: the reserved slots
-    // slim to 120 px, DRIVE keeps its own 150): five of them stay
+    // six slots down the shorter panel (v2.78.0: the reserved slots
+    // slim to 110 px, DRIVE keeps its own 150): five of them stay
     // RESERVED - engraved empty frames that name the sections the
     // coming builds will fill (PHASE INVERT, STEREO PAN, STEREO
     // WIDTH, MONO MAKER, OUTPUT TRIM) - and the fifth slot is DRIVE,
@@ -3514,7 +3469,7 @@ void CostesStripEditor::resized()
     // it has always carried
     for (int i = 0; i < 6; ++i)
     {
-        auto slot = column3.removeFromTop (i == 4 ? 150 : 120);
+        auto slot = column3.removeFromTop (i == 4 ? 150 : 110);
 
         if (i < 5)
             column3.removeFromTop (6);   // a breath between the slots
@@ -3904,19 +3859,11 @@ void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,
         g.fillEllipse (led);
     }
 
-    // v2.70.0 (Clement's remark 9): the shape's own glyph rides INSIDE
-    // the plate, beside the LED - the band's shelf plateau (low on band
-    // 1, high on band 4, the shelfGlyph member) when the button reads
-    // SHELF, the bell bump when it reads BELL - the same single-stroke
-    // shapes the whole strip already speaks, one drawing, two owners
-    auto glyphArea = bounds.removeFromLeft (16.0f);
-    SectionIcon::drawGlyph (g,
-                            glyphArea.withSizeKeepingCentre (13.0f, 13.0f),
-                            on ? SectionIcon::Icon::eq : shelfGlyph,
-                            on ? engraving : plateText);
-
-    // the caption spells the shape: "BELL" / "SHELF", dark engraving on
-    // the lit plate, and (v2.69.0) the plate's own cream on the dark one
+    // v2.78.0 (Clement's remark 4): the shape LEFT the plate - it
+    // stands under the band's name now, in the row's margin column,
+    // and follows the plate from there (the SectionIcon that shadows
+    // this button reads its shelfGlyph) - so the plate keeps its LED
+    // and its word alone
     g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
     g.drawText (on ? "BELL" : "SHELF", bounds,
@@ -4016,10 +3963,11 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
                                                   bool highlighted,
                                                   bool /*down*/)
 {
-    // the vertical sibling of the oversampling plate (v2.59.0, Clement's
-    // remark 2): an SSL-style bar beside each cut's readout - the LED on
-    // top, the state spelled out below. Amber and lit when the filter
-    // processes, dark with a dead LED when it is bypassed
+    // v2.78.0 (Clement's remark 8): the cut's plate turned HORIZONTAL
+    // - the LED at the left, the state spelled at the right - and
+    // rides its cell's top-right corner beside the filter's own
+    // glyph. The same SSL plate language as ever: amber and lit when
+    // the filter processes, dark with a dead LED when it is bypassed
     const bool on = getToggleState();
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 
@@ -4031,10 +3979,10 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
                     : (highlighted ? knobBezel : engravingDim));
     g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
 
-    // the LED at the top: a lit amber dot with a soft glow when on, a
+    // the LED at the left: a lit amber dot with a soft glow when on, a
     // dark socket sunk into the plate when off
-    const auto ledArea = bounds.removeFromTop (bounds.getHeight() * 0.45f);
-    const auto led = ledArea.withSizeKeepingCentre (8.0f, 8.0f);
+    const auto ledArea = bounds.removeFromLeft (18.0f);
+    const auto led = ledArea.withSizeKeepingCentre (9.0f, 9.0f);
 
     if (on)
     {
@@ -4052,7 +4000,7 @@ void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
     // the caption spells the state: "ON" / "OFF", dark engraving on the
     // lit plate, and (v2.69.0) the plate's own cream on the dark one
     g.setColour (on ? engraving : plateText);
-    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
     g.drawText (on ? "ON" : "OFF", bounds,
                 juce::Justification::centred);
 }
@@ -4148,26 +4096,32 @@ void CostesStripEditor::SectionIcon::drawGlyph (juce::Graphics& g,
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
 
-        // LOW SHELF (v2.62.0, Clement's remark 5): the band-1 glyph under
-        // the LF selector - flat at the bottom, the knee rising to the
-        // high PLATEAU, flat at the top. Distinct from the low cut's
-        // open-ended rise: the shelf settles, it does not climb away
+        // LOW SHELF (v2.62.0, Clement's remark 5; corrected in v2.78.0,
+        // Clement's remark 3): the band-1 shape - the response the
+        // strip's own convention reads, the frequency axis running
+        // left to right exactly as the low cut's own glyph draws it.
+        // The low shelf sits UP at the LOW end and settles to the
+        // unity plateau: flat at the TOP, the knee falling to the
+        // low plateau, flat at the bottom
         case Icon::lowShelf:
-            p.startNewSubPath (X (2.0f), Y (12.5f));
-            p.lineTo (X (5.0f), Y (12.5f));
-            p.quadraticTo (X (9.0f), Y (12.5f), X (11.0f), Y (3.5f));
-            p.lineTo (X (14.0f), Y (3.5f));
+            p.startNewSubPath (X (2.0f), Y (3.5f));
+            p.lineTo (X (5.0f), Y (3.5f));
+            p.quadraticTo (X (9.0f), Y (3.5f), X (11.0f), Y (12.5f));
+            p.lineTo (X (14.0f), Y (12.5f));
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
 
-        // HIGH SHELF (v2.62.0, Clement's remark 5): the band-4 glyph, the
-        // low shelf's mirror - flat at the top, the knee falling to the
-        // low plateau, flat at the bottom
+        // HIGH SHELF (v2.62.0, Clement's remark 5; corrected in
+        // v2.78.0, Clement's remark 3): the band-4 shape, the low
+        // shelf's true mirror - the unity plateau at the low end,
+        // the knee rising to the shelf's own level at the high end:
+        // flat at the bottom, the knee rising to the top plateau,
+        // flat at the top
         case Icon::highShelf:
-            p.startNewSubPath (X (2.0f), Y (3.5f));
-            p.lineTo (X (5.0f), Y (3.5f));
-            p.quadraticTo (X (7.0f), Y (3.5f), X (9.0f), Y (12.5f));
-            p.lineTo (X (14.0f), Y (12.5f));
+            p.startNewSubPath (X (2.0f), Y (12.5f));
+            p.lineTo (X (5.0f), Y (12.5f));
+            p.quadraticTo (X (7.0f), Y (12.5f), X (9.0f), Y (3.5f));
+            p.lineTo (X (14.0f), Y (3.5f));
             g.strokePath (p, juce::PathStrokeType (stroke));
             break;
 
@@ -4178,8 +4132,17 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
 {
     // the component face of the glyph (v2.70.0, Clement's remark 9):
     // the whole drawing lives in drawGlyph now - paint just hands it
-    // the local bounds and the strip's engraved silkscreen colour
-    drawGlyph (g, getLocalBounds().toFloat(), type, engraving);
+    // the local bounds and the strip's engraved silkscreen colour.
+    // v2.78.0 (Clement's remark 4): the outer bands' icons FOLLOW
+    // their BELL/SHELF plates - the shape is picked at paint time,
+    // the bell while the plate reads BELL, the band's own shelf
+    // (the shelfGlyph member) when it reads SHELF, so the glyph and
+    // its plate never disagree
+    const auto shape = follows != nullptr
+        ? (follows->getToggleState() ? Icon::eq : follows->shelfGlyph)
+        : type;
+
+    drawGlyph (g, getLocalBounds().toFloat(), shape, engraving);
 }
 
 void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,

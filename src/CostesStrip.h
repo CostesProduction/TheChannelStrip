@@ -535,6 +535,8 @@ public:
     // to the left of its caption in the engraved silkscreen colour - the
     // five shapes read at a glance without any text. Public so the offline
     // test harness can name the types and count the instances
+    struct ShelfModeToggle;   // the outer bands' glyphs shadow their plates
+
     struct SectionIcon : public juce::Component
     {
         enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
@@ -550,6 +552,13 @@ public:
                                Icon iconType, const juce::Colour& colour);
 
         Icon type;
+
+        // v2.78.0 (Clement's remark 4): the outer bands' glyphs stand
+        // under their band names now and FOLLOW their BELL/SHELF
+        // plates - the icon picks its shape at paint time, the bell
+        // while the plate reads BELL, the band's own shelf when it
+        // reads SHELF. Null on every other icon, which keeps its type
+        const ShelfModeToggle* follows = nullptr;
     };
 
     // the icons in column order (trim, low cut, high cut, tilt, drive),
@@ -559,15 +568,11 @@ public:
         return { &trimIcon, &lowCutIcon, &highCutIcon, &tiltIcon, &driveIcon };
     }
 
-    // the EQ section's own bell-curve glyph (v2.61.0), beside the header
-    // caption - the harness reaches it through this
-    SectionIcon* getEqIcon() { return &eqIcon; }
-
-    // v2.70.0 (Clement's remark 9): the two mid bands' bell glyphs now
-    // sit at the RIGHT of their Q readout's own "oct" - the outer bands'
-    // shapes moved INTO their BELL/SHELF plates, so only the two bells
-    // remain as free icons. In band order (LO MID then HI MID) for the
-    // offline test harness
+    // v2.78.0 (Clement's remarks 4 and 6): every band's glyph stands
+    // under its band's name now, in the row's margin column - the two
+    // mid bells, and (out of the getter's reach) the two outer bands'
+    // dynamic shapes, which follow their BELL/SHELF plates. In band
+    // order (LMF then HMF) for the offline test harness
     std::array<SectionIcon*, 2> getEqBandIcons()
     {
         return { &eqBand2Icon, &eqBand3Icon };
@@ -583,18 +588,6 @@ public:
     {
         return { &eq1ModeButton, &eq4ModeButton };
     }
-
-    // v2.70.0 (Clement's remarks 5 and 7): the input conditioning block
-    // (TRIM, the cuts, TILT, DRIVE) finally carries its own written
-    // name - INPUT, the SSL idiom for the channel's front end - centred
-    // in the top band over the left half of the panel, the way the EQ
-    // header names the right one
-    juce::Label* getInputSectionLabel() { return &inputSectionLabel; }
-
-    // v2.76.0 (Clement's remark): the FILTERS band names the cuts'
-    // line between the front end's two-knob rows - public so the
-    // harness can pin its engraved address
-    juce::Label* getFiltersSectionLabel() { return &filtersSectionLabel; }
 
     // v2.77.0 (Clement's remark): the four band names stand in a slim
     // margin column at their rows' left now, level with their knobs,
@@ -744,31 +737,30 @@ private:
     SectionIcon highCutIcon{ SectionIcon::Icon::highCut };
     SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
     SectionIcon driveIcon  { SectionIcon::Icon::drive };
-    SectionIcon eqIcon    { SectionIcon::Icon::eq };   // v2.61.0
 
-    // the EQ band glyphs (v2.62.0; re-cut in v2.70.0, Clement's remark
-    // 9): the outer bands' shelf shapes moved INTO their BELL/SHELF
-    // plates, so only the two mid bells remain as free icons - each
-    // sitting at the right of its Q readout's own "oct"
+    // the EQ band glyphs (v2.62.0; re-cut in v2.70.0 and again in
+    // v2.78.0, Clement's remarks 4 and 6): all four bands keep a free
+    // glyph now, standing under the band's name in the row's margin
+    // column - the two mid bells, and the two outer bands' own shapes,
+    // which follow their BELL/SHELF plates (the follows member) and
+    // repaint with them
+    SectionIcon eqBand1Icon { SectionIcon::Icon::lowShelf };
     SectionIcon eqBand2Icon { SectionIcon::Icon::eq };
     SectionIcon eqBand3Icon { SectionIcon::Icon::eq };
+    SectionIcon eqBand4Icon { SectionIcon::Icon::highShelf };
 
-    // the EQ section (v2.61.0): eight knobs (a FREQ and a GAIN per band,
-    // each with its own caption label), four band captions, two bandwidth
-    // sliders (bands 2/3) and two bell/shelf plates (bands 1/4)
+    // the EQ section (v2.61.0; v2.78.0, Clement's remarks 5 and 9):
+    // eight knobs - a GAIN at the left of each band's row, a FREQ at
+    // its right, no caption words under them any more - four band
+    // captions, two bandwidth sliders (bands 2/3) and two bell/shelf
+    // plates (bands 1/4, living in the margin column now)
     CostesSlider eq1HzKnob,   eq1GainKnob;
     CostesSlider eq2HzKnob,   eq2GainKnob;
     CostesSlider eq3HzKnob,   eq3GainKnob;
     CostesSlider eq4HzKnob,   eq4GainKnob;
     CostesSlider eq2OctSlider, eq3OctSlider;
 
-    juce::Label eq1HzLabel, eq1GainLabel;
-    juce::Label eq2HzLabel, eq2GainLabel;
-    juce::Label eq3HzLabel, eq3GainLabel;
-    juce::Label eq4HzLabel, eq4GainLabel;
     juce::Label eqBand1Label, eqBand2Label, eqBand3Label, eqBand4Label;
-    juce::Label eqSectionLabel;
-    juce::Label inputSectionLabel;   // v2.70.0: the input block's own name
 
     // v2.70.0 (Clement's remark 1): the panel front's grain - a small
     // deterministic speckle tile, baked once in the constructor (the
@@ -825,10 +817,6 @@ private:
     // same way their SC LPF neighbours do
     juce::Label expKneeLabel, compLinkLabel;
     juce::Label expSectionLabel, compSectionLabel;
-    // v2.76.0 (Clement's remark): the front end reads two knobs a
-    // row - the FILTERS band names the cuts' line, engraved the same
-    // way the INPUT header always has
-    juce::Label filtersSectionLabel;
 
     // v2.75.0 (Clement's request): the reserved slots the future
     // builds will fill - the TRANSIENT stage's slot between the two

@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.77.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.78.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,36 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.78.0** — *One COSTES CONSOLE block, an EQ that reads like the
+  SSL's own meter bridge - and another 50 px won.*
+  - **The front end is ONE block now.** INPUT and FILTERS merge into a
+    single block that the COSTES CONSOLE signature names - the trace
+    and wording that ran down the panel's left edge come back to the
+    top band, horizontal and centred over the column - and the freed
+    left margin belongs to the grid, so the columns start at the
+    panel's own edge.
+  - **The EQ reads GAIN at the left, FREQ at the right** - the SSL's
+    own order - and the section's name is its EQ ON plate now:
+    centred in the header band, no caption and no bell glyph any
+    more. The FREQ/GAIN words go too; the readouts speak alone.
+  - **Every band keeps its identity in a slim margin column** - LF,
+    LMF, HMF and HF level with their knobs, each name with its own
+    glyph riding under the words: the mid bells, and the outer
+    bands' shelf shapes, which follow their BELL/SHELF plates (the
+    plates moved into the column too and gave up the shape they
+    carried inside). HI MID reads HMF, LO MID reads LMF.
+  - **The cuts read HPF and LPF.** The freed captions ride their
+    cells' top-left corner, the ON/OFF plate rides the top-right with
+    the filter's glyph beside it, and the shelf glyphs themselves
+    are corrected - the low shelf falls, the high shelf rises, the
+    frequency axis running left to right.
+  - **50 px more won back.** The panel drops from 860 x 814 to
+    860 x 764 - the EQ rows sit at one tight 117 px pitch, the
+    reserved column-3 slots slim to 110 px (DRIVE keeps its 150 and
+    its full 96 px knob), and the dynamics stages keep their exact
+    245 px height.
+  - **DSP unchanged.** Layout only - the audio chain keeps its exact
+    order, and the full harness now runs 925 checks.
 - **2.77.0** — *The console sheds 150 px - the EQ reads SSL-style,
   the band names stand beside their knobs.*
   - **The EQ reads the SSL way.** The four bands stack with the HIGHS

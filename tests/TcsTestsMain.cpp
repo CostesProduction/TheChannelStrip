@@ -5647,11 +5647,11 @@ void testCostesStripSectionIcons()
     CostesStripEditor editor (stripProc);
 
     // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // width - v2.77.0: the band names stand beside their knobs and
-    // the little vertical airs tighten, so the console sheds the
-    // 150 px Clement asked for - 860 x 814
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 814,
-                "the strip panel opens as the tightened three-column console (860 x 814)");
+    // width - v2.78.0: the signature leaves the left edge, the EQ
+    // caption words and the band intertitles go, and the console
+    // drops another 50 px - 860 x 764
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 764,
+                "the strip panel opens as the tightened three-column console (860 x 764)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5674,20 +5674,15 @@ void testCostesStripSectionIcons()
                     "every section icon is laid out inside the panel");
     }
 
-    // the EQ header's own glyph (v2.61.0): a sixth icon, the bell bump,
-    // beside the section caption - the same visibility and containment
-    // rules as the five knob icons
-    auto* eqIcon = editor.getEqIcon();
-    expectTrue (eqIcon != nullptr && eqIcon->type == CostesStripEditor::SectionIcon::Icon::eq,
-                "the EQ section carries its own bell-curve glyph");
-    expectTrue (eqIcon != nullptr && eqIcon->isVisible()
-                    && editor.getLocalBounds().contains (eqIcon->getBounds()),
-                "the EQ glyph is laid out inside the panel");
+    // v2.78.0 (Clement's remark 2): the EQ header carries NO caption
+    // and NO bell glyph any more - the EQ ON plate is the section's
+    // own name, centred in the header band
 
-    // v2.70.0 (Clement's remark 9): only the two MID bands keep a free
-    // glyph any more - the two bells, before their readout's own
-    // "Width" since v2.72.0 - while the outer bands' shelf shapes moved
-    // INSIDE their BELL/SHELF plates
+    // v2.78.0 (Clement's remarks 4 and 6): every band keeps a free
+    // glyph under its name now - the harness reaches the two mid
+    // bells, which stand under the LMF and HMF names in their rows'
+    // margin columns (the outer bands' shapes follow their
+    // BELL/SHELF plates and stay out of the getter's reach)
     const auto bandIcons = editor.getEqBandIcons();
     const CostesStripEditor::SectionIcon::Icon expectedBandTypes[2] =
     {
@@ -5705,10 +5700,11 @@ void testCostesStripSectionIcons()
                     "every mid-band glyph is laid out inside the panel");
     }
 
-    // the outer bands' BELL/SHELF plates (v2.70.0, Clement's remark 9):
-    // each plate carries its band's own shelf shape inside the button -
-    // the low shelf on band 1, the high shelf on band 4 - laid out and
-    // visible like every other control on the panel
+    // the outer bands' BELL/SHELF plates (v2.70.0, Clement's remark 9,
+    // redrawn in v2.78.0): each plate keeps its band's own shelf shape
+    // as a member - the low shelf on band 1, the high shelf on band 4 -
+    // and the free icon riding under the band's name now paints it,
+    // so the plate itself reads only its LED and its BELL/SHELF words
     const auto modeButtons = editor.getEqModeButtons();
     const CostesStripEditor::SectionIcon::Icon expectedShelfGlyphs[2] =
     {
@@ -5720,23 +5716,11 @@ void testCostesStripSectionIcons()
     {
         expectTrue (modeButtons[(size_t) i] != nullptr
                         && modeButtons[(size_t) i]->shelfGlyph == expectedShelfGlyphs[i],
-                    "the BELL/SHELF plates carry their bands' shelf glyphs inside the button");
+                    "the BELL/SHELF plates keep their bands' shelf shapes for the icons under the names");
         expectTrue (modeButtons[(size_t) i] != nullptr && modeButtons[(size_t) i]->isVisible()
                         && editor.getLocalBounds().contains (modeButtons[(size_t) i]->getBounds()),
                     "every BELL/SHELF plate is laid out inside the panel");
     }
-
-    // the INPUT section's own written name (v2.70.0, Clement's remarks 5
-    // and 7; v2.75.0: the column grid's own header): the front end's
-    // first section speaks its name centred over column 1, clear of
-    // the engraved signature's margin at the panel's left edge
-    auto* inputLabel = editor.getInputSectionLabel();
-    expectTrue (inputLabel != nullptr && inputLabel->getText() == "INPUT"
-                    && inputLabel->isVisible()
-                    && editor.getLocalBounds().contains (inputLabel->getBounds())
-                    && inputLabel->getBounds().getX() >= 28
-                    && inputLabel->getBounds().getCentreX() < 242,
-                "the INPUT block carries its name, centred over column 1 of the grid");
 
     // the console front's grain (v2.70.0, Clement's remark 1): a
     // deterministic 96 x 96 speckle tile baked once at construction,
@@ -5754,6 +5738,15 @@ void testCostesStripSectionIcons()
     // (v2.72.0) at index 31, the expander's KNEE selector (v2.73.0)
     // closing at index 32
     const auto sliders = editor.getStripSliders();
+
+    // v2.78.0 (Clement's remark 1): the front end is ONE block now
+    // and its name is the COSTES CONSOLE signature - painted across
+    // the top band where INPUT once read, so no label carries it.
+    // The grid starts at x = 12: the margin the vertical signature
+    // once owned belongs to the columns
+    expectTrue (sliders[0] != nullptr && sliders[0]->getBounds().getX() >= 12
+                    && sliders[0]->getBounds().getX() < 28,
+                "the columns start at the panel's own left edge now - the signature's old margin is theirs");
 
     for (int i = 17; i < 33; ++i)
         expectTrue (sliders[(size_t) i]->isVisible()
@@ -5780,13 +5773,16 @@ void testCostesStripSectionIcons()
                     && sliders[25]->getBounds().getY() == sliders[23]->getBounds().getY(),
                 "the compressor reads MIX, THRESH, RELEASE across the top, GAIN and RATIO below");
 
-    // the mid bells' glyphs sit BEFORE the words now (v2.72.0,
-    // Clement's remark 1): the LO MID band's bell hugs the LEFT edge
-    // of the wide "Width : ... octave" box that follows it
-    expectTrue (sliders[11] != nullptr && bandIcons[0] != nullptr
+    // the mid bells' glyphs ride UNDER their band's name now (v2.78.0,
+    // Clement's remark 6): the LMF band's bell stands in its row's
+    // slim margin column, one px under the engraved word, clear of
+    // the GAIN knob (10) that follows
+    expectTrue (sliders[10] != nullptr && bandIcons[0] != nullptr
                     && bandIcons[0]->getBounds().getRight()
-                        < sliders[11]->getBounds().getCentreX() - 70,
-                "the LO MID bell glyph sits just before the Width readout's own words");
+                        <= sliders[10]->getBounds().getX()
+                    && bandIcons[0]->getBounds().getY()
+                        - editor.getEqBandLabels()[1]->getBounds().getBottom() == 1,
+                "the LMF bell glyph stands right under its band's name");
 
     // the six dynamics meters (v2.65.0, the OUT ladders joined in
     // v2.66.0): the expander's IN/OUT/GR trio then the compressor's,
@@ -5914,8 +5910,8 @@ void testCostesStripSectionIcons()
                 "the dynamics stages stand at their v2.74 height again - the ladders 211 px tall");
 
     // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
-    // ROW - TRIM and TILT (0 and 3) share the first line, LOW CUT and
-    // HIGH CUT (1 and 2) the FILTERS line under it, then the EQ's
+    // ROW - TRIM and TILT (0 and 3) share the first line, the two
+    // cuts (HPF and LPF, 1 and 2) the line under it, then the EQ's
     // first band (7) closes the column
     expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
@@ -5924,52 +5920,47 @@ void testCostesStripSectionIcons()
                     && sliders[1]->getBounds().getY() == sliders[2]->getBounds().getY()
                     && sliders[1]->getBounds().getY() > sliders[0]->getBounds().getY()
                     && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
-                "column 1 reads two knobs a row - TRIM and TILT on one line, the two cuts on the FILTERS line, the EQ under it");
+                "column 1 reads two knobs a row - TRIM and TILT on one line, HPF and LPF on the next, the EQ under it");
 
-    // v2.77.0 (Clement's remark): the EQ reads SSL-style now - the
-    // HIGHS at the top of the stack, the lows at the bottom (15 is
-    // the HF band's FREQ, 12 HI MID's, 9 LO MID's, 7 the LF's) - and
-    // the four rows sit at one tight 123 px pitch, the air the old
-    // caption rows once took now won back
+    // v2.78.0 (Clement's remarks): the EQ reads SSL-style - the HIGHS
+    // at the top of the stack, the lows at the bottom (15 is the HF
+    // band's FREQ, 12 HMF's, 9 LMF's, 7 the LF's) - and the four rows
+    // sit at one tight 117 px pitch, the caption words gone
     expectTrue (sliders[15] != nullptr && sliders[12] != nullptr
                     && sliders[9] != nullptr && sliders[7] != nullptr
                     && sliders[15]->getBounds().getY() < sliders[12]->getBounds().getY()
                     && sliders[12]->getBounds().getY() < sliders[9]->getBounds().getY()
                     && sliders[9]->getBounds().getY() < sliders[7]->getBounds().getY()
-                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 123
-                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 123
-                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 123,
-                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 123 px pitch");
+                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 117
+                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 117
+                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 117,
+                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 117 px pitch");
 
-    // and the band names themselves (v2.77.0, Clement's remark): no
-    // caption row of their own any more - each name stands in a slim
-    // margin column at its row's left, LEVEL WITH ITS KNOBS (LO
-    // MID's name beside its FREQ knob, 9)
+    // and the band names themselves: each name stands in a slim
+    // margin column at its row's left, LEVEL WITH ITS KNOBS (LMF's
+    // name at the left of its GAIN knob, 10), with its band's own
+    // glyph riding right under the words
     {
         const auto bandLabels = editor.getEqBandLabels();
-        expectTrue (bandLabels[1] != nullptr && sliders[9] != nullptr
-                        && bandLabels[1]->getText() == "LO MID"
-                        && bandLabels[1]->getBounds().getRight() <= sliders[9]->getBounds().getX()
-                        && bandLabels[1]->getBounds().getY() >= sliders[9]->getBounds().getY()
-                        && bandLabels[1]->getBounds().getBottom() <= sliders[9]->getBounds().getBottom(),
-                    "the band names stand level with their knobs - LO MID engraved beside its FREQ knob");
+        expectTrue (bandLabels[1] != nullptr && sliders[10] != nullptr
+                        && bandLabels[1]->getText() == "LMF"
+                        && bandLabels[1]->getBounds().getRight() <= sliders[10]->getBounds().getX()
+                        && bandLabels[1]->getBounds().getY() >= sliders[10]->getBounds().getY()
+                        && bandLabels[1]->getBounds().getBottom() <= sliders[10]->getBounds().getBottom(),
+                    "the band names stand level with their knobs - LMF engraved at the left of its GAIN knob");
     }
 
-    // and the FILTERS band (v2.76.0): the engraved intertitle that
-    // names the cuts' line - it sits BETWEEN the TRIM/TILT row and
-    // the cuts' row, exactly where the two lines meet
-    {
-        auto* filtersLabel = editor.getFiltersSectionLabel();
-        expectTrue (filtersLabel != nullptr && filtersLabel->getText() == "FILTERS"
-                        && filtersLabel->isVisible()
-                        && editor.getLocalBounds().contains (filtersLabel->getBounds())
-                        && filtersLabel->getBounds().getY() > sliders[0]->getBounds().getBottom()
-                        && filtersLabel->getBounds().getBottom() < sliders[1]->getBounds().getY(),
-                    "the FILTERS band names the cuts' line - engraved between the TRIM/TILT row and the cuts");
-    }
+    // and the knobs themselves read the SSL way (v2.78.0, Clement's
+    // remark 9): the GAIN at the LEFT of each band's row, the FREQ at
+    // its right (LMF's pair: 10 and 9)
+    expectTrue (sliders[10] != nullptr && sliders[9] != nullptr
+                    && sliders[10]->getBounds().getX() < sliders[9]->getBounds().getX()
+                    && sliders[10]->getBounds().getY() == sliders[9]->getBounds().getY()
+                    && sliders[10]->getBounds().getHeight() == sliders[9]->getBounds().getHeight(),
+                "each EQ row reads GAIN at the left, FREQ at the right - the SSL's own order");
 
     // and the three columns themselves: the trim knob inside the
-    // 214 px front end, the expander's THRESH (17) inside the middle
+    // 230 px front end, the expander's THRESH (17) inside the middle
     // column, DRIVE (4) inside the 142 px output chain at the right
     expectTrue (sliders[0] != nullptr && sliders[17] != nullptr && sliders[4] != nullptr
                     && sliders[0]->getBounds().getRight() <= 242
@@ -6012,17 +6003,17 @@ void testCostesStripSectionIcons()
                 "the compressor's GR ladder reads IN, OUT, GR - left of its knobs");
 
     // the dynamics knobs wear the EQ's own cap colours (v2.68.0,
-    // Clement's remark): the expander the HI MID band's ivory, the
-    // compressor the LO MID band's saturated blue - index 17 is the
+    // Clement's remark): the expander the HMF band's ivory, the
+    // compressor the LMF band's saturated blue - index 17 is the
     // expander's THRESH, 22 the compressor's
     expectTrue (sliders[17] != nullptr
                     && sliders[17]->findColour (juce::Slider::backgroundColourId)
                            == juce::Colour (0xffefe0bc),
-                "the expander's knobs wear the HI MID band's saturated ivory cap");
+                "the expander's knobs wear the HMF band's saturated ivory cap");
     expectTrue (sliders[22] != nullptr
                     && sliders[22]->findColour (juce::Slider::backgroundColourId)
                            == juce::Colour (0xff6f9fd4),
-                "the compressor's knobs wear the LO MID band's saturated blue cap");
+                "the compressor's knobs wear the LMF band's saturated blue cap");
 
     // the knobs sit smaller than the row-1 columns (v2.68.0, Clement's
     // remark) - the SSL 500-series density inside the one-row band
@@ -6033,7 +6024,7 @@ void testCostesStripSectionIcons()
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 860, 814 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 764 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -6045,9 +6036,6 @@ void testCostesStripSectionIcons()
 
             for (auto* icon : editor.getSectionIcons())
                 icon->paint (g);
-
-            if (eqIcon != nullptr)
-                eqIcon->paint (g);
 
             for (auto* icon : bandIcons)
                 icon->paint (g);
@@ -6069,7 +6057,7 @@ void testCostesStripSectionIcons()
     // (the GR ladders). The degenerate sizes above paint nothing
     // (the early return), so the first real paint here arms the hold
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 814, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 764, true);
         juce::Graphics g (canvas);
 
         for (int i = 0; i < 6; ++i)
@@ -6085,7 +6073,7 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (860, 814);
+    editor.setSize (860, 764);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -6189,10 +6177,10 @@ void testCostesStripKnobDefaultsAndCaps()
     // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 23
     // rotary knobs carry their band's colour on the
     // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
-    // red HIGH CUT (v2.63.0), the EQ bands speak the SSL colours, and
-    // the dynamics knobs wear their stage's own colour (v2.68.0,
-    // Clement's remark): the expander borrows the HI MID band's
-    // off-white, the compressor the LO MID band's pastel blue - the
+    // red high cut, the LPF now (v2.63.0), the EQ bands speak the SSL
+    // colours, and the dynamics knobs wear their stage's own colour
+    // (v2.68.0, Clement's remark): the expander borrows the HMF band's
+    // off-white, the compressor the LMF band's pastel blue - the
     // two stages echo the EQ's own palette. The expander's attack
     // knob became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
     // loop. The eight linear selectors draw no cap, so they are not in
@@ -6216,11 +6204,11 @@ void testCostesStripKnobDefaultsAndCaps()
     for (int k = 0; k < 23; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (high cut and HF saturated red, LO MID saturated blue, HI MID saturated ivory, saturated ivory expander, saturated blue compressor)");
+                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor)");
 
     // v2.75.0 (Clement's spec): the front end is the console's first
     // column - the trim knob at its head, the EQ's first band under
-    // the filters, both inside the same 214 px column and stacked in
+    // the cuts, both inside the same 230 px column and stacked in
     // the sound's own order
     expectTrue (sliders[0] != nullptr && sliders[7] != nullptr
                     && sliders[0]->getBounds().getRight() <= 242
@@ -6318,7 +6306,7 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq1Hz").setValue (100.0f);
     strip->getApvts().getParameterAsValue ("eq1Bell").setValue (true);
 
-    // band 2 (LO MID): the bell centre, then the bandwidth sweep - the
+    // band 2 (LMF): the bell centre, then the bandwidth sweep - the
     // same +6 dB bell probed one octave up reads +0.12 dB narrow
     // (0.3 oct) and +3.00 dB wide (2.0 oct): the octave readout moves
     // the bell exactly the way it says it does
@@ -6349,7 +6337,7 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (0.0f);
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
 
-    // band 3 (HI MID): the centre, then a wide -6 dB bell probed an
+    // band 3 (HMF): the centre, then a wide -6 dB bell probed an
     // octave BELOW its centre (the mirrored side of the band 2 check)
     strip->getApvts().getParameterAsValue ("eq3Gain").setValue (6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1600.0, 1600.0) / unity1k), 6.0, 0.3,
@@ -7612,17 +7600,20 @@ void testCostesStripKneeAndLayoutTightening()
                     "the KNEE slider takes its own clicks on its track too");
     }
 
-    // remark 3: the cut ON/OFF plates moved to their knob's TOP-LEFT
-    // corner - the plate and its knob share the corner of the column,
-    // and the plate sits ABOVE its knob so the corner's clicks switch
-    // the cut instead of dragging the disc behind it
+    // remark 3 + v2.78.0 (Clement's remark 8): the cut ON/OFF plates
+    // moved to their knob's TOP-RIGHT corner - the plate rides the
+    // right edge of its knob, flush with its cell, and sits ABOVE the
+    // disc so the corner's clicks switch the cut instead of dragging
+    // the knob behind it
     expectTrue (cutPlates[0] != nullptr && sliders[1] != nullptr
-                    && cutPlates[0]->getBounds().getTopLeft() == sliders[1]->getBounds().getTopLeft(),
-                "the HPF's ON/OFF plate sits at its knob's top-left corner");
+                    && cutPlates[0]->getBounds().getRight() == sliders[1]->getBounds().getRight()
+                    && cutPlates[0]->getBounds().getBottom() <= sliders[1]->getBounds().getY(),
+                "the HPF's ON/OFF plate rides its knob's top-right corner - above the disc, flush with its cell");
 
     expectTrue (cutPlates[1] != nullptr && sliders[2] != nullptr
-                    && cutPlates[1]->getBounds().getTopLeft() == sliders[2]->getBounds().getTopLeft(),
-                "the LPF's ON/OFF plate sits at its knob's top-left corner");
+                    && cutPlates[1]->getBounds().getRight() == sliders[2]->getBounds().getRight()
+                    && cutPlates[1]->getBounds().getBottom() <= sliders[2]->getBounds().getY(),
+                "the LPF's ON/OFF plate rides its knob's top-right corner too");
 
     if (cutPlates[0] != nullptr && cutPlates[1] != nullptr)
     {
