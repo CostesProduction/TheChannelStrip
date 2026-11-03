@@ -436,7 +436,7 @@ private:
 //
 // v2.59.0 (Clement's remarks 1-3): the slope sliders keep only the seven
 // legal slopes (6 to 72 dB/oct, snapped on the parameter), the bypass
-// moved to the new CutOnToggle plate on the left of each cut's readout
+// moved to the cut on/off plate on the left of each cut's readout
 // band, and the readout boxes grew (76 x 18 for the knobs, 72 x 16 for
 // the slopes) so no descender clips at the panel's edge again.
 //
@@ -486,11 +486,53 @@ public:
     // slider back on its DEFAULT - the same default double-click
     // already used, now wired into the linear selectors too. Public so
     // the offline test harness can name the type and drive the path
+    // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
+    // to the left of its caption in the engraved silkscreen colour - the
+    // five shapes read at a glance without any text. Public so the offline
+    // test harness can name the types and count the instances.
+    // v2.80.0: the struct stands BEFORE CostesSlider now - a slider
+    // may carry one of these glyphs inside its own readout (the SC
+    // selectors' curve beside the value), and the member needs the
+    // complete type
+    struct ShelfModeToggle;   // the outer bands' glyphs shadow their plates
+
+    struct SectionIcon : public juce::Component
+    {
+        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
+
+        explicit SectionIcon (Icon iconType) : type (iconType) {}
+
+        void paint (juce::Graphics& g) override;
+
+        // v2.70.0 (Clement's remark 9): the glyph drawing itself, split
+        // out of paint() so the BELL/SHELF plates can carry the very
+        // same shapes INSIDE their buttons - one drawing, two owners
+        static void drawGlyph (juce::Graphics& g, juce::Rectangle<float> bounds,
+                               Icon iconType, const juce::Colour& colour);
+
+        Icon type;
+
+        // v2.78.0 (Clement's remark 4): the outer bands' glyphs stand
+        // under their band names now and FOLLOW their BELL/SHELF
+        // plates - the icon picks its shape at paint time, the bell
+        // while the plate reads BELL, the band's own shelf when it
+        // reads SHELF. Null on every other icon, which keeps its type
+        const ShelfModeToggle* follows = nullptr;
+    };
+
     struct CostesSlider : public juce::Slider
     {
         // the value a command-click restores (setUpKnob/setUpSlope set
         // it from the same constant as the double-click default)
         float cmdClickDefault = 0.0f;
+
+        // v2.80.0 (Clement's remark 6): a slider may carry a glyph in
+        // its own readout - the SC selectors draw their HPF / LPF
+        // curve beside the value ("off" at rest, "90 Hz" moved)
+        // instead of spelling "SC HPF" out. hasReadoutGlyph switches
+        // it on and the look-and-feel's text box paints it
+        SectionIcon::Icon readoutGlyph = SectionIcon::Icon::lowCut;
+        bool hasReadoutGlyph = false;
 
         // with the command key down the click jumps straight to the
         // default and the drag never starts; without it the normal JUCE
@@ -531,35 +573,9 @@ public:
                  &compLinkSlider, &expKneeSlider };
     }
 
-    // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
-    // to the left of its caption in the engraved silkscreen colour - the
-    // five shapes read at a glance without any text. Public so the offline
-    // test harness can name the types and count the instances
-    struct ShelfModeToggle;   // the outer bands' glyphs shadow their plates
-
-    struct SectionIcon : public juce::Component
-    {
-        enum class Icon { trim, lowCut, highCut, tilt, drive, eq, lowShelf, highShelf };
-
-        explicit SectionIcon (Icon iconType) : type (iconType) {}
-
-        void paint (juce::Graphics& g) override;
-
-        // v2.70.0 (Clement's remark 9): the glyph drawing itself, split
-        // out of paint() so the BELL/SHELF plates can carry the very
-        // same shapes INSIDE their buttons - one drawing, two owners
-        static void drawGlyph (juce::Graphics& g, juce::Rectangle<float> bounds,
-                               Icon iconType, const juce::Colour& colour);
-
-        Icon type;
-
-        // v2.78.0 (Clement's remark 4): the outer bands' glyphs stand
-        // under their band names now and FOLLOW their BELL/SHELF
-        // plates - the icon picks its shape at paint time, the bell
-        // while the plate reads BELL, the band's own shelf when it
-        // reads SHELF. Null on every other icon, which keeps its type
-        const ShelfModeToggle* follows = nullptr;
-    };
+    // v2.60.0 (Clement's remark): one clean vector glyph per knob -
+    // the SectionIcon struct itself now stands ABOVE CostesSlider
+    // (v2.80.0), where the sliders' readout glyphs read it
 
     // the icons in column order (trim, low cut, high cut, tilt, drive),
     // for the offline test harness
@@ -581,8 +597,9 @@ public:
     // the outer bands' BELL/SHELF plates (band 1 then band 4) - the
     // harness reads their shelfGlyph to prove each plate carries its
     // own shape inside the button. The struct itself is defined below,
-    // with the other painted plates
-    struct ShelfModeToggle;
+    // with the other painted plates (the forward declaration at the
+    // top of the class, v2.80.0, serves the whole editor now - this
+    // duplicate went with it)
 
     std::array<ShelfModeToggle*, 2> getEqModeButtons()
     {
@@ -648,6 +665,14 @@ public:
         int leds;
         float markStep;
         const char* caption;
+
+        // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar - an
+        // IN ladder may carry its stage's own threshold corner as a
+        // red bar (the same 3.4 px weight as the GR ladder's peak-hold
+        // bar), reading the parameter its THRESH knob drives. Null on
+        // the OUT and GR ladders, which carry no threshold. Public so
+        // the offline harness can ask a ladder where its bar reads
+        std::function<float()> thresholdDb;
 
         // v2.70.0 (Clement's remark 3): the GR scales' engraved values -
         // more numbers than the old three anchors, drawn positive
@@ -718,8 +743,9 @@ public:
                  &compFastAttackButton, &compListenButton };
     }
 
-    // v2.73.0: the two cut ON/OFF plates, for the harness to pin their
-    // top-left corner beside the knob they switch
+    // v2.73.0 / v2.80.0 (Clement's remark 1): the two merged HPF / LPF
+    // buttons, for the harness to pin their top-left corner beside the
+    // knob they switch
     std::array<juce::Button*, 2> getCutPlateButtons()
     {
         return { &lowCutOnButton, &highCutOnButton };
@@ -741,7 +767,7 @@ private:
 
     CostesSlider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
     CostesSlider lowCutSlope, highCutSlope;
-    juce::Label trimInLabel, lowCutLabel, highCutLabel, tiltLabel, driveLabel;
+    juce::Label trimInLabel, tiltLabel, driveLabel;
 
     SectionIcon trimIcon   { SectionIcon::Icon::trim };
     SectionIcon lowCutIcon { SectionIcon::Icon::lowCut };
@@ -776,9 +802,10 @@ private:
     // v2.70.0 (Clement's remark 1): the panel front's grain - a small
     // deterministic speckle tile, baked once in the constructor (the
     // same pixels every launch, a fixed xorshift seed) and tiled over
-    // the cream at paint time. The alphas are tiny (3 to 6), so the
-    // texture reads as paint grain, not noise - the console's own
-    // slightly rough finish, at a paint cost the meters never notice
+    // the cream at paint time. v2.80.0 (Clement's remark 8): the
+    // alphas climbed from the 3-to-6 whisper to a visible felt finish
+    // - the painted-steel grain of a real module, still fine noise.
+    // Public for the harness
     juce::Image grainTexture { juce::Image::ARGB, 96, 96, true };
 
     // the dynamics section (v2.64.0, Clement's spec; reordered in
@@ -820,10 +847,9 @@ private:
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
     juce::Label compThresholdLabel, compRatioLabel, compReleaseLabel;
     juce::Label compGainLabel, compMixLabel;
-    // v2.79.0 (Clement's remark 4): the SC selectors lost their
-    // caption labels - their readouts identify themselves now
-    // ("SC HPF off", "SC LPF off", "KNEE hard", the LINK's own words)
-    juce::Label expSectionLabel, compSectionLabel;
+    // v2.80.0 (Clement's remark 7): the EXPANDER and COMPRESSOR
+    // section titles are gone - the stages' own EXP / COMP plates
+    // name them, and the header band's height belongs to the knobs
 
     // v2.75.0 (Clement's request): the reserved slots the future
     // builds will fill - the TRANSIENT stage's slot between the two
@@ -860,10 +886,19 @@ public:
     // shelf glyph beside SHELF. shelfGlyph says which shelf the band
     // speaks (lowShelf on band 1, highShelf on band 4). Public like
     // SectionIcon and DynamicsMeter, so the harness can read the
-    // shelfGlyph the way it reads a glyph type or a ladder's LEDs
+    // shelfGlyph the way it reads a glyph type or a ladder's LEDs.
+    // v2.80.0 (Clement's remark 1): the cuts' merged HPF / LPF button
+    // speaks through this same plate - cutWord pins the word the
+    // button spells in BOTH states ("HPF" / "LPF"), and only the
+    // light follows the state, exactly the BELL/SHELF language
     struct ShelfModeToggle : public juce::ToggleButton
     {
         SectionIcon::Icon shelfGlyph = SectionIcon::Icon::lowShelf;
+
+        // v2.80.0: empty on the EQ's own BELL/SHELF plates (the word
+        // still follows the state there), "HPF" / "LPF" on the cuts'
+        // merged buttons (the word never changes, only the light)
+        juce::String cutWord;
 
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
     };
@@ -897,16 +932,13 @@ private:
 
     ListenToggle expListenButton, compListenButton;
 
-    // the cut on/off plates (v2.59.0, Clement's remark 2): one ToggleButton
-    // per cut, painted like the oversampling switch but vertical - a
-    // horizontal bar with an LED at the top and an ON/OFF caption below.
-    // It replaces "off" in the slope slider, which now starts at 6 dB/oct.
-    struct CutOnToggle : public juce::ToggleButton
-    {
-        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
-    };
-
-    CutOnToggle lowCutOnButton, highCutOnButton;
+    // the cuts' merged HPF / LPF buttons (v2.80.0, Clement's remark 1):
+    // the old ON/OFF plate and the old caption word are ONE button
+    // now - a ShelfModeToggle that says "HPF" / "LPF" in both states,
+    // lit amber with a live LED when the filter processes, black with
+    // a dead LED when it is bypassed, riding the cell's top-left
+    // corner where the caption word used to stand
+    ShelfModeToggle lowCutOnButton, highCutOnButton;
 
     // the dynamics' own on/off plates (v2.64.0): the same "NAME ON" /
     // "NAME OFF" plates as the EQ's global switch, one per half
@@ -991,11 +1023,54 @@ private:
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
+    //
+    // v2.80.0 (Clement's remark 6): the SC selectors' readout label -
+    // the slider's own curve glyph drawn at the left of the value, so
+    // the readout reads [curve] "off" / [curve] "90 Hz" and the words
+    // "SC HPF" are gone. Private to the editor; only the
+    // look-and-feel's factory below creates it
+    struct GlyphReadoutLabel : public juce::Label
+    {
+        explicit GlyphReadoutLabel (SectionIcon::Icon glyphType) : glyph (glyphType) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds();
+
+            // the curve at the readout's left, 12 px in an 18 px strip -
+            // the same engraved silkscreen colour the value speaks
+            auto glyphArea = bounds.removeFromLeft (16);
+            SectionIcon::drawGlyph (g, glyphArea.toFloat().reduced (2.0f),
+                                    glyph, findColour (juce::Label::textColourId));
+
+            // then the value, centred in the room that is left - the
+            // readout never grows: the glyph rides INSIDE the old box
+            g.setFont (getFont());
+            g.setColour (findColour (juce::Label::textColourId));
+            g.drawText (getText(), bounds, juce::Justification::centred);
+        }
+
+        SectionIcon::Icon glyph;
+    };
+
     struct StripLookAndFeel : public juce::LookAndFeel_V4
     {
         void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h,
                                float sliderPos, float rotaryStartAngle,
                                float rotaryEndAngle, juce::Slider&) override;
+
+        // v2.80.0 (Clement's remark 6): a CostesSlider that carries a
+        // readout glyph gets the glyph-aware label; every other slider
+        // keeps JUCE's own
+        juce::Label* createSliderTextBox (juce::Slider& slider) override
+        {
+            auto* asCostes = dynamic_cast<CostesSlider*> (&slider);
+
+            if (asCostes != nullptr && asCostes->hasReadoutGlyph)
+                return new GlyphReadoutLabel (asCostes->readoutGlyph);
+
+            return juce::LookAndFeel_V4::createSliderTextBox (slider);
+        }
     };
 
     StripLookAndFeel look;

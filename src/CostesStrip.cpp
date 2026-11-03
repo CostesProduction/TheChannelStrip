@@ -417,6 +417,44 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                    .getFloatValue();
     };
 
+    // v2.80.0 (Clement's remark 6): ONE Hz language for every corner
+    // the console displays - plain integer hertz below 1 kHz ("90
+    // Hz"), one-decimal kHz the moment it crosses ("1.2 kHz", never
+    // "1200 Hz"), and the useless ".0" dropped ("16 kHz", never
+    // "16.0 kHz"). No readout grows: the new words are never wider
+    // than the old ones. The (value, int) pair speaks the parameter
+    // attributes' own stringFromValue signature
+    const auto hzText = [] (float value, int)
+    {
+        if (value >= 999.5f)
+        {
+            auto k = juce::String (value * 0.001f, 1);
+
+            if (k.endsWith (".0"))
+                k = k.dropLastCharacters (2);
+
+            return k + " kHz";
+        }
+
+        return juce::String (juce::roundToInt (value)) + " Hz";
+    };
+
+    // and its parser half: "kHz" read FIRST (a "kHz" also ends in
+    // "hz"), then the bare "hz" suffix - so a typed "1.2 kHz" lands
+    // on 1200 and never on 1.2
+    const auto hzParse = [] (const juce::String& text)
+    {
+        auto t = text.trim();
+        const bool kHz = t.endsWithIgnoreCase ("khz");
+
+        if (t.endsWithIgnoreCase ("hz"))
+            t = t.dropLastCharacters (2).trim();
+
+        const float parsed = t.replaceCharacter (',', '.').getFloatValue();
+
+        return kHz ? 1000.0f * parsed : parsed;
+    };
+
     // the trim: -24 to +12 dB in 0.1 dB steps, unity at the default
     // (v2.59.0, Clement's remark 4: the old -20/+10 sweep widened)
     layout.add (std::make_unique<juce::AudioParameterFloat> (
@@ -435,19 +473,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         juce::ParameterID { "lowCutHz", 1 }, "Low Cut",
         makeLogRange (16.0f, 1600.0f, twoSigFigSnap()), 16.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (juce::roundToInt (value)) + " Hz";
-            })
-            .withValueFromStringFunction ([] (const juce::String& text)
-            {
-                auto t = text.trim();
-
-                if (t.endsWithIgnoreCase ("hz"))
-                    t = t.dropLastCharacters (2).trim();
-
-                return t.replaceCharacter (',', '.').getFloatValue();
-            })));
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
 
     // the shared slope plumbing (v2.59.0): the knob speaks and accepts
     // dB/oct, and its legal values are only the Butterworth orders
@@ -532,17 +559,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             })));
 
     // the high cut corner: [240, 24000] Hz, logarithmic, on the same
-    // two-significant-figure grid (v2.70.0, Clement's remark 5); the
-    // readout is kHz with two decimals, and a typed number without a
-    // unit is read as kHz - the unit the knob itself displays
+    // two-significant-figure grid (v2.70.0, Clement's remark 5);
+    // v2.80.0 (Clement's remark 6): the readout speaks the console's
+    // one hzText language now - "240 Hz" at the floor, "24 kHz" at
+    // the ceiling - and a typed number without a unit is read as
+    // kHz, the unit the knob itself displays
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "highCutHz", 1 }, "High Cut",
         makeLogRange (240.0f, 24000.0f, twoSigFigSnap()), 24000.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (value * 0.001f, 2) + " kHz";
-            })
+            .withStringFromValueFunction (hzText)
             .withValueFromStringFunction ([] (const juce::String& text)
             {
                 auto t = text.trim();
@@ -657,24 +683,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             })));
 
     // band 2 (LO MID): the same two-significant-figure plumbing over
-    // 60 Hz to 3 kHz
+    // 60 Hz to 3 kHz (v2.80.0: the readout speaks hzText - "2.5 kHz"
+    // at the top of its sweep, never "2500 Hz")
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq2Hz", 1 }, "EQ 2 Frequency",
         makeLogRange (60.0f, 3000.0f, twoSigFigSnap()), 400.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (juce::roundToInt (value)) + " Hz";
-            })
-            .withValueFromStringFunction ([] (const juce::String& text)
-            {
-                auto t = text.trim();
-
-                if (t.endsWithIgnoreCase ("hz"))
-                    t = t.dropLastCharacters (2).trim();
-
-                return t.replaceCharacter (',', '.').getFloatValue();
-            })));
+            .withStringFromValueFunction (hzText)
+            .withValueFromStringFunction (hzParse)));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq2Gain", 1 }, "EQ 2 Gain",
@@ -746,15 +762,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             })));
 
     // band 3 (HI MID): the same pair, kHz-spoken like the high cut,
-    // both knobs on the two-significant-figure grid
+    // both knobs on the two-significant-figure grid (v2.80.0: one
+    // decimal now - "2.5 kHz", never "2.50 kHz")
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq3Hz", 1 }, "EQ 3 Frequency",
         makeLogRange (500.0f, 12000.0f, twoSigFigSnap()), 1600.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (value * 0.001f, 2) + " kHz";
-            })
+            .withStringFromValueFunction (hzText)
             .withValueFromStringFunction ([] (const juce::String& text)
             {
                 auto t = text.trim();
@@ -804,15 +818,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             })));
 
     // band 4 (HF): bell or high shelf, 600 Hz to 18 kHz, the knobs on
-    // the same two-significant-figure grid
+    // the same two-significant-figure grid (v2.80.0: the one hzText
+    // language - "7.2 kHz", never "7.20 kHz")
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "eq4Hz", 1 }, "EQ 4 Frequency",
         makeLogRange (600.0f, 18000.0f, twoSigFigSnap()), 7200.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction ([] (float value, int)
-            {
-                return juce::String (value * 0.001f, 2) + " kHz";
-            })
+            .withStringFromValueFunction (hzText)
             .withValueFromStringFunction ([] (const juce::String& text)
             {
                 auto t = text.trim();
@@ -1067,51 +1079,48 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             });
     };
 
-    // the sidechain readouts speak plain hertz once you move them -
-    // and at their rest positions they say their OWN name, "SC HPF
-    // off" / "SC LPF off" (v2.79.0, Clement's remark 4: the selector
-    // line lost its captions, so the readout identifies the slider),
-    // and a typed "off" still parses back to rest
-    const auto scHpfText = [] (float value, int)
+    // v2.80.0 (Clement's remark 6): the sidechain readouts draw their
+    // own curve glyph beside the value now (the slider's readout
+    // label), so the words spell only the value - "off" at rest,
+    // hzText once moved - and the same shared lambdas serve all four
+    // selectors, the expander's pair and the compressor's. The pair
+    // travels BY VALUE in the capture: the attribute holds a
+    // std::function, so a capturing lambda is legal, and the little
+    // helpers are plain words of this function's own vocabulary
+    const auto scHpfText = [hzText] (float value, int)
     {
         if (value < 16.5f)
-            return juce::String ("SC HPF off");
+            return juce::String ("off");
 
-        return juce::String (juce::roundToInt (value)) + " Hz";
+        return hzText (value, 0);
     };
 
-    const auto scHpfParse = [] (const juce::String& text)
+    const auto scHpfParse = [hzParse] (const juce::String& text)
     {
         auto t = text.trim();
 
         if (t.containsIgnoreCase ("off"))
             return 16.0f;
 
-        if (t.endsWithIgnoreCase ("hz"))
-            t = t.dropLastCharacters (2).trim();
-
-        return t.replaceCharacter (',', '.').getFloatValue();
+        return hzParse (t);
     };
 
-    const auto scLpfText = [] (float value, int)
+    const auto scLpfText = [hzText] (float value, int)
     {
         if (value > 23999.5f)
-            return juce::String ("SC LPF off");
+            return juce::String ("off");
 
-        return juce::String (juce::roundToInt (value)) + " Hz";
+        return hzText (value, 0);
     };
 
-    const auto scLpfParse = [] (const juce::String& text)
+    const auto scLpfParse = [hzParse] (const juce::String& text)
     {
         auto t = text.trim();
 
         if (t.containsIgnoreCase ("off"))
             return 24000.0f;
 
-        if (t.endsWithIgnoreCase ("hz"))
-            t = t.dropLastCharacters (2).trim();
-
-        return t.replaceCharacter (',', '.').getFloatValue();
+        return hzParse (t);
     };
 
     // the shared LISTEN plumbing (v2.66.0, Clement's remark A): the
@@ -2417,16 +2426,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     };
 
     setUpKnob (trimInKnob, &trimInLabel,  "TRIM IN",  0.0f,    knobDisc);
-    // v2.78.0 (Clement's remark 8): the cuts speak the console's own
-    // filter names - HPF and LPF - and their captions ride the cells'
-    // top-left corner now, so the words hang at the LEFT of the line
-    // their ON plate closes at the right
-    setUpKnob (lowCutKnob, &lowCutLabel,  "HPF",  16.0f,   knobDisc);
-    lowCutLabel.setJustificationType (juce::Justification::centredLeft);
+    // v2.80.0 (Clement's remark 1): the cuts lost their caption words
+    // - the merged HPF / LPF button IS the name now, lit when the
+    // filter processes, black when it is bypassed, and it takes the
+    // old caption's own top-left corner
+    setUpKnob (lowCutKnob,   nullptr, "",  16.0f,   knobDisc);
     // v2.63.0 (Clement's remark 4): the LPF knob wears the same
     // pastel red cap as the EQ's HF band
-    setUpKnob (highCutKnob, &highCutLabel, "LPF", 24000.0f, eqHfDisc);
-    highCutLabel.setJustificationType (juce::Justification::centredLeft);
+    setUpKnob (highCutKnob,  nullptr, "", 24000.0f, eqHfDisc);
     setUpKnob (tiltKnob, &tiltLabel,    "TILT",     0.0f,    knobDisc);
     setUpKnob (driveKnob, &driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
@@ -2541,13 +2548,16 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // expander, threshold 0 / ratio 2 on the compressor, mix 100 %,
     // every sidechain at rest)
     // ------------------------------------------------------------------
-    setUpKnob (expThresholdKnob, &expThresholdLabel, "THRESH", -50.0f, expKnobDisc);
+    // v2.80.0 (Clement's remarks 4 and 5): both THRESH knobs wear the
+    // console's own red - the HF band's saturated disc, the colour
+    // their IN ladders' new threshold bar speaks too
+    setUpKnob (expThresholdKnob, &expThresholdLabel, "THRESH", -50.0f, eqHfDisc);
     setUpKnob (expRangeKnob, &expRangeLabel,     "RANGE",    0.0f, expKnobDisc);
     setUpKnob (expReleaseKnob, &expReleaseLabel,   "RELEASE",   0.3f, expKnobDisc);
     setUpKnob (expRatioKnob, &expRatioLabel,      "RATIO",    2.0f, expKnobDisc);
     setUpKnob (expMixKnob, &expMixLabel,        "MIX",     100.0f, expKnobDisc);
 
-    setUpKnob (compThresholdKnob, &compThresholdLabel, "THRESH",  0.0f, compKnobDisc);
+    setUpKnob (compThresholdKnob, &compThresholdLabel, "THRESH",  0.0f, eqHfDisc);
     setUpKnob (compRatioKnob, &compRatioLabel,     "RATIO",   2.0f, compKnobDisc);
     setUpKnob (compReleaseKnob, &compReleaseLabel,  "RELEASE", 0.25f, compKnobDisc);
     setUpKnob (compGainKnob, &compGainLabel,      "GAIN",    0.0f, compKnobDisc);
@@ -2555,7 +2565,23 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // the sidechain pair of each stage rides the cuts' own horizontal
     // selector - the SC HPF parks at 16 Hz, the SC LPF at 24000 Hz,
-    // and both rest positions leave the detector a flat band
+    // and both rest positions leave the detector a flat band.
+    // v2.80.0 (Clement's remark 6): every SC selector draws its own
+    // curve in the readout now - the HPF's own glyph on the two HPF
+    // sliders, the LPF's on the two LPF ones - so the value reads
+    // [curve] "off" at rest and [curve] "90 Hz" once moved, and the
+    // words "SC HPF" are gone. The flags ride BEFORE setUpSlope: the
+    // readout label is created once, inside setTextBoxStyle, and the
+    // look-and-feel's factory reads the flag right there
+    compHpfSlider.readoutGlyph     = SectionIcon::Icon::lowCut;
+    compHpfSlider.hasReadoutGlyph  = true;
+    compScLpfSlider.readoutGlyph   = SectionIcon::Icon::highCut;
+    compScLpfSlider.hasReadoutGlyph = true;
+    expScHpfSlider.readoutGlyph    = SectionIcon::Icon::lowCut;
+    expScHpfSlider.hasReadoutGlyph  = true;
+    expScLpfSlider.readoutGlyph    = SectionIcon::Icon::highCut;
+    expScLpfSlider.hasReadoutGlyph = true;
+
     setUpSlope (compHpfSlider, 16.0f);
     setUpSlope (compScLpfSlider, 24000.0f);
     setUpSlope (expScHpfSlider, 16.0f);
@@ -2575,26 +2601,17 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpSlope (expKneeSlider, 0.0f);
 
     // v2.79.0 (Clement's remark 4): the SC row lost its captions -
-    // every selector's readout identifies itself now ("SC HPF off",
-    // "SC LPF off", "KNEE hard", and the LINK's own words), so the
-    // labels are gone and the strip sits that much shorter
+    // every selector's readout identifies itself now ("off" with its
+    // own curve glyph, "KNEE hard", the LINK's own words), so the
+    // labels are gone and the strip sits that much shorter.
+    // v2.80.0 (Clement's remark 7): the EXPANDER and COMPRESSOR
+    // section titles are gone too - the stages' own EXP / COMP
+    // plates name them, and the header band the titles took returns
+    // to the knobs below
 
     // v2.68.0 (Clement's remark): the dynamics sections carry no
     // glyphs any more - the stages read through their captions, their
     // knob colours and their ladders alone
-
-    // the two section captions, engraved like the EQ header's own
-    expSectionLabel.setText ("EXPANDER", juce::dontSendNotification);
-    expSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    expSectionLabel.setJustificationType (juce::Justification::centred);
-    expSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (expSectionLabel);
-
-    compSectionLabel.setText ("COMPRESSOR", juce::dontSendNotification);
-    compSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    compSectionLabel.setJustificationType (juce::Justification::centred);
-    compSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (compSectionLabel);
 
     // the oversampling switch, an SSL-style illuminated plate under the
     // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
@@ -2625,13 +2642,16 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (eq1ModeButton);
     addAndMakeVisible (eq4ModeButton);
 
-    // the cut on/off plates (v2.59.0, Clement's remark 2; v2.78.0,
-    // Clement's remark 8): the same SSL plate language, turned
-    // HORIZONTAL now - an LED at the left, the state spelled at the
-    // right - riding the cells' top-RIGHT corner beside the filter's
-    // own glyph. They own the bypass; the slope sweep itself starts
-    // at 6 dB/oct
+    // the cut on/off plates (v2.80.0, Clement's remark 1): the ON
+    // plate and the filter's caption are ONE button now - a
+    // ShelfModeToggle-style plate that says "HPF" / "LPF" in both
+    // states, lit amber when the filter processes, black with a
+    // dead LED when it is bypassed - and it takes the old caption's
+    // own top-left corner. It owns the bypass; the slope sweep
+    // itself starts at 6 dB/oct
+    lowCutOnButton.cutWord = "HPF";
     addAndMakeVisible (lowCutOnButton);
+    highCutOnButton.cutWord = "LPF";
     addAndMakeVisible (highCutOnButton);
 
     // the dynamics' on/off plates (v2.64.0): "EXP ON" / "EXP OFF" and
@@ -2661,6 +2681,15 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (compInMeter);
     addAndMakeVisible (compOutMeter);
     addAndMakeVisible (compGrMeter);
+
+    // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar - each
+    // IN ladder carries its stage's own threshold corner as a red
+    // bar, fed straight from the parameter its THRESH knob drives, so
+    // the bar and the knob can never disagree
+    expInMeter.thresholdDb =
+        [this] { return owner.getApvts().getRawParameterValue ("expThreshold")->load(); };
+    compInMeter.thresholdDb =
+        [this] { return owner.getApvts().getRawParameterValue ("compThreshold")->load(); };
 
     trimInAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "trimInDb", trimInKnob);
@@ -2758,11 +2787,15 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // v2.70.0 (Clement's remark 1): the console front's own grain - a
     // 96 x 96 speckle tile baked ONCE, from a fixed xorshift seed so
-    // the texture is the same pixels every launch. One dark speckle in
-    // eight and one light one, each at a whisper of alpha (3 to 6):
-    // the painted-steel finish of a real module, not a noise overlay.
-    // The tile is a member image, the paint tiles it - no per-frame
-    // cost beyond the blits the clipping region asks for
+    // the texture is the same pixels every launch. One dark speckle
+    // in eight and one light one, each at a whisper of alpha.
+    // v2.80.0 (Clement's remark 8): the felt finish DEEPENED - the
+    // alphas climbed from the old 3-to-6 whisper to 7 and up, so the
+    // speckles read as the painted-steel grain of a real module the
+    // way the brainworx console's own background does, still fine
+    // noise and never a poster. The tile is a member image, the paint
+    // tiles it - no per-frame cost beyond the blits the clipping
+    // region asks for
     {
         // JUCE 8 writes pixels through Image::BitmapData (the Image
         // itself carries no setPixelColour) - ONE lock around the
@@ -2784,10 +2817,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
                 if (bucket < 2u)
                     grainData.setPixelColour (x, y, juce::Colour (0xff1c1a14)
-                        .withAlpha ((juce::uint8) (3 + ((n >> 4) & 3u))));
+                        .withAlpha ((juce::uint8) (8 + ((n >> 4) & 3u))));
                 else if (bucket > 12u)
                     grainData.setPixelColour (x, y, juce::Colour (0xfffdf6e3)
-                        .withAlpha ((juce::uint8) (3 + ((n >> 4) & 3u))));
+                        .withAlpha ((juce::uint8) (7 + ((n >> 4) & 3u))));
             }
         }
     }
@@ -2918,11 +2951,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
 
     // v2.70.0 (Clement's remark 1): the console front's own grain -
     // the 96 x 96 speckle tile baked in the constructor, tiled over
-    // the cream. The alphas live inside the tile (3 to 6), so the
-    // texture reads as paint grain; JUCE 8 retired drawImageTiled, so
-    // the tiles are drawn directly - a few dozen tiny blits, and the
-    // clipping region keeps the cost proportional to what actually
-    // repaints
+    // the cream. The alphas live inside the tile, so the texture
+    // reads as paint grain; v2.80.0 (Clement's remark 8) deepened
+    // them from the old 3-to-6 whisper to a visible felt finish.
+    // JUCE 8 retired drawImageTiled, so the tiles are drawn directly
+    // - a few dozen tiny blits, and the clipping region keeps the
+    // cost proportional to what actually repaints
     for (int tileY = 0; tileY < getHeight(); tileY += grainTexture.getHeight())
         for (int tileX = 0; tileX < getWidth(); tileX += grainTexture.getWidth())
             g.drawImageAt (grainTexture, tileX, tileY);
@@ -2997,7 +3031,9 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
 
     g.drawLine (14.0f, 47.0f, 240.0f, 47.0f, 1.0f);
-    g.drawLine (14.0f, 299.0f, 240.0f, 299.0f, 1.0f);
+    // v2.80.0: the rule rides under the EQ's header band, which the
+    // taller front-end rows carry down to y = 339
+    g.drawLine (14.0f, 339.0f, 240.0f, 339.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3092,78 +3128,68 @@ void CostesStripEditor::resized()
     // and the EQ closes the column as ever
     column1.removeFromTop (24);   // the signature's own band
 
-    // the TRIM and TILT line: two cells of the same pattern - knob
-    // above, caption below, the section glyph hugging the text's
-    // left edge
-    auto inputRow = column1.removeFromTop (96);
-    const int inputCellW = inputRow.getWidth() / 2;
-
-    for (int i = 0; i < 2; ++i)
+    // the front end's two lines (v2.80.0, Clement's remarks 1, 2 and
+    // 3): the GAINS at the left of their lines and the high
+    // frequencies at the top - TRIM with LPF on the first line, TILT
+    // with HPF under it - so the column reads the signal's own
+    // geography. Every cell the same shape, every one of the four
+    // knobs the SAME 107 x 62 square: 20 px of air, the knob, the
+    // caption strip, and (on the cuts) the slope selector under the
+    // knob at the EQ sliders' own 38 px geometry
+    const auto frontEndLine = [] (juce::Rectangle<int> row,
+                                  CostesSlider& gainKnob, juce::Label& gainCaption,
+                                  SectionIcon& gainIcon,
+                                  CostesSlider& cutKnob, CostesSlider& cutSlope,
+                                  SectionIcon& cutIcon, juce::Button& cutButton)
     {
-        auto column = inputRow.removeFromLeft (inputCellW).reduced (4, 2);
+        const int cellW = row.getWidth() / 2;
+        auto gainCell = row.removeFromLeft (cellW).reduced (4, 2);
+        auto cutCell  = row.reduced (4, 2);
 
-        auto* knob = &trimInKnob;
-        auto* caption = &trimInLabel;
-        SectionIcon* icon = &trimIcon;
+        // the gain cell: air, the knob, then the caption with its
+        // glyph hugging the text's left edge
+        gainCell.removeFromTop (20);
+        gainKnob.setBounds (gainCell.removeFromTop (62));
+        auto gainCaptionBounds = gainCell.removeFromTop (18);
+        gainCaption.setBounds (gainCaptionBounds);
 
-        if (i == 1) { knob = &tiltKnob; caption = &tiltLabel; icon = &tiltIcon; }
+        const int textWidth = gainCaption.getFont().getStringWidth (gainCaption.getText());
+        gainIcon.setBounds (gainCaptionBounds.getCentreX() - textWidth / 2 - 21,
+                            gainCaptionBounds.getY() + 1, 16, 16);
 
-        auto captionBounds = column.removeFromBottom (18);
-        caption->setBounds (captionBounds);
+        // the cut cell (v2.80.0, Clement's remark 1): the merged
+        // button IS the caption - "HPF" / "LPF" written on the plate
+        // itself, lit amber when the filter processes, black when it
+        // is bypassed - and it takes the old caption word's own
+        // top-left corner, above the glyph
+        auto topStrip = cutCell.removeFromTop (20);
+        // the plate owns the 56 px its horizontal reading needs: the
+        // LED's 20 plus the word's own room
+        cutButton.setBounds (topStrip.removeFromLeft (56));
 
-        const int textWidth = caption->getFont().getStringWidth (caption->getText());
-        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
-                         captionBounds.getY() + 1, 16, 16);
+        // the knob under the strip, then the slope selector under the
+        // knob - centred, the EQ sliders' own 38 px tall geometry
+        cutKnob.setBounds (cutCell.removeFromTop (62));
 
-        knob->setBounds (column);
-    }
+        // the filter's own glyph rides UNDER the merged button, at
+        // the knob square's own top-left corner - the corner the
+        // rotary disc never reaches, exactly where the caption word
+        // once carried it
+        cutIcon.setBounds (cutKnob.getX() + 2,
+                           cutKnob.getY() + 2, 16, 16);
+
+        cutSlope.setBounds (cutCell.withSizeKeepingCentre (76, 38));
+    };
+
+    auto lineOne = column1.removeFromTop (124);
+    frontEndLine (lineOne, trimInKnob, trimInLabel, trimIcon,
+                  highCutKnob, highCutSlope, highCutIcon, highCutOnButton);
 
     column1.removeFromTop (4);   // a breath between the lines
 
-    // the HPF and LPF line (v2.78.0, Clement's remark 8): the freed
-    // caption rides the cell's top-LEFT corner, the filter's glyph and
-    // its ON plate close the same line at the RIGHT, the knob stands
-    // under them and the slope selector keeps the bottom - the caption
-    // line the old bottom stack took is gone, so the knob keeps its
-    // own 62 px while the row reads tighter
-    auto filtersRow = column1.removeFromTop (112);
-    const int filtersCellW = filtersRow.getWidth() / 2;
-
-    for (int i = 0; i < 2; ++i)
-    {
-        auto column = filtersRow.removeFromLeft (filtersCellW).reduced (4, 2);
-
-        auto* knob = &lowCutKnob;
-        auto* caption = &lowCutLabel;
-        juce::Slider* slope = &lowCutSlope;
-        SectionIcon* icon = &lowCutIcon;
-
-        if (i == 1) { knob = &highCutKnob; caption = &highCutLabel; slope = &highCutSlope; icon = &highCutIcon; }
-
-        // the top strip: the caption at the left, the on/off plate
-        // flush at the cell's right edge (v2.59.0; v2.73.0 at the
-        // top-left; v2.78.0 at the top-RIGHT). v2.79.0 (Clement's
-        // remark 3): the filter's own glyph rides UNDER its caption
-        // now - the words above, the curve just under them, at the
-        // knob square's empty top-left corner (the rotary disc never
-        // reaches it, so the glyph costs the knob nothing)
-        auto topStrip = column.removeFromTop (20);
-        // the plate owns the 42 px its horizontal reading needs: the
-        // LED's 18 plus the widest word's own 20 (an OFF at 9.5 pt)
-        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (
-            topStrip.removeFromRight (42));
-        caption->setBounds (topStrip);
-        icon->setBounds (caption->getBounds().getX() + 2,
-                         topStrip.getBottom() + 2, 16, 16);
-
-        // the slope columns give their selector a 26 px band - the 18 px
-        // readout box plus a slice of track above it (v2.60.0)
-        auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
-        slope->setBounds (slopeBounds);
-
-        // the knob owns everything the strip and the slope leave - 62 px
-        knob->setBounds (column);
-    }
+    auto lineTwo = column1.removeFromTop (124);
+    frontEndLine (lineTwo, tiltKnob, tiltLabel, tiltIcon,
+                  lowCutKnob, lowCutSlope, lowCutIcon, lowCutOnButton);
 
     // v2.79.0 (Clement's remark 1): a real breath between the end of
     // the filters and the start of the EQ - the merged block's last
@@ -3297,7 +3323,6 @@ void CostesStripEditor::resized()
     // LINK, sitting level with the SC selectors
     auto layoutDynStage = [] (juce::Rectangle<int> block,
                                  PlateToggle& onButton,
-                                 juce::Label& sectionLabel,
                                  DynamicsMeter& inMeter,
                                  DynamicsMeter& outMeter,
                                  DynamicsMeter& grMeter,
@@ -3311,37 +3336,43 @@ void CostesStripEditor::resized()
     {
         block = block.reduced (4, 2);
         block.removeFromTop (6);      // a breath under the band above
-        auto header = block.removeFromTop (20);
 
-        // v2.79.0 (Clement's remark 5): the plate owns the room its
-        // own widest words need - "COMP OFF" at 11 px bold no longer
-        // clips into "COMP O..."
-        onButton.setBounds (header.getX() + 8, header.getY() + 1, 88, 18);
-        sectionLabel.setBounds (header);
+        // v2.80.0 (Clement's remark 7): the section titles are GONE -
+        // the stages read through their own EXP / COMP plates, their
+        // knob colours and their ladders - so no header band at all:
+        // the on/off plate rides the meters column's own top line,
+        // and the height the titles' header once took belongs to the
+        // knobs below
+        onButton.setBounds (block.getX(), block.getY(), 88, 18);
 
         // the three ladders: IN, OUT and GR together at the block's
         // left edge (v2.72.0, Clement's request - the GR meter found
         // its place between the OUT meter and the knobs), the full
-        // height of the stage. v2.73.0 (Clement's remark 1): the trio
-        // tightened - the IN ladder keeps the ONE engraved scale the
-        // OUT ladder beside it shares (its own copy is gone), so the
-        // pair reads as one meter with one series of numbers.
+        // height of the stage under the plate's own top line.
+        // v2.73.0 (Clement's remark 1): the trio tightened - the IN
+        // ladder keeps the ONE engraved scale the OUT ladder beside
+        // it shares (its own copy is gone), so the pair reads as one
+        // meter with one series of numbers.
         // v2.74.0 (Clement's remark 2): the IN ladder gave its numbers
         // column the same width the OUT ladder gives its air - the
         // frame-to-frame distance reads EVEN now, IN to OUT exactly
         // the OUT-to-GR seam
-        auto meterIn  = block.removeFromLeft (44);
-        auto meterOut = block.removeFromLeft (44);
-        auto meterGr  = block.removeFromLeft (56);
+        auto meterColumn = block.removeFromLeft (144);
+        meterColumn.removeFromTop (20);
+        auto meterIn  = meterColumn.removeFromLeft (44);
+        auto meterOut = meterColumn.removeFromLeft (44);
+        auto meterGr  = meterColumn.removeFromLeft (56);
         inMeter.setBounds (meterIn.reduced (2, 2));
         outMeter.setBounds (meterOut.reduced (2, 2));
         grMeter.setBounds (meterGr.reduced (2, 2));
 
         // v2.79.0 (Clement's remark 4): the SC row lost its caption
         // line - the three selectors ride a slim strip at the stage's
-        // foot, their readouts identifying themselves ("SC HPF off"),
-        // and the two knob rows share the height the caption row once
-        // took - every knob grows to the SSL's own 72 px square
+        // foot, their readouts identifying themselves (the curve
+        // glyph and "off"), and the two knob rows share the height
+        // the caption row once took. v2.80.0 (Clement's remark 7):
+        // with the section titles gone too, every knob grows to the
+        // 84 px square - the height the two headers once took
         auto scStrip = block.removeFromBottom (39);
 
         // every cell sits its caption at the bottom and centres its
@@ -3362,11 +3393,11 @@ void CostesStripEditor::resized()
         {
             auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
                                      *captions[(size_t) i]);
-            // v2.79.0: the clamp rides up from 64 to the row-1 knobs'
-            // own 72 - the SSL square, the taller rows' whole point
+            // v2.80.0: the clamp rode up from 72 to 84 - the section
+            // titles' own room, returned to the knobs
             knobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 72),
-                juce::jmin (cell.getHeight(), 72)));
+                juce::jmin (cell.getWidth(), 84),
+                juce::jmin (cell.getHeight(), 84)));
         }
 
         // the middle row: RANGE (GAIN on the compressor) and RATIO,
@@ -3381,10 +3412,10 @@ void CostesStripEditor::resized()
         {
             auto cell = captionCell (midRow.removeFromLeft (midW).reduced (2, 0),
                                      *captions[(size_t) (3 + i)]);
-            // v2.79.0: the same 72 px square as the top row
+            // v2.80.0: the same 84 px square as the top row
             knobs[(size_t) (3 + i)]->setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 72),
-                juce::jmin (cell.getHeight(), 72)));
+                juce::jmin (cell.getWidth(), 84),
+                juce::jmin (cell.getHeight(), 84)));
         }
 
         // v2.70.0 (Clement's remark 6): no caption under the plate any
@@ -3405,9 +3436,9 @@ void CostesStripEditor::resized()
         // the SC strip (v2.79.0, Clement's remark 4): the sidechain
         // corners and the stage's own selector pulled DOWN into a slim
         // uncaptioned strip - each slider's readout says whose it is
-        // ("SC HPF off" / "SC LPF off"), and once you move one its own
-        // hertz speak for it, so the caption line the row once needed
-        // is gone and the knobs above own the height it took
+        // (its own curve glyph, then "off" or its own hertz), so the
+        // caption line the row once needed is gone and the knobs
+        // above own the height it took
         const int scW = scStrip.getWidth() / 3;
 
         hpfSlider.setBounds (scStrip.removeFromLeft (scW).reduced (2, 0)
@@ -3433,7 +3464,7 @@ void CostesStripEditor::resized()
             &expRangeLabel, &expRatioLabel
         };
 
-        layoutDynStage (expBlock, expOnButton, expSectionLabel,
+        layoutDynStage (expBlock, expOnButton,
                         expInMeter, expOutMeter, expGrMeter,
                         expKnobs, expCaptions,
                         expFastAttackButton,
@@ -3457,7 +3488,7 @@ void CostesStripEditor::resized()
             &compGainLabel, &compRatioLabel
         };
 
-        layoutDynStage (compBlock, compOnButton, compSectionLabel,
+        layoutDynStage (compBlock, compOnButton,
                         compInMeter, compOutMeter, compGrMeter,
                         compKnobs, compCaptions,
                         compFastAttackButton,
@@ -3692,6 +3723,23 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         }
     }
 
+    // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar on an IN
+    // ladder - the stage's own threshold corner drawn as a red bar,
+    // the same 3.4 px weight and style the GR ladder's peak-hold bar
+    // carries, the HF band's own saturated red. It reads the
+    // parameter the THRESH knob drives, so the bar and the knob can
+    // never disagree; a degenerate resize returned above and never
+    // reaches this bar
+    if (mode == Mode::input && thresholdDb != nullptr)
+    {
+        const float v = juce::jlimit (lowDb, highDb, thresholdDb());
+        float y = bottom - (v - lowDb) / span * height;
+        y = juce::jlimit (top, bottom - 1.0f, y);
+
+        g.setColour (eqHfDisc);
+        g.drawLine (lx, y, lx + lw, y, 3.4f);
+    }
+
     // the peak-hold marker (v2.67.0): a cream hairline across the
     // ladder at the held extreme. v2.71.0: the GR ladder's marker
     // rides the same TWO-RATE geometry as its LEDs
@@ -3872,10 +3920,19 @@ void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,
     // stands under the band's name now, in the row's margin column,
     // and follows the plate from there (the SectionIcon that shadows
     // this button reads its shelfGlyph) - so the plate keeps its LED
-    // and its word alone
+    // and its word alone. v2.80.0 (Clement's remark 1): the cuts
+    // speak through this same plate - their word rides cutWord
+    // ("HPF" / "LPF") and NEVER changes with the state, only the
+    // light does: lit amber when the filter processes, black with a
+    // dead LED when it is bypassed, the BELL/SHELF plate's own
+    // language
+    const juce::String word = cutWord.isNotEmpty()
+        ? cutWord
+        : juce::String (on ? "BELL" : "SHELF");
+
     g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-    g.drawText (on ? "BELL" : "SHELF", bounds,
+    g.drawText (word, bounds,
                 juce::Justification::centred);
 }
 
@@ -3965,52 +4022,6 @@ void CostesStripEditor::ListenToggle::paintButton (juce::Graphics& g,
     g.setColour (on ? engraving : plateText);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText ("LISTEN", bounds,
-                juce::Justification::centred);
-}
-
-void CostesStripEditor::CutOnToggle::paintButton (juce::Graphics& g,
-                                                  bool highlighted,
-                                                  bool /*down*/)
-{
-    // v2.78.0 (Clement's remark 8): the cut's plate turned HORIZONTAL
-    // - the LED at the left, the state spelled at the right - and
-    // rides its cell's top-right corner beside the filter's own
-    // glyph. The same SSL plate language as ever: amber and lit when
-    // the filter processes, dark with a dead LED when it is bypassed
-    const bool on = getToggleState();
-    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
-
-    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
-                    : plateFill);
-    g.fillRoundedRectangle (bounds, 4.0f);
-
-    g.setColour (on ? valueArc.brighter (0.12f)
-                    : (highlighted ? knobBezel : engravingDim));
-    g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
-
-    // the LED at the left: a lit amber dot with a soft glow when on, a
-    // dark socket sunk into the plate when off
-    const auto ledArea = bounds.removeFromLeft (18.0f);
-    const auto led = ledArea.withSizeKeepingCentre (9.0f, 9.0f);
-
-    if (on)
-    {
-        g.setColour (valueArc.withMultipliedAlpha (0.40f));
-        g.fillEllipse (led.expanded (3.0f));
-        g.setColour (valueArc.brighter (0.35f));
-        g.fillEllipse (led);
-    }
-    else
-    {
-        g.setColour (juce::Colour (0xff17150f));
-        g.fillEllipse (led);
-    }
-
-    // the caption spells the state: "ON" / "OFF", dark engraving on the
-    // lit plate, and (v2.69.0) the plate's own cream on the dark one
-    g.setColour (on ? engraving : plateText);
-    g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-    g.drawText (on ? "ON" : "OFF", bounds,
                 juce::Justification::centred);
 }
 

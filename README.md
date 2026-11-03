@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.79.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.80.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,44 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.80.0** — *Eight remarks, one console: the front end reads the SSL
+  way, the threshold speaks in red, and the grain deepens.*
+  - **The cut ON plate and the caption are one button.** A merged
+    plate says "HPF" / "LPF" in both states - lit amber when the
+    filter processes, black with a dead LED when it is bypassed, the
+    BELL/SHELF plate's own language - and it takes the old caption
+    word's top-left corner. The slope selectors ride under their
+    knobs now, centred, at the EQ sliders' own 38 px geometry (the
+    76 px width keeps "24 dB/oct" whole, the v2.60 lesson).
+  - **Every front-end knob wears one size.** TRIM, LPF, TILT and HPF
+    share the same 107 x 62 square, their discs the same 44 px, and
+    the EQ keeps its own 83 px discs untouched.
+  - **The front end reads the SSL way.** The gains at the left of
+    their lines, the highs at the top: TRIM with LPF on the first
+    line, TILT with HPF under it, the slope selectors under their
+    own knobs. The EQ stack follows at its tighter 105 px pitch.
+  - **The threshold materialises in the input meters.** A red bar
+    crosses each IN ladder at its stage's own threshold corner - the
+    same 3.4 px weight as the GR ladder's peak-hold bar - and both
+    THRESH knobs wear the console's own saturated red, the HF band's
+    colour, so the knob and its bar speak the same language.
+  - **The sidechain readouts draw their curve.** The SC selectors'
+    readouts carry their own HPF / LPF glyph beside the value - the
+    curve at the left, "off" or the hertz after it - and the words
+    "SC HPF" are gone. Every Hz readout past 1 kHz speaks one-decimal
+    kHz now - "1.2 kHz", never "1200 Hz" - and the useless ".0" is
+    dropped: "16 kHz", "24 kHz".
+  - **The EXPANDER and COMPRESSOR titles are gone.** The stages' own
+    EXP / COMP plates name them, riding the meters columns' top
+    line - and the height the titles took belongs to the knobs, which
+    grow to 84 px squares.
+  - **The felt finish deepens.** The console front's speckle grain
+    reads deeper now - the alphas climbed from the old 3-to-6
+    whisper to 7 and up, the fine painted-steel noise of a real
+    module, without touching the colour.
+  - **DSP unchanged.** Layout, plates and readouts only - the audio
+    chain keeps its exact order, and the full harness now runs 945
+    checks.
 - **2.79.0** — *Five remarks, five fixes - the SC caption line goes,
   the dynamics knobs breathe, and nothing clips any more.*
   - **A real breath before the EQ.** The merged block's last line and

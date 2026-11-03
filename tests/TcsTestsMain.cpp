@@ -5729,6 +5729,22 @@ void testCostesStripSectionIcons()
     expectTrue (grain.isValid() && grain.getWidth() == 96 && grain.getHeight() == 96,
                 "the panel bakes a 96 x 96 grain tile for its speckled front");
 
+    // v2.80.0 (Clement's remark 8): the felt finish DEEPENED - the
+    // speckles' alphas climbed from the old 3-to-6 whisper to 7 and
+    // up, the brainworx-style fine grain reading as paint now
+    {
+        juce::Image::BitmapData grainData (grain, juce::Image::BitmapData::readOnly);
+        int deep = 0;
+
+        for (int y = 0; y < grain.getHeight(); ++y)
+            for (int x = 0; x < grain.getWidth(); ++x)
+                if (grainData.getPixelColour (x, y).getAlpha() >= 7)
+                    ++deep;
+
+        expectTrue (deep > 300,
+                    "the console's grain reads deeper now - the speckles carry alphas the old 3-to-6 whisper never had");
+    }
+
 
 
     // the fifteen dynamics sliders (v2.64.0, the sidechain pair grown
@@ -5925,33 +5941,61 @@ void testCostesStripSectionIcons()
                     && meters[3]->getHeight() == 211,
                 "the dynamics stages stand at their v2.74 height again - the ladders 211 px tall");
 
-    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
-    // ROW - TRIM and TILT (0 and 3) share the first line, the two
-    // cuts (HPF and LPF, 1 and 2) the line under it, then the EQ's
-    // first band (7) closes the column
+    // v2.80.0 (Clement's remarks 2 and 3): the front end reads the
+    // SSL way - the GAINS at the left of their lines, the highs at
+    // the top: TRIM and LPF (0 and 2) share the first line, TILT and
+    // HPF (3 and 1) the one under it, then the EQ's first band (7)
+    // closes the column
     expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
                     && sliders[7] != nullptr
-                    && sliders[0]->getBounds().getY() == sliders[3]->getBounds().getY()
-                    && sliders[1]->getBounds().getY() == sliders[2]->getBounds().getY()
+                    && sliders[0]->getBounds().getY() == sliders[2]->getBounds().getY()
+                    && sliders[3]->getBounds().getY() == sliders[1]->getBounds().getY()
                     && sliders[1]->getBounds().getY() > sliders[0]->getBounds().getY()
                     && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
-                "column 1 reads two knobs a row - TRIM and TILT on one line, HPF and LPF on the next, the EQ under it");
+                "column 1 reads the SSL way - TRIM and LPF on one line, TILT and HPF under it, the EQ under both");
+
+    // v2.80.0 (Clement's remark 2): every knob of the front end
+    // wears ONE size - TRIM, LPF, TILT and HPF the same square
+    expectTrue (sliders[0] != nullptr && sliders[1] != nullptr
+                    && sliders[2] != nullptr && sliders[3] != nullptr
+                    && sliders[0]->getWidth() == sliders[1]->getWidth()
+                    && sliders[1]->getWidth() == sliders[2]->getWidth()
+                    && sliders[2]->getWidth() == sliders[3]->getWidth()
+                    && sliders[0]->getHeight() == sliders[1]->getHeight()
+                    && sliders[1]->getHeight() == sliders[2]->getHeight()
+                    && sliders[2]->getHeight() == sliders[3]->getHeight(),
+                "every front-end knob wears one size - TRIM, LPF, TILT and HPF the same square");
 
     // v2.78.0 (Clement's remarks): the EQ reads SSL-style - the HIGHS
     // at the top of the stack, the lows at the bottom (15 is the HF
     // band's FREQ, 12 HMF's, 9 LMF's, 7 the LF's) - and the four rows
-    // sit at one tight 115 px pitch (v2.79.0: the selector lines are
-    // gone, the rows own their whole room), the caption words gone
+    // sit at one tight 105 px pitch (v2.80.0, Clement's remark 3: the
+    // taller front-end rows carry the stack down, the caption words
+    // still gone), the knobs' own 83 px discs preserved
     expectTrue (sliders[15] != nullptr && sliders[12] != nullptr
                     && sliders[9] != nullptr && sliders[7] != nullptr
                     && sliders[15]->getBounds().getY() < sliders[12]->getBounds().getY()
                     && sliders[12]->getBounds().getY() < sliders[9]->getBounds().getY()
                     && sliders[9]->getBounds().getY() < sliders[7]->getBounds().getY()
-                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 115
-                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 115
-                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 115,
-                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 115 px pitch");
+                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 105
+                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 105
+                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 105,
+                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 105 px pitch");
+
+    // v2.80.0 (Clement's remark 1): the slope selectors ride UNDER
+    // their knobs now, centred, at the EQ sliders' own 38 px
+    // geometry - the 76 px width keeps "24 dB/oct" whole (the v2.60
+    // lesson), the height matches the EQ's width sweeps
+    expectTrue (sliders[5] != nullptr && sliders[1] != nullptr
+                    && sliders[6] != nullptr && sliders[2] != nullptr
+                    && sliders[5]->getWidth() == 76 && sliders[5]->getHeight() == 38
+                    && sliders[5]->getBounds().getCentreX() == sliders[1]->getBounds().getCentreX()
+                    && sliders[5]->getBounds().getY() == sliders[1]->getBounds().getBottom()
+                    && sliders[6]->getWidth() == 76 && sliders[6]->getHeight() == 38
+                    && sliders[6]->getBounds().getCentreX() == sliders[2]->getBounds().getCentreX()
+                    && sliders[6]->getBounds().getY() == sliders[2]->getBounds().getBottom(),
+                "the HPF and LPF slope selectors ride under their knobs, centred, at the EQ sliders' own 38 px geometry");
 
     // and the band names themselves: each name stands in a slim
     // margin column at its row's left, LEVEL WITH ITS KNOBS (LMF's
@@ -6022,24 +6066,26 @@ void testCostesStripSectionIcons()
     // the dynamics knobs wear the EQ's own cap colours (v2.68.0,
     // Clement's remark): the expander the HMF band's ivory, the
     // compressor the LMF band's saturated blue - index 17 is the
-    // expander's THRESH, 22 the compressor's
+    // expander's THRESH, 22 the compressor's. v2.80.0 (Clement's
+    // remarks 4 and 5): both THRESH knobs speak the console's own
+    // RED now - the HF band's saturated disc, the colour their IN
+    // ladders' new threshold bars carry
     expectTrue (sliders[17] != nullptr
                     && sliders[17]->findColour (juce::Slider::backgroundColourId)
-                           == juce::Colour (0xffefe0bc),
-                "the expander's knobs wear the HMF band's saturated ivory cap");
+                           == juce::Colour (0xffcd7f6d),
+                "the expander's THRESH knob wears the console's own red - the colour its IN ladder's threshold bar speaks");
     expectTrue (sliders[22] != nullptr
                     && sliders[22]->findColour (juce::Slider::backgroundColourId)
-                           == juce::Colour (0xff6f9fd4),
-                "the compressor's knobs wear the LMF band's saturated blue cap");
+                           == juce::Colour (0xffcd7f6d),
+                "the compressor's THRESH knob wears the same red");
 
-    // the dynamics knobs grew to the SSL's own 72 px square (v2.79.0,
-    // Clement's remark 4): the caption line the SC row once took is
-    // gone, so the two knob rows own their whole height
-    expectTrue (sliders[17] != nullptr && sliders[0] != nullptr
-                    && sliders[17]->getHeight() <= sliders[0]->getHeight()
-                    && sliders[17]->getHeight() > 64
-                    && sliders[17]->getWidth() == 72,
-                "the dynamics knobs grew to the row-1 columns' own 72");
+    // the dynamics knobs grew to 84 px squares (v2.80.0, Clement's
+    // remark 7): the EXPANDER / COMPRESSOR titles are gone, and the
+    // height their header bands once took belongs to the knobs
+    expectTrue (sliders[17] != nullptr
+                    && sliders[17]->getWidth() == 84
+                    && sliders[17]->getHeight() == 84,
+                "the dynamics knobs grew to 84 px squares - the section titles' own room");
 
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
@@ -6215,16 +6261,16 @@ void testCostesStripKnobDefaultsAndCaps()
         0xff6f9fd4u, 0xff6f9fd4u,
         0xffefe0bcu, 0xffefe0bcu,
         0xffcd7f6du, 0xffcd7f6du,
-        0xffefe0bcu, 0xffefe0bcu, 0xffefe0bcu,
+        0xffcd7f6du, 0xffefe0bcu, 0xffefe0bcu,
         0xffefe0bcu, 0xffefe0bcu,
-        0xff6f9fd4u, 0xff6f9fd4u, 0xff6f9fd4u,
+        0xffcd7f6du, 0xff6f9fd4u, 0xff6f9fd4u,
         0xff6f9fd4u, 0xff6f9fd4u
     };
 
     for (int k = 0; k < 23; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor)");
+                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor, and both THRESH knobs the console's own red since v2.80.0)");
 
     // v2.75.0 (Clement's spec): the front end is the console's first
     // column - the trim knob at its head, the EQ's first band under
@@ -7405,10 +7451,11 @@ void testCostesStripKneeAndLayoutTightening()
         strip->getApvts().getParameterAsValue ("expKnee").setValue (0.0f);
     }
 
-    // ---- the sidechain readouts identify themselves now (v2.79.0,
-    // Clement's remark 4): the SC selector line lost its captions, so
-    // each readout says its own name at rest - once you move one, its
-    // own hertz speak for it ----
+    // ---- the sidechain readouts speak through their own curve glyph
+    // now (v2.80.0, Clement's remark 6): the glyph rides at the
+    // readout's left (the slider's label paints it), so the words
+    // spell only the value - "off" at rest, the console's one hzText
+    // language once moved ----
     {
         auto* scHpfParam = dynamic_cast<juce::RangedAudioParameter*> (
             strip->getApvts().getParameter ("compHpf"));
@@ -7417,16 +7464,91 @@ void testCostesStripKneeAndLayoutTightening()
 
         expectTrue (scHpfParam != nullptr && scLpfParam != nullptr
                         && scHpfParam->getText (scHpfParam->getValue(), 100)
-                               == "SC HPF off"
+                               == "off"
                         && scLpfParam->getText (scLpfParam->getValue(), 100)
-                               == "SC LPF off",
-                    "the sidechain readouts speak their own name at rest - \"SC HPF off\" and \"SC LPF off\"");
+                               == "off",
+                    "the sidechain readouts say only \"off\" at rest - their own curve glyph names them now");
 
         if (scHpfParam != nullptr)
+        {
             expectNear (scHpfParam->convertFrom0to1 (
-                            scHpfParam->getValueForText ("SC HPF off")),
+                            scHpfParam->getValueForText ("off")),
                         16.0, 0.01,
-                        "the named \"SC HPF off\" parses back to its own rest corner");
+                        "a typed \"off\" parses back to its own rest corner");
+
+            strip->getApvts().getParameterAsValue ("compHpf").setValue (1200.0f);
+            expectTrue (scHpfParam->getText (scHpfParam->getValue(), 100)
+                               == "1.2 kHz",
+                        "a sidechain corner past 1 kHz reads \"1.2 kHz\" - never \"1200 Hz\"");
+            expectNear (scHpfParam->convertFrom0to1 (
+                            scHpfParam->getValueForText ("1.2 kHz")),
+                        1200.0, 0.01,
+                        "a typed \"1.2 kHz\" parses back to 1200 Hz");
+        }
+    }
+
+    // ---- and the console's ONE Hz language everywhere (v2.80.0,
+    // Clement's remark 6): every corner past 1 kHz reads one-decimal
+    // kHz, the useless ".0" dropped, and plain integer hertz below
+    // the crossing ----
+    {
+        auto* lowCutParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("lowCutHz"));
+        auto* highCutParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("highCutHz"));
+        auto* eq2HzParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("eq2Hz"));
+        auto* eq3HzParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("eq3Hz"));
+
+        // the strip below is shared, and the knee pass further down
+        // feeds its own tone through the front end - so every corner
+        // this block borrows returns to the value it held on arrival.
+        // v2.80.0 fix: a 1600 Hz HPF left engaged bent the knee pass
+        // by twice its 8.8 dB at the pass's own 1 kHz (once in the
+        // path, once in the detector the expander hears)
+        const float parkedLowCutHz =
+            strip->getApvts().getRawParameterValue ("lowCutHz")->load();
+        const float parkedHighCutHz =
+            strip->getApvts().getRawParameterValue ("highCutHz")->load();
+        const float parkedEq2Hz =
+            strip->getApvts().getRawParameterValue ("eq2Hz")->load();
+        const float parkedEq3Hz =
+            strip->getApvts().getRawParameterValue ("eq3Hz")->load();
+
+        strip->getApvts().getParameterAsValue ("lowCutHz").setValue (1600.0f);
+        expectTrue (lowCutParam != nullptr
+                        && lowCutParam->getText (lowCutParam->getValue(), 100)
+                               == "1.6 kHz",
+                    "the HPF's own corner reads \"1.6 kHz\" at 1600 - never \"1600 Hz\"");
+        expectNear (lowCutParam->convertFrom0to1 (
+                        lowCutParam->getValueForText ("1.6 kHz")),
+                    1600.0, 0.01,
+                    "a typed \"1.6 kHz\" parses back to 1600 Hz on the HPF");
+
+        strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
+        expectTrue (highCutParam != nullptr
+                        && highCutParam->getText (highCutParam->getValue(), 100)
+                               == "24 kHz",
+                    "the LPF's ceiling reads \"24 kHz\" - no useless zero");
+
+        strip->getApvts().getParameterAsValue ("eq2Hz").setValue (2500.0f);
+        expectTrue (eq2HzParam != nullptr
+                        && eq2HzParam->getText (eq2HzParam->getValue(), 100)
+                               == "2.5 kHz",
+                    "the LO MID band's corner reads \"2.5 kHz\" past 1 kHz");
+
+        strip->getApvts().getParameterAsValue ("eq3Hz").setValue (800.0f);
+        expectTrue (eq3HzParam != nullptr
+                        && eq3HzParam->getText (eq3HzParam->getValue(), 100)
+                               == "800 Hz",
+                    "the HI MID band's corner keeps its plain \"800 Hz\" below 1 kHz");
+
+        // and the borrowed corners go back where they were found
+        strip->getApvts().getParameterAsValue ("lowCutHz").setValue (parkedLowCutHz);
+        strip->getApvts().getParameterAsValue ("highCutHz").setValue (parkedHighCutHz);
+        strip->getApvts().getParameterAsValue ("eq2Hz").setValue (parkedEq2Hz);
+        strip->getApvts().getParameterAsValue ("eq3Hz").setValue (parkedEq3Hz);
     }
 
     // ---- the compressor's GAIN rides the same 18 dB ceiling as its
@@ -7597,6 +7719,27 @@ void testCostesStripKneeAndLayoutTightening()
                     && meters[3]->markStep == 10.0f,
                 "the IN ladders engrave every ten dB - 0 down to the -70 floor");
 
+    // v2.80.0 (Clement's remarks 4 and 5): the IN ladders carry the
+    // THRESHOLD bar - a red hairline (the same 3.4 px weight as the
+    // GR ladders' peak-hold bars) fed straight from the parameter
+    // their THRESH knobs drive, so the bar and the knob can never
+    // disagree
+    expectTrue (meters[0] != nullptr && meters[0]->thresholdDb != nullptr
+                    && meters[3] != nullptr && meters[3]->thresholdDb != nullptr,
+                "both IN ladders carry a threshold bar - the expander's and the compressor's");
+
+    if (meters[0] != nullptr && meters[3] != nullptr
+        && meters[0]->thresholdDb != nullptr && meters[3]->thresholdDb != nullptr)
+    {
+        stripForLayout.getApvts().getParameterAsValue ("expThreshold").setValue (-20.0f);
+        expectNear (meters[0]->thresholdDb(), -20.0, 0.01,
+                    "the expander's threshold bar reads its THRESH knob's own value");
+
+        stripForLayout.getApvts().getParameterAsValue ("compThreshold").setValue (-12.0f);
+        expectNear (meters[3]->thresholdDb(), -12.0, 0.01,
+                    "the compressor's threshold bar reads its THRESH knob's own value");
+    }
+
     // v2.73.0 (Clement's remark 2): FAST ATK and LISTEN stack as one
     // column - v2.74.0 (Clement's remark 1) moved the pair UP a row,
     // into the middle row's third cell, centred as one plate unit
@@ -7645,33 +7788,51 @@ void testCostesStripKneeAndLayoutTightening()
                     "the KNEE slider takes its own clicks on its track too");
     }
 
-    // remark 3 + v2.78.0 (Clement's remark 8): the cut ON/OFF plates
-    // moved to their knob's TOP-RIGHT corner - the plate rides the
-    // right edge of its knob, flush with its cell, and sits ABOVE the
-    // disc so the corner's clicks switch the cut instead of dragging
-    // the knob behind it
+    // v2.80.0 (Clement's remark 1): the ON plate and the filter's
+    // caption are ONE button now - "HPF" / "LPF" written on the plate
+    // itself, lit amber when the filter processes, black when it is
+    // bypassed (the BELL/SHELF plate's own language) - riding the
+    // cell's TOP-LEFT corner, exactly where the old caption word
+    // stood, above the disc so the corner's clicks switch the cut
+    // instead of dragging the knob behind it
     expectTrue (cutPlates[0] != nullptr && sliders[1] != nullptr
-                    && cutPlates[0]->getBounds().getRight() == sliders[1]->getBounds().getRight()
+                    && cutPlates[0]->getBounds().getWidth() == 56
+                    && cutPlates[0]->getBounds().getX() == sliders[1]->getBounds().getX()
                     && cutPlates[0]->getBounds().getBottom() <= sliders[1]->getBounds().getY(),
-                "the HPF's ON/OFF plate rides its knob's top-right corner - above the disc, flush with its cell");
+                "the HPF's merged button rides its knob's top-left corner - the button IS the word HPF now");
 
     expectTrue (cutPlates[1] != nullptr && sliders[2] != nullptr
-                    && cutPlates[1]->getBounds().getRight() == sliders[2]->getBounds().getRight()
+                    && cutPlates[1]->getBounds().getWidth() == 56
+                    && cutPlates[1]->getBounds().getX() == sliders[2]->getBounds().getX()
                     && cutPlates[1]->getBounds().getBottom() <= sliders[2]->getBounds().getY(),
-                "the LPF's ON/OFF plate rides its knob's top-right corner too");
+                "the LPF's merged button rides its knob's top-left corner too");
 
     if (cutPlates[0] != nullptr && cutPlates[1] != nullptr)
     {
         expectTrue (editor.getComponentAt (cutPlates[0]->getBounds().getCentre()) == cutPlates[0],
-                    "the HPF's ON/OFF plate takes its own clicks - it sits above its knob, not under it");
+                    "the HPF's merged button takes its own clicks - it sits above its knob, not under it");
 
         expectTrue (editor.getComponentAt (cutPlates[1]->getBounds().getCentre()) == cutPlates[1],
-                    "the LPF's ON/OFF plate takes its own clicks too");
+                    "the LPF's merged button takes its own clicks too");
     }
 
-    // v2.79.0 (Clement's remark 3): the cut glyphs ride UNDER their
-    // captions now - the words above, the curve at the knob square's
-    // empty top-left corner, the corner the rotary disc never reaches
+    // and the words the merged buttons spell: the button says its
+    // filter's own name in BOTH states - only the light follows the
+    // state, the BELL/SHELF plate's own language
+    {
+        auto* hpfButton = dynamic_cast<CostesStripEditor::ShelfModeToggle*> (cutPlates[0]);
+        auto* lpfButton = dynamic_cast<CostesStripEditor::ShelfModeToggle*> (cutPlates[1]);
+
+        expectTrue (hpfButton != nullptr && lpfButton != nullptr
+                        && hpfButton->cutWord == "HPF"
+                        && lpfButton->cutWord == "LPF",
+                    "the merged buttons spell their filter's own name - HPF and LPF, lit when they process");
+    }
+
+    // v2.79.0 (Clement's remark 3): the cut glyphs ride under their
+    // buttons now - the curve at the knob square's empty top-left
+    // corner, the corner the rotary disc never reaches (v2.80.0: the
+    // merged HPF / LPF button stands above it, lit = on)
     {
         const auto icons = editor.getSectionIcons();
         expectTrue (icons[(size_t) 1] != nullptr && sliders[1] != nullptr
@@ -7679,27 +7840,36 @@ void testCostesStripKneeAndLayoutTightening()
                             == sliders[1]->getBounds().getX() + 2
                         && icons[(size_t) 1]->getBounds().getY()
                             == sliders[1]->getBounds().getY() + 2,
-                    "the HPF's glyph stands right under its caption, at its knob square's top-left corner");
+                    "the HPF's glyph stands under its merged button, at its knob square's top-left corner");
 
         expectTrue (icons[(size_t) 2] != nullptr && sliders[2] != nullptr
                         && icons[(size_t) 2]->getBounds().getX()
                             == sliders[2]->getBounds().getX() + 2
                         && icons[(size_t) 2]->getBounds().getY()
                             == sliders[2]->getBounds().getY() + 2,
-                    "the LPF's glyph stands right under its caption too");
+                    "the LPF's glyph stands under its merged button too");
     }
 
     // v2.79.0 (Clement's remark 5): the dynamics ON plates own the
     // room their own widest words need - "COMP OFF" at 11 px bold never
     // clips into "COMP O..." again (the LED's 24 plus the margins' 2
-    // stay inside the plate's own 88)
+    // stay inside the plate's own 88). v2.80.0 (Clement's remark 7):
+    // the EXPANDER / COMPRESSOR titles are gone, so each stage's own
+    // plate rides the meters column's top line - the room the titles
+    // took belongs to the knobs
     {
         const auto onButtons = editor.getDynOnButtons();
         expectTrue (onButtons[(size_t) 1] != nullptr
                         && onButtons[(size_t) 1]->getWidth() == 88
                         && juce::Font (juce::FontOptions (11.0f, juce::Font::bold))
-                               .getStringWidth ("COMP OFF") + 26 <= 88,
-                    "the COMP plate owns its own widest words - its OFF never clips");
+                               .getStringWidth ("COMP OFF") + 26 <= 88
+                        && meters[3] != nullptr
+                        && onButtons[(size_t) 1]->getBounds().getBottom()
+                               <= meters[3]->getBounds().getY()
+                        && onButtons[0] != nullptr
+                        && onButtons[0]->getBounds().getBottom()
+                               <= meters[0]->getBounds().getY(),
+                    "the COMP plate owns its own widest words - and both stages' plates ride the meters columns' own top line, the section titles gone");
     }
 }
 
