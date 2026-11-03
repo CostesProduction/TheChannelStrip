@@ -3212,8 +3212,14 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // is ALWAYS one dB, only the number of divisions changes - 40
     // over the expander's 0 to 40, 20 over the compressor's 0 to 20 -
     // and the engraved scale beside them grew from three anchors to
-    // the full expGrMarks / compGrMarks lists, drawn positive. The
-    // component holds no state of its
+    // the full expGrMarks / compGrMarks lists, drawn positive.
+    // v2.71.0 (Clement's request): the GR ladders went TWO-RATE -
+    // one dB per division as before, but the first 6 dB own the TOP
+    // HALF of the ladder in six fat divisions and everything below
+    // squeezes into the bottom half in fine ones (34 divisions over
+    // the expander's 6 to 40, 14 over the compressor's 6 to 20) -
+    // most reduction lives between 0 and 6 dB, so that zone gets
+    // the room. The component holds no state of its
     // own: every paint reads the truth, and a degenerate resize
     // paints nothing but the caption - there is no size small enough
     // to divide by
@@ -3307,19 +3313,24 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     // the LEDs: LED 0 is the lowest on an IN or OUT ladder, the
     // highest on a GR ladder - all three light towards the reading,
-    // never past it
+    // never past it. v2.71.0 (Clement's request): a GR rung now owns
+    // its own height - the six fat divisions of the top half, the
+    // fine rungs below - while the IN and OUT ladders stay uniform
     for (int j = 0; j < leds; ++j)
     {
         float y = 0.0f;
+        float rung = seg;
         bool lit = false;
         juce::Colour colour (meterGreen);
 
         if (mode == Mode::gainReduction)
         {
-            y = top + (float) j * seg + 1.0f;
+            // v2.71.0: the rung boundaries ride the two-rate scale -
+            // the border stays one dB per LED, exactly as in v2.70.0
+            y = top + grFractionForDb ((float) j, span) * height;
+            rung = (grFractionForDb ((float) j + 1.0f, span)
+                    - grFractionForDb ((float) j, span)) * height;
 
-            // v2.70.0 (Clement's remark 3): one division is one dB,
-            // top to bottom - the LED above the reading's own rung
             const float border = span * (float) j / (float) leds;
 
             lit = (-reading) > border;
@@ -3332,8 +3343,12 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
             colour = (j >= leds - 2) ? valueArc : meterGreen;
         }
 
-        const juce::Rectangle<float> led (lx + 1.0f, y, lw - 2.0f,
-                                          juce::jmax (1.0f, seg - 2.0f));
+        // v2.71.0: the gap shrinks with the rung so the fine divisions
+        // below the half still read as separate LEDs, never as a
+        // solid bar
+        const float gap = juce::jmin (2.0f, rung * 0.5f);
+        const juce::Rectangle<float> led (lx + 1.0f, y + gap * 0.5f, lw - 2.0f,
+                                          juce::jmax (1.0f, rung - gap));
 
         if (lit)
         {
@@ -3350,15 +3365,15 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     }
 
     // the peak-hold marker (v2.67.0): a cream hairline across the
-    // ladder at the held extreme. The GR ladder's marker rides the
-    // same linear one-dB-per-division geometry as its LEDs
+    // ladder at the held extreme. v2.71.0: the GR ladder's marker
+    // rides the same TWO-RATE geometry as its LEDs
     {
         float markerY = top;
 
         if (mode == Mode::gainReduction)
         {
             const float v = juce::jlimit (0.0f, span, -holdReading);
-            markerY = top + v / span * height;
+            markerY = top + grFractionForDb (v, span) * height;
         }
         else
         {
@@ -3404,7 +3419,10 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         for (int m = 0; m < numMarks; ++m)
         {
             const float v = (float) marks[m];
-            const float y = top + v / span * height;
+
+            // v2.71.0: the engraved values sit at their two-rate
+            // rungs - 6 dB at the half, the deep values packed below
+            const float y = top + grFractionForDb (v, span) * height;
 
             g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
             g.drawText (juce::String (marks[m]),

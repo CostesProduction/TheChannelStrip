@@ -621,6 +621,27 @@ public:
         static constexpr int expGrMarks[10]  { 0, 2, 4, 6, 8, 10, 14, 20, 30, 40 };
         static constexpr int compGrMarks[8]  { 0, 2, 4, 6, 8, 10, 14, 20 };
 
+        // v2.71.0 (Clement's request): the GR ladders' TWO-RATE
+        // geometry - the first 6 dB own the TOP HALF of the ladder in
+        // six fat one-dB divisions, and everything below squeezes into
+        // the bottom half in fine one-dB divisions (34 of them on the
+        // expander's 6 to 40, 14 on the compressor's 6 to 20). Most
+        // reduction lives between 0 and 6 dB, so that zone gets the
+        // room. Pure and public so the offline harness can pin the
+        // geometry: 0 dB is fraction 0, 6 dB exactly 0.5, the ladder's
+        // full scale 1.0
+        static float grFractionForDb (float reductionDb, float spanDb)
+        {
+            const float splitDb = 6.0f;
+            const float half = 0.5f;
+
+            if (reductionDb <= splitDb)
+                return half * reductionDb / splitDb;
+
+            const float below = juce::jmax (1.0e-4f, spanDb - splitDb);
+            return half + half * (reductionDb - splitDb) / below;
+        }
+
         // v2.67.0 (Clement's remark): the peak hold - the reading's own
         // extreme (the loudest level on an IN or OUT ladder, the
         // deepest reduction on a GR ladder) held for 3 s, then a gentle
@@ -795,9 +816,10 @@ private:
     // the dynamics meters' instances (v2.65.0, grown in v2.66.0) - the
     // public struct and the harness accessor sit above. Each stage
     // carries its IN and OUT pair over 70 dB (marks every 20) and its
-    // GR ladder on the v2.70.0 linear scale: ONE DECIBEL PER DIVISION
-    // - 40 LEDs over the expander's 0 to 40 range, 20 over the
-    // compressor's 0 to 20 - with the full value lists engraved at
+    // GR ladder on the v2.71.0 TWO-RATE scale: one dB per division as
+    // in v2.70.0, but the first 6 dB own the top half in six fat
+    // divisions - 40 LEDs over the expander's 0 to 40 range, 20 over
+    // the compressor's 0 to 20 - with the full value lists engraved at
     // the ladder's right (expGrMarks / compGrMarks)
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
                                 true, -70.0f, 0.0f, 14, 20.0f, "IN" };

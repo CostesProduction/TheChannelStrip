@@ -5841,6 +5841,47 @@ void testCostesStripSectionIcons()
     expectTrue (compMarksMatch,
                 "the compressor's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20");
 
+    // v2.71.0 (Clement's request): the GR ladders' TWO-RATE geometry -
+    // the first 6 dB own the TOP HALF of the ladder in six fat one-dB
+    // divisions, everything below squeezes into the bottom half in
+    // fine ones. The pure mapping is public so the geometry can be
+    // pinned exactly: 0 dB is fraction 0, 6 dB exactly the half, the
+    // ladder's full scale 1.0
+    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (0.0f, 40.0f)) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (6.0f, 40.0f) - 0.5f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (40.0f, 40.0f) - 1.0f) < 0.0001f,
+                "the expander's GR ladder puts 0, 6 and 40 dB at the top, the half and the bottom");
+
+    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (0.0f, 20.0f)) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (6.0f, 20.0f) - 0.5f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (20.0f, 20.0f) - 1.0f) < 0.0001f,
+                "the compressor's GR ladder puts 0, 6 and 20 dB at the top, the half and the bottom");
+
+    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (3.0f, 40.0f) - 0.25f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (3.0f, 20.0f) - 0.25f) < 0.0001f,
+                "3 dB sits at the first quarter on BOTH ladders - the six fat divisions own the top half");
+
+    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (23.0f, 40.0f) - 0.75f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (13.0f, 20.0f) - 0.75f) < 0.0001f,
+                "23 dB (expander) and 13 dB (compressor) sit at the three-quarter line - the fine divisions pack the bottom half");
+
+    {
+        bool expMonotonic = true, compMonotonic = true;
+
+        for (int j = 0; j < 40; ++j)
+            expMonotonic = expMonotonic
+                && CostesStripEditor::DynamicsMeter::grFractionForDb ((float) j, 40.0f)
+                   < CostesStripEditor::DynamicsMeter::grFractionForDb ((float) (j + 1), 40.0f);
+
+        for (int j = 0; j < 20; ++j)
+            compMonotonic = compMonotonic
+                && CostesStripEditor::DynamicsMeter::grFractionForDb ((float) j, 20.0f)
+                   < CostesStripEditor::DynamicsMeter::grFractionForDb ((float) (j + 1), 20.0f);
+
+        expectTrue (expMonotonic && compMonotonic,
+                    "the two-rate GR geometry never folds back - every rung sits strictly below the one above it, across the 6 dB split");
+    }
+
     // v2.68.0 (Clement's remark): the two stages stand as two VERTICAL
     // blocks side by side - the expander's whole trio at the LEFT of
     // the band, the compressor's at the RIGHT, both the same height

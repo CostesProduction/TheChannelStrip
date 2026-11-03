@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.70.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.71.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,21 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.71.0** — *The GR ladders give the first 6 dB the room they
+  deserve.* Clément's remark: most gain reduction lives between 0
+  and 6 dB, yet the ladders spent half their height on the deep
+  end nobody visits.
+  - **Two-rate GR scales.** On both the expander's and the
+    compressor's GR ladder, **0 to 6 dB now owns the top half of the
+    bar** in six fat one-dB divisions; the range below packs into
+    the bottom half in fine one-dB divisions (34 of them over the
+    expander's 6 to 40, 14 over the compressor's 6 to 20). One
+    division is still one dB everywhere - only the geometry changed:
+    a 3 dB reduction reads at the first quarter of the bar, 6 dB
+    exactly at the half.
+  - The engraved scales, the peak-hold bar and the LED counts ride
+    the same two-rate geometry - nothing else moved.
 
 - **2.70.2** — *The host now hears every state change.* Clement's
   Studio One report: after turning knobs inside the shell (consoles or
