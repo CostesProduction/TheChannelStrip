@@ -8,13 +8,14 @@
 // sidechain selectors (SC HPF and SC LPF, 12 dB/oct biquads, 16 to 1600 Hz
 // and 100 to 24000 Hz - the flat rest positions leave the detector's band
 // whole) and the LISTEN plate, then RANGE on the expander (make-up GAIN on
-// the compressor), and the GR ladder at the right. The expander's attack
+// the compressor), and the GR ladder beside them (at the block's left
+// since v2.72.0, Clement's request). The expander's attack
 // knob became a FAST/SLOW plate like the compressor's (1 ms lit / 30 ms
 // dark); each stage carries its own sidechain pair and its own LISTEN
 // monitor (the filtered signal its detector hears, the compressor's plate
 // winning when both are lit); two new OUT ladders read the level each
 // stage leaves behind; and the GR ladders speak the J's two-half scales
-// (0-10-40 dB on the expander, 0-6-20 on the compressor). The stage knobs
+// (the expander tops at 36 dB since v2.72.0, the compressor at 20). The knobs
 // wear the section colours Clement asked for in v2.68.0: the HI MID
 // band's off-white cap on the expander's knobs, the LO MID band's
 // pastel blue on the compressor's.
@@ -39,8 +40,9 @@
 // stage gets the SSL's two meters: an IN ladder at the LEFT (the
 // stereo-linked RMS level the detector hears, scaled -70 to 0 dB, sitting
 // right beside the THRESHOLD knob so the setting reads naturally) and a
-// GR ladder at the RIGHT (0 dB at the top, growing down as the section
-// works: 40 dB of span for the expander, 20 for the compressor, the
+// GR ladder (0 dB at the top, growing down as the section
+// works: 36 dB of span for the expander since v2.72.0, 20 for the
+// compressor, the
 // classic orange). The meters ride four new atomics the process loop
 // stores once per block: the detectors now ALWAYS run - metering never
 // waits for a section to be engaged - while the gain arithmetic stays
@@ -52,7 +54,8 @@
 // v2.64.0 (Clement's spec, roadmap C3): the DYNAMICS section - a
 // gate/expander and a classic compressor between the EQ and the tilt,
 // exactly where an SSL channel puts them. The expander: threshold
-// (-70 to 0 dB), range (0 to 40 dB, the maximum attenuation - 0 dB is a
+// (-70 to 0 dB), range (0 to 36 dB since v2.72.0, the maximum
+// attenuation - 0 dB is a
 // true bypass), attack (0.5 to 100 ms, added: a gate needs its opening
 // speed for click-free transients), release (0.1 to 3 s), ratio (1.2 to 12)
 // and a mix knob (0 to 100 % wet). The compressor: threshold (-60 to 0 dB),
@@ -305,6 +308,7 @@ private:
     std::atomic<float>* compHpf       = nullptr;
     std::atomic<float>* compScLpf     = nullptr;  // v2.66.0
     std::atomic<float>* compListen    = nullptr;  // 0.0 / 1.0 (v2.66.0)
+    std::atomic<float>* compLink      = nullptr;  // 0-3: dual/50/80/link (v2.72.0)
 
     double currentSampleRate = 48000.0;
 
@@ -347,12 +351,20 @@ private:
     // and release one-poles are per-block constants from the parameters.
     // The gains live in the dB domain so the static curves stay plain
     // arithmetic, and a neutral section (range 0, threshold 0) is skipped
-    // before a single multiply touches the samples
+    // before a single multiply touches the samples.
+    // v2.72.0 (Clement's request): the compressor carries its own
+    // detector AND gain per channel - the compLink plate blends each
+    // channel's detector level towards the stereo-linked one (0 = fully
+    // dual, 1 = the classic single-detector link), so at "link" the two
+    // gains evolve identically and the strip is bit-for-bit its old self
     static constexpr float detectorFloorPower = 1.0e-12f;  // -120 dB
+    static constexpr float compLinkWeights[4] { 0.0f, 0.5f, 0.8f, 1.0f };
     float expDetectorPower = 0.0f;
     float expGainDb        = 0.0f;    // 0 = open, negative = expanded
-    float compDetectorPower = 0.0f;
-    float compGainDb       = 0.0f;    // 0 = unity, negative = compressed
+    float compDetectorPowerL = 0.0f;  // the compressor's per-channel RMS (v2.72.0)
+    float compDetectorPowerR = 0.0f;
+    float compGainDbL       = 0.0f;    // 0 = unity, negative = compressed
+    float compGainDbR       = 0.0f;
     float detectorCoef     = 0.0f;    // 10 ms RMS ballistics, per sample
     Biquad compSidechain[2] = {};     // the SC HPF, one per channel
     float lastCompHpf      = -1.0f;   // the sidechain corner's cache
@@ -500,8 +512,9 @@ public:
     // expander's five knobs and the compressor's five (both attack
     // plates are buttons, not sliders, since v2.66.0), and the four
     // sidechain selectors - the compressor's SC HPF and SC LPF, the
-    // expander's own pair
-    std::array<CostesSlider*, 31> getStripSliders()
+    // expander's own pair - plus the compressor's LINK selector
+    // (v2.72.0) as index 31
+    std::array<CostesSlider*, 32> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
@@ -512,7 +525,8 @@ public:
                  &compThresholdKnob, &compRatioKnob, &compReleaseKnob,
                  &compGainKnob, &compMixKnob,
                  &compHpfSlider, &compScLpfSlider,
-                 &expScHpfSlider, &expScLpfSlider };
+                 &expScHpfSlider, &expScLpfSlider,
+                 &compLinkSlider };
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
@@ -587,7 +601,8 @@ public:
     // from the top down as the section works. v2.70.0 (Clement's
     // remark 3): the GR scale is a plain LINEAR dB ladder - ONE DECIBEL
     // PER DIVISION on both stages, only the number of divisions
-    // changes (40 on the expander, whose RANGE runs 0 to 40, 20 on the
+    // changes (36 on the expander, whose RANGE runs 0 to 36 since v2.72.0,
+    // 20 on the
     // compressor) - and the engraved scale beside it carries the full
     // value lists below. The component polls the processor in its
     // paint, so the meters never hold state of their own - a fresh
@@ -618,28 +633,32 @@ public:
         // v2.70.0 (Clement's remark 3): the GR scales' engraved values -
         // more numbers than the old three anchors, drawn positive
         // beside the ladder. One list per stage, public for the harness
-        static constexpr int expGrMarks[10]  { 0, 2, 4, 6, 8, 10, 14, 20, 30, 40 };
+        static constexpr int expGrMarks[10]  { 0, 2, 4, 6, 8, 10, 14, 20, 30, 36 };
         static constexpr int compGrMarks[8]  { 0, 2, 4, 6, 8, 10, 14, 20 };
 
-        // v2.71.0 (Clement's request): the GR ladders' TWO-RATE
-        // geometry - the first 6 dB own the TOP HALF of the ladder in
-        // six fat one-dB divisions, and everything below squeezes into
-        // the bottom half in fine one-dB divisions (34 of them on the
-        // expander's 6 to 40, 14 on the compressor's 6 to 20). Most
-        // reduction lives between 0 and 6 dB, so that zone gets the
-        // room. Pure and public so the offline harness can pin the
-        // geometry: 0 dB is fraction 0, 6 dB exactly 0.5, the ladder's
-        // full scale 1.0
-        static float grFractionForDb (float reductionDb, float spanDb)
+        // v2.72.0 (Clement's request): the GR ladders' THREE-TIER
+        // geometry - each tier owns exactly a THIRD of the ladder. The
+        // expander reads 0-6, 6-18 and 18-36 dB (the range itself now
+        // tops at 36 dB), the compressor 0-5, 5-10 and 10-20. The
+        // divisions stay one dB - only their heights change, so the
+        // working zone at the top keeps the room. Pure and public so
+        // the offline harness can pin the geometry: 0 dB is fraction
+        // 0, the first tier boundary exactly 1/3, the second 2/3, and
+        // the ladder's full scale 1.0
+        static float grFractionForDb (float reductionDb, float spanDb,
+                                      float tier1Db, float tier2Db)
         {
-            const float splitDb = 6.0f;
-            const float half = 0.5f;
+            const float third = 1.0f / 3.0f;
 
-            if (reductionDb <= splitDb)
-                return half * reductionDb / splitDb;
+            if (reductionDb <= tier1Db)
+                return third * reductionDb / tier1Db;
 
-            const float below = juce::jmax (1.0e-4f, spanDb - splitDb);
-            return half + half * (reductionDb - splitDb) / below;
+            if (reductionDb <= tier2Db)
+                return third + third * (reductionDb - tier1Db)
+                       / (tier2Db - tier1Db);
+
+            const float below = juce::jmax (1.0e-4f, spanDb - tier2Db);
+            return (2.0f / 3.0f) + third * (reductionDb - tier2Db) / below;
         }
 
         // v2.67.0 (Clement's remark): the peak hold - the reading's own
@@ -725,6 +744,13 @@ private:
     CostesSlider compGainKnob,     compMixKnob;
     CostesSlider expScHpfSlider, expScLpfSlider;
     CostesSlider compHpfSlider, compScLpfSlider;
+
+    // v2.72.0 (Clement's request): the compressor's LINK selector - a
+    // four-position slider (dual / 50% link / 80% link / link) that
+    // blends the two channels' detectors towards the stereo-linked
+    // one. It reads the mode in its own text box and sits in the
+    // compressor block's header, right of the section caption
+    CostesSlider compLinkSlider;
 
     juce::Label expThresholdLabel, expRangeLabel;
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
@@ -817,8 +843,8 @@ private:
     // public struct and the harness accessor sit above. Each stage
     // carries its IN and OUT pair over 70 dB (marks every 20) and its
     // GR ladder on the v2.71.0 TWO-RATE scale: one dB per division as
-    // in v2.70.0, but the first 6 dB own the top half in six fat
-    // divisions - 40 LEDs over the expander's 0 to 40 range, 20 over
+    // in v2.70.0, but the first tier of dB owns the fat divisions -
+    // 36 LEDs over the expander's 0 to 36 range (v2.72.0), 20 over
     // the compressor's 0 to 20 - with the full value lists engraved at
     // the ladder's right (expGrMarks / compGrMarks)
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
@@ -826,7 +852,7 @@ private:
     DynamicsMeter expOutMeter { owner, DynamicsMeter::Mode::output,
                                 true, -70.0f, 0.0f, 14, 20.0f, "OUT" };
     DynamicsMeter expGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
-                                true, -40.0f, 0.0f, 40, 1.0f, "GR" };
+                                true, -36.0f, 0.0f, 36, 1.0f, "GR" };
     DynamicsMeter compInMeter { owner, DynamicsMeter::Mode::input,
                                 false, -70.0f, 0.0f, 14, 20.0f, "IN" };
     DynamicsMeter compOutMeter { owner, DynamicsMeter::Mode::output,
@@ -882,6 +908,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compHpfAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compScLpfAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compListenAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compLinkAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position

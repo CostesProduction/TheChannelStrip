@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.71.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.72.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,32 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.72.0** — *The GR ladders cut into three tiers, the compressor
+  learns to unlink, and the mid bands' width reads its own
+  sentence.* Clément's four remarks.
+  - **Three-tier GR scales.** Each GR ladder now reads in three
+    tiers of exactly a third of the bar: **0–6, 6–18 and 18–36 dB on
+    the expander** (the RANGE knob now tops at 36 dB), **0–5, 5–10
+    and 10–20 on the compressor**. One division is still one dB -
+    only the tier heights changed. The expander's engraved scale
+    tops at 36 accordingly, and the peak-hold bar rides the same
+    geometry.
+  - **The compressor's LINK selector.** A four-position slider in
+    the compressor block's header - **dual, 50 % link, 80 % link,
+    link** - blends the two channels' detectors towards the
+    stereo-linked one (dual = fully independent detectors and gains,
+    link = the classic single linked detector, the default every
+    existing session already knows). The GR meter always reads the
+    **average** of the left and right reductions.
+  - **"Width : 1.0 octave".** The mid bands' bandwidth readout -
+    clipped at its bottom edge in v2.71 - now speaks its own
+    sentence on a wider box with air below it, and the bell glyph
+    sits just before the "Width". The parser reads the full
+    sentence as happily as the old bare "0.50 oct".
+  - **The GR meters moved.** Each stage's GR ladder sits at the
+    left of its own dynamics block now, between the OUT meter and
+    the knobs: IN, OUT, GR, then the controls.
 
 - **2.71.0** — *The GR ladders give the first 6 dB the room they
   deserve.* Clément's remark: most gain reduction lives between 0
