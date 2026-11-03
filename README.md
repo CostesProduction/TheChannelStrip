@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.72.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.73.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,41 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.73.1** — *A harness repair, nothing more: the strip itself is
+  untouched.*
+  - The four new click-probe checks of 2.73.0 (LINK, KNEE, and the
+    two cut ON/OFF plates) consulted `getComponentAt` on an editor
+    that the offline harness never shows - and JUCE components are
+    born invisible, so every probe answered "swallowed". The harness
+    now shows its editor before probing; in a real host the editor
+    is always visible, so the product behaved correctly all along.
+
+- **2.73.0** — *The dynamics blocks breathe as one, the knee plate
+  arrives, and the whole strip answers five of Clément's remarks.*
+  - **Tighter dynamics meters.** The IN / OUT / GR ladders of both
+    dynamics blocks sit closer to one another, and only the IN meter
+    carries the engraved dB scale now: with the meters side by side,
+    the one series of engravings reads for both.
+  - **The LINK slider fixed and relocated.** The compressor's LINK
+    slider was buried under the block's label and would not take a
+    click; it now lives under the LISTEN plate, aligned with the
+    SC HPF / SC LPF sliders, its value printed under it like its
+    neighbours'. FAST ATTACK and LISTEN sit stacked directly on top
+    of each other, so the whole control column reads as one.
+  - **The INPUT cut plates on top.** The HPF and LPF ON/OFF plates
+    moved from the bottom-left corner of their knobs to the
+    top-left, right where the eye lands first.
+  - **The compressor's new thirds.** The GR ladder reads
+    **0–3, 3–9 and 9–18 dB** - the full-scale reduction tops at
+    18 dB now, and the GAIN knob rides the same 18 dB ceiling
+    (a session saved above it clamps down to it).
+  - **The expander's KNEE plate.** A six-position slider under the
+    expander's LISTEN, aligned with the SC corners: **hard** (the
+    corner every session born before this version already knows,
+    bit-exact) then **4, 8, 12, 16 and 20 dB** of soft knee. The
+    static curve bends through the threshold's neighbourhood
+    instead of folding at it - no extra latency, no delay line.
 
 - **2.72.0** — *The GR ladders cut into three tiers, the compressor
   learns to unlink, and the mid bands' width reads its own

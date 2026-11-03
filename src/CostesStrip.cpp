@@ -357,6 +357,7 @@ CostesStrip::CostesStrip()
     expRange       = apvts.getRawParameterValue ("expRange");
     expRelease     = apvts.getRawParameterValue ("expRelease");
     expRatio       = apvts.getRawParameterValue ("expRatio");
+    expKnee        = apvts.getRawParameterValue ("expKnee");
     expMix         = apvts.getRawParameterValue ("expMix");
     expFastAttack  = apvts.getRawParameterValue ("expFastAttack");
     expScHpf       = apvts.getRawParameterValue ("expScHpf");
@@ -385,6 +386,7 @@ CostesStrip::CostesStrip()
              && eq4Bell != nullptr
              && expOn != nullptr && expThreshold != nullptr && expRange != nullptr
              && expFastAttack != nullptr && expRelease != nullptr && expRatio != nullptr
+             && expKnee != nullptr
              && expMix != nullptr && expScHpf != nullptr && expScLpf != nullptr
              && expListen != nullptr
              && compOn != nullptr && compThreshold != nullptr && compRatio != nullptr
@@ -985,6 +987,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (ratioText)
             .withValueFromStringFunction (ratioParse)));
 
+    // the expander's KNEE (v2.73.0, Clement's choice - option B): how
+    // softly the static curve turns at its threshold. Six even plates
+    // - "hard" (the corner every session born before v2.73 already
+    // knows, bit-exact) then 4 / 8 / 12 / 16 / 20 dB - the same
+    // interval-snapped selector pattern the SC corners use
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "expKnee", 1 }, "Expander Knee",
+        juce::NormalisableRange<float> (0.0f, 20.0f, 4.0f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return value < 0.5f ? juce::String ("hard")
+                                    : juce::String (juce::roundToInt (value)) + " dB";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                if (t.equalsIgnoreCase ("hard") || t.equalsIgnoreCase ("off"))
+                    return 0.0f;
+
+                return t.replaceCharacter (',', '.').getFloatValue();
+            })));
+
     // the shared mix plumbing: 0 to 100 % wet, a bare number reads as %
     const auto mixText = [] (float value, int)
     {
@@ -1174,11 +1200,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                 return text.trim().equalsIgnoreCase ("slow") ? false : true;
             })));
 
-    // the make-up gain: 0 to +20 dB on the wet path only, so the mix
-    // knob's dry half stays honest
+    // the make-up gain: 0 to +18 dB on the wet path only, so the mix
+    // knob's dry half stays honest (v2.73.0, Clement's remark 4: the
+    // ceiling rides the compressor's new 18 dB full-scale reduction -
+    // a session saved above 18 dB clamps to it)
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "compGain", 1 }, "Compressor Gain",
-        juce::NormalisableRange<float> (0.0f, 20.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float> (0.0f, 18.0f, 0.1f), 0.0f,
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
@@ -1787,6 +1815,7 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const float expThresholdDb = expThreshold->load();
     const float expRangeDb     = expRange->load();
     const float expRatioValue  = expRatio->load();
+    const float expKneeDb      = expKnee->load();
     const float expMixNorm     = expMix->load() * 0.01f;
     const bool  expActive = expOn->load() > 0.5f
                             && expRangeDb > 0.0f
@@ -1998,7 +2027,37 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
                 float targetDb = 0.0f;
 
-                if (levelDb < expThresholdDb)
+                // v2.73.0 (Clement's choice, option B): the KNEE plate
+                // softens the corner. The zone spans a half-width either
+                // side of the threshold; a parabola leaves the unity
+                // line at the zone's top edge with slope zero and
+                // rejoins the hard curve at its bottom edge, so the
+                // transition bends instead of folding. A knee parked
+                // at 0 takes the classic corner branch untouched -
+                // bit-exact the pre-2.73 behaviour
+                if (expKneeDb > 0.0f)
+                {
+                    const float kneeHalfDb = expKneeDb * 0.5f;
+
+                    if (levelDb < expThresholdDb + kneeHalfDb)
+                    {
+                        // the hard curve's own value at the zone's lower
+                        // edge (range-clamped) anchors the parabola
+                        const float edgeDb = juce::jmin (kneeHalfDb * expCurveSlope,
+                                                        expRangeDb);
+
+                        if (levelDb <= expThresholdDb - kneeHalfDb)
+                            targetDb = -juce::jmin ((expThresholdDb - levelDb) * expCurveSlope,
+                                                    expRangeDb);
+                        else
+                        {
+                            const float ramp = (expThresholdDb + kneeHalfDb - levelDb)
+                                               / expKneeDb;
+                            targetDb = -edgeDb * ramp * ramp;
+                        }
+                    }
+                }
+                else if (levelDb < expThresholdDb)
                     targetDb = -juce::jmin ((expThresholdDb - levelDb) * expCurveSlope,
                                             expRangeDb);
 
@@ -2494,18 +2553,16 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
 
     // v2.72.0 (Clement's request): the compressor's LINK selector - a
     // four-position horizontal slider (dual / 50% link / 80% link /
-    // link) reading its mode in the text box at its right, parked at
-    // "link" (the v2.64.0 behaviour every session already knows)
-    compLinkSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    compLinkSlider.setTextBoxStyle (juce::Slider::TextBoxRight, true, 66, 18);
-    compLinkSlider.setDoubleClickReturnValue (true, 3.0f);
-    compLinkSlider.cmdClickDefault = 3.0f;
-    compLinkSlider.setColour (juce::Slider::trackColourId, knobBezel);
-    compLinkSlider.setColour (juce::Slider::thumbColourId, valueArc);
-    compLinkSlider.setColour (juce::Slider::textBoxTextColourId, engraving);
-    compLinkSlider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colour (0x00000000));
-    compLinkSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0x00000000));
-    addAndMakeVisible (compLinkSlider);
+    // link) parked at "link" (the v2.64.0 behaviour every session
+    // already knows). v2.73.0 (Clement's remark 2): it reads its mode
+    // UNDER the slider now, the same selector geometry the SC corners
+    // use - it moved out of the block's header, where the section
+    // label's full-width bounds swallowed every one of its clicks
+    setUpSlope (compLinkSlider, 3.0f);
+
+    // v2.73.0 (Clement's choice, option B): the expander's KNEE
+    // selector - the same selector geometry, parked at "hard" (0 dB)
+    setUpSlope (expKneeSlider, 0.0f);
 
     setUpBandCaption (compHpfLabel, "SC HPF");
     setUpBandCaption (compScLpfLabel, "SC LPF");
@@ -2649,6 +2706,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "expRelease", expReleaseKnob);
     expRatioAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expRatio", expRatioKnob);
+    expKneeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "expKnee", expKneeSlider);
     expMixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "expMix", expMixKnob);
     expScHpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -2766,6 +2825,7 @@ CostesStripEditor::~CostesStripEditor()
     expFastAttackAttachment.reset();
     expReleaseAttachment.reset();
     expRatioAttachment.reset();
+    expKneeAttachment.reset();
     expMixAttachment.reset();
     expScHpfAttachment.reset();
     expScLpfAttachment.reset();
@@ -3042,14 +3102,15 @@ void CostesStripEditor::resized()
         // readout box plus a slice of track above it (v2.60.0)
         const int knobHeight = column.getHeight() - 46;
 
-        // the cut on/off plate (v2.59.0): a 34 px strip on the left of
-        // the readout band, above the slope selector. The readout box
-        // stays centred, so the plate never collides with it
-        auto plateArea = column;
-        plateArea = plateArea.removeFromBottom (64).removeFromTop (40);
-
-        auto plate = plateArea.removeFromLeft (34).reduced (2);
-        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (plate);
+        // the cut on/off plate (v2.59.0): v2.73.0 (Clement's remark 3)
+        // moved it from the bottom-left of the knob's square to its
+        // TOP-LEFT corner - the rotary disc leaves the corner empty,
+        // so the plate reads as its knob's own switch at a glance and
+        // steals none of the knob's room (the bounds below come from a
+        // copy: the knob's own square stays untouched)
+        auto plate = column;
+        (i == 0 ? lowCutOnButton : highCutOnButton).setBounds (
+            plate.removeFromTop (32).removeFromLeft (30));
 
         auto slopeBounds = column.removeFromBottom (26).reduced (6, 0);
         slope->setBounds (slopeBounds);
@@ -3200,7 +3261,10 @@ void CostesStripEditor::resized()
     auto compBlock = dynArea;
 
     // one layout for both stages: the same control set in the same
-    // order, the same ladders, so the two halves read as one design
+    // order, the same ladders, so the two halves read as one design.
+    // v2.73.0 (Clement's remark 2): the lambda grew the third cell's
+    // own selector - the expander's KNEE, the compressor's LINK -
+    // stacked under the LISTEN push
     auto layoutDynStage = [] (juce::Rectangle<int> block,
                                  PlateToggle& onButton,
                                  juce::Label& sectionLabel,
@@ -3214,7 +3278,8 @@ void CostesStripEditor::resized()
                                  juce::Label& hpfLabel,
                                  CostesSlider& lpfSlider,
                                  juce::Label& lpfLabel,
-                                 ListenToggle& listenButton)
+                                 ListenToggle& listenButton,
+                                 CostesSlider& plateSelector)
     {
         block = block.reduced (4, 2);
         block.removeFromTop (6);      // a breath under the band above
@@ -3226,10 +3291,13 @@ void CostesStripEditor::resized()
         // the three ladders: IN, OUT and GR together at the block's
         // left edge (v2.72.0, Clement's request - the GR meter found
         // its place between the OUT meter and the knobs), the full
-        // height of the stage
-        auto meterIn  = block.removeFromLeft (64);
-        auto meterOut = block.removeFromLeft (64);
-        auto meterGr  = block.removeFromLeft (64);
+        // height of the stage. v2.73.0 (Clement's remark 1): the trio
+        // tightened - the IN ladder keeps the ONE engraved scale the
+        // OUT ladder beside it shares (its own copy is gone), so the
+        // pair reads as one meter with one series of numbers
+        auto meterIn  = block.removeFromLeft (56);
+        auto meterOut = block.removeFromLeft (44);
+        auto meterGr  = block.removeFromLeft (56);
         inMeter.setBounds (meterIn.reduced (2, 2));
         outMeter.setBounds (meterOut.reduced (2, 2));
         grMeter.setBounds (meterGr.reduced (2, 2));
@@ -3274,12 +3342,18 @@ void CostesStripEditor::resized()
 
         // v2.70.0 (Clement's remark 6): no caption under the plate any
         // more - the button owns its whole cell, wide enough for the
-        // FAST ATK wording
+        // FAST ATK wording. v2.73.0 (Clement's remark 2): the plate
+        // sits at the BOTTOM of its cell now, flush above the LISTEN
+        // push below it - the two stack as one column
         auto plateCell = midRow.reduced (2, 0);
-        attackButton.setBounds (plateCell.withSizeKeepingCentre (76, 26));
+        attackButton.setBounds (plateCell.removeFromBottom (26).withSizeKeepingCentre (
+            juce::jmin (plateCell.getWidth(), 76), 26));
 
         // the bottom row: the SC HPF and SC LPF selectors and the
-        // LISTEN push
+        // LISTEN push - and (v2.73.0, Clement's remarks 2 and 5) the
+        // stage's own selector under the LISTEN push, aligned with
+        // the SC selectors' own column, its value read under the
+        // slider the same way
         const int scW = block.getWidth() / 3;
 
         auto hpfCell = captionCell (block.removeFromLeft (scW).reduced (2, 0), hpfLabel);
@@ -3289,7 +3363,10 @@ void CostesStripEditor::resized()
         lpfSlider.setBounds (lpfCell.withSizeKeepingCentre (76, 36));
 
         auto listenCell = block.reduced (2, 0);
-        listenButton.setBounds (listenCell.withSizeKeepingCentre (76, 26));
+        listenButton.setBounds (listenCell.removeFromTop (28).withSizeKeepingCentre (
+            juce::jmin (listenCell.getWidth(), 76), 26));
+        plateSelector.setBounds (listenCell.removeFromTop (36).withSizeKeepingCentre (
+            juce::jmin (listenCell.getWidth(), 76), 36));
     };
 
     {
@@ -3313,7 +3390,8 @@ void CostesStripEditor::resized()
                         expFastAttackButton,
                         expScHpfSlider, expScHpfLabel,
                         expScLpfSlider, expScLpfLabel,
-                        expListenButton);
+                        expListenButton,
+                        expKneeSlider);
     }
 
     {
@@ -3336,14 +3414,8 @@ void CostesStripEditor::resized()
                         compFastAttackButton,
                         compHpfSlider, compHpfLabel,
                         compScLpfSlider, compScLpfLabel,
-                        compListenButton);
-
-        // v2.72.0 (Clement's request): the compressor's LINK selector
-        // sits in the block's header, right of the section caption -
-        // the four positions (dual / 50% link / 80% link / link) read
-        // in the slider's own text box, one drag apart
-        compLinkSlider.setBounds (compBlock.getX() + compBlock.getWidth() - 144,
-                                  compBlock.getY() + 9, 132, 18);
+                        compListenButton,
+                        compLinkSlider);
     }
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
@@ -3358,8 +3430,8 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // behind). v2.70.0 (Clement's remark 3): the GR ladders dropped
     // the J's two-half scale for a straight LINEAR one - one division
     // is ALWAYS one dB, only the number of divisions changes - 36
-    // over the expander's 0 to 36 (v2.72.0), 20 over the compressor's
-    // 0 to 20 -
+    // over the expander's 0 to 36 (v2.72.0), 18 over the compressor's
+    // 0 to 18 (v2.73.0) -
     // and the engraved scale beside them grew from three anchors to
     // the full expGrMarks / compGrMarks lists, drawn positive.
     // v2.71.0 (Clement's request): the GR ladders went TWO-RATE -
@@ -3370,7 +3442,8 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // most reduction lives between 0 and 6 dB, so that zone gets
     // the room. v2.72.0 (Clement's request): the THREE-TIER cut -
     // the expander reads 0-6, 6-18, 18-36 dB (the range itself tops
-    // at 36 now), the compressor 0-5, 5-10, 10-20, each tier owning
+    // at 36 now), the compressor 0-3, 3-9, 9-18 (v2.73.0, Clement's
+    // remark 4), each tier owning
     // exactly a THIRD of the ladder, one dB per division as ever.
     // The component holds no state of its
     // own: every paint reads the truth, and a degenerate resize
@@ -3465,9 +3538,11 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     const float seg = height / (float) leds;
 
     // v2.72.0 (Clement's request): the GR ladders' three tier
-    // boundaries - the expander 0-6-18-36, the compressor 0-5-10-20
-    const float grTier1Db = expander ? 6.0f : 5.0f;
-    const float grTier2Db = expander ? 18.0f : 10.0f;
+    // boundaries - the expander 0-6-18-36, the compressor 0-3-9-18
+    // (v2.73.0, Clement's remark 4: the compressor's full-scale
+    // reduction is 18 dB now)
+    const float grTier1Db = expander ? 6.0f : 3.0f;
+    const float grTier2Db = expander ? 18.0f : 9.0f;
 
     // the LEDs: LED 0 is the lowest on an IN or OUT ladder, the
     // highest on a GR ladder - all three light towards the reading,
@@ -3592,6 +3667,12 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     }
     else
     {
+        // v2.73.0 (Clement's remark 1): the OUT ladder dropped its own
+        // engraved scale - the IN ladder's series beside it serves the
+        // tightened pair, one set of numbers for two ladders
+        if (mode != Mode::input)
+            return;
+
         for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
         {
             const float value = highDb - (float) m * markStep;

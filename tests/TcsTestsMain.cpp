@@ -4567,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 44,
-                "the strip's forty-four parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 45,
+                "the strip's forty-five parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 44,
-                "the strip exposes exactly forty-four parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 45,
+                "the strip exposes exactly forty-five parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5109,8 +5109,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 44,
-                "the restored strip's forty-four parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 45,
+                "the restored strip's forty-five parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5248,8 +5248,8 @@ void testCostesStripSessionDeep()
                         "the expander range restores (the reported knob)");
         }
 
-        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 44,
-                    "the restored strip's forty-four parameters are relayed");
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 45,
+                    "the restored strip's forty-five parameters are relayed");
 
         // a host can restore twice (Studio One's launch sequence does):
         // the second pass re-hosts a fresh strip and re-applies the
@@ -5466,7 +5466,7 @@ void testCostesStripSessionDeep()
                         "the expander range is intact after 50 cycles");
         }
 
-        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 44,
+        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 45,
                     "the cycled strip's parameters stay relayed");
     }
 }
@@ -5744,14 +5744,15 @@ void testCostesStripSectionIcons()
 
 
 
-    // the fourteen dynamics sliders (v2.64.0, the sidechain pair grown
+    // the fifteen dynamics sliders (v2.64.0, the sidechain pair grown
     // to four in v2.66.0): every knob and the sidechain selectors laid
     // out and visible inside the panel after the pass - the stable
-    // slider order's indices 17 to 31, plus the compressor's LINK
-    // selector (v2.72.0) as index 31
+    // slider order's indices 17 to 32, the compressor's LINK selector
+    // (v2.72.0) at index 31, the expander's KNEE selector (v2.73.0)
+    // closing at index 32
     const auto sliders = editor.getStripSliders();
 
-    for (int i = 17; i < 32; ++i)
+    for (int i = 17; i < 33; ++i)
         expectTrue (sliders[(size_t) i]->isVisible()
                         && editor.getLocalBounds().contains (sliders[(size_t) i]->getBounds()),
                     "every dynamics knob and slider is laid out inside the panel");
@@ -5814,19 +5815,19 @@ void testCostesStripSectionIcons()
 
     // v2.70.0 (Clement's remark 3): the GR ladders went LINEAR - one
     // division is one dB everywhere, only the number of divisions
-    // changes: 36 LEDs over the expander's 0 to 36 (v2.72.0), 20 over
-    // the compressor's 0 to 20
+    // changes: 36 LEDs over the expander's 0 to 36 (v2.72.0), 18 over
+    // the compressor's 0 to 18 (v2.73.0, Clement's remark 4)
     expectTrue (meters[2] != nullptr && meters[2]->leds == 36
-                    && meters[5] != nullptr && meters[5]->leds == 20
+                    && meters[5] != nullptr && meters[5]->leds == 18
                     && meters[2]->leds == juce::roundToInt (-meters[2]->lowDb)
                     && meters[5]->leds == juce::roundToInt (-meters[5]->lowDb),
-                "the GR ladders give one LED per dB - 36 over the expander's 0 to 36, 20 over the compressor's 0 to 20");
+                "the GR ladders give one LED per dB - 36 over the expander's 0 to 36, 18 over the compressor's 0 to 18");
 
     // and their engraved scales carry their full value lists (v2.70.0,
     // Clement's remark 3) - more numbers than the old three anchors,
     // drawn positive beside each ladder
     const int expectedExpGrMarks[10] = { 0, 2, 4, 6, 8, 10, 14, 20, 30, 36 };
-    const int expectedCompGrMarks[8] = { 0, 2, 4, 6, 8, 10, 14, 20 };
+    const int expectedCompGrMarks[8] = { 0, 2, 4, 6, 8, 10, 14, 18 };
     bool expMarksMatch = true, compMarksMatch = true;
 
     for (int i = 0; i < 10; ++i)
@@ -5840,37 +5841,38 @@ void testCostesStripSectionIcons()
     expectTrue (expMarksMatch,
                 "the expander's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20, 30, 36");
     expectTrue (compMarksMatch,
-                "the compressor's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20");
+                "the compressor's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 18");
 
     // v2.72.0 (Clement's request): the GR ladders' THREE-TIER geometry -
     // each tier owns exactly a third of the bar. The expander reads
-    // 0-6, 6-18, 18-36 dB, the compressor 0-5, 5-10, 10-20. The pure
-    // mapping is public so the geometry can be pinned exactly: 0 dB is
-    // fraction 0, the first tier boundary exactly a third, the second
-    // two thirds, the ladder's full scale 1.0
+    // 0-6, 6-18, 18-36 dB, the compressor 0-3, 3-9, 9-18 (v2.73.0,
+    // Clement's remark 4). The pure mapping is public so the geometry
+    // can be pinned exactly: 0 dB is fraction 0, the first tier
+    // boundary exactly a third, the second two thirds, the ladder's
+    // full scale 1.0
     expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (0.0f, 36.0f, 6.0f, 18.0f)) < 0.0001f
                     && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (6.0f, 36.0f, 6.0f, 18.0f) - 1.0f / 3.0f) < 0.0001f
                     && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (18.0f, 36.0f, 6.0f, 18.0f) - 2.0f / 3.0f) < 0.0001f
                     && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (36.0f, 36.0f, 6.0f, 18.0f) - 1.0f) < 0.0001f,
                 "the expander's GR ladder puts 0, 6, 18 and 36 dB at the top, the thirds and the bottom");
 
-    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (0.0f, 20.0f, 5.0f, 10.0f)) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (5.0f, 20.0f, 5.0f, 10.0f) - 1.0f / 3.0f) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (10.0f, 20.0f, 5.0f, 10.0f) - 2.0f / 3.0f) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (20.0f, 20.0f, 5.0f, 10.0f) - 1.0f) < 0.0001f,
-                "the compressor's GR ladder puts 0, 5, 10 and 20 dB at the top, the thirds and the bottom");
+    expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (0.0f, 18.0f, 3.0f, 9.0f)) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (3.0f, 18.0f, 3.0f, 9.0f) - 1.0f / 3.0f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (9.0f, 18.0f, 3.0f, 9.0f) - 2.0f / 3.0f) < 0.0001f
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (18.0f, 18.0f, 3.0f, 9.0f) - 1.0f) < 0.0001f,
+                "the compressor's GR ladder puts 0, 3, 9 and 18 dB at the top, the thirds and the bottom");
 
     expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (3.0f, 36.0f, 6.0f, 18.0f) - 1.0f / 6.0f) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (2.5f, 20.0f, 5.0f, 10.0f) - 1.0f / 6.0f) < 0.0001f,
-                "half the first tier sits at the first sixth on BOTH ladders - 3 dB expander, 2.5 dB compressor");
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (1.5f, 18.0f, 3.0f, 9.0f) - 1.0f / 6.0f) < 0.0001f,
+                "half the first tier sits at the first sixth on BOTH ladders - 3 dB expander, 1.5 dB compressor");
 
     expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (12.0f, 36.0f, 6.0f, 18.0f) - 0.5f) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (7.5f, 20.0f, 5.0f, 10.0f) - 0.5f) < 0.0001f,
-                "the second tier's midpoint sits at the half on BOTH ladders - 12 dB expander, 7.5 dB compressor");
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (6.0f, 18.0f, 3.0f, 9.0f) - 0.5f) < 0.0001f,
+                "the second tier's midpoint sits at the half on BOTH ladders - 12 dB expander, 6 dB compressor");
 
     expectTrue (std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (27.0f, 36.0f, 6.0f, 18.0f) - 5.0f / 6.0f) < 0.0001f
-                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (15.0f, 20.0f, 5.0f, 10.0f) - 5.0f / 6.0f) < 0.0001f,
-                "the third tier's midpoint sits at the five-sixths line - 27 dB expander, 15 dB compressor");
+                    && std::abs (CostesStripEditor::DynamicsMeter::grFractionForDb (13.5f, 18.0f, 3.0f, 9.0f) - 5.0f / 6.0f) < 0.0001f,
+                "the third tier's midpoint sits at the five-sixths line - 27 dB expander, 13.5 dB compressor");
 
     {
         bool expMonotonic = true, compMonotonic = true;
@@ -5880,10 +5882,10 @@ void testCostesStripSectionIcons()
                 && CostesStripEditor::DynamicsMeter::grFractionForDb ((float) j, 36.0f, 6.0f, 18.0f)
                    < CostesStripEditor::DynamicsMeter::grFractionForDb ((float) (j + 1), 36.0f, 6.0f, 18.0f);
 
-        for (int j = 0; j < 19; ++j)
+        for (int j = 0; j < 17; ++j)
             compMonotonic = compMonotonic
-                && CostesStripEditor::DynamicsMeter::grFractionForDb ((float) j, 20.0f, 5.0f, 10.0f)
-                   < CostesStripEditor::DynamicsMeter::grFractionForDb ((float) (j + 1), 20.0f, 5.0f, 10.0f);
+                && CostesStripEditor::DynamicsMeter::grFractionForDb ((float) j, 18.0f, 3.0f, 9.0f)
+                   < CostesStripEditor::DynamicsMeter::grFractionForDb ((float) (j + 1), 18.0f, 3.0f, 9.0f);
 
         expectTrue (expMonotonic && compMonotonic,
                     "the three-tier GR geometry never folds back - every rung sits strictly below the one above it, across both tier boundaries");
@@ -6028,10 +6030,11 @@ void testCostesStripKnobDefaultsAndCaps()
     // FREQ/GAIN knobs and width sweeps band by band, then each stage's
     // five knobs and its sidechain pair (v2.66.0: the expander's
     // attack knob became a FAST/SLOW plate; v2.72.0: the compressor's
-    // LINK selector joins as the 32nd control)
+    // LINK selector joins as the 32nd control; v2.73.0: the expander's
+    // KNEE selector closes the array as the 33rd)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[32] =
+    const char* paramIds[33] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
@@ -6040,10 +6043,10 @@ void testCostesStripKnobDefaultsAndCaps()
         "expThreshold", "expRange", "expRelease", "expRatio", "expMix",
         "compThreshold", "compRatio", "compRelease", "compGain", "compMix",
         "compHpf", "compScLpf", "expScHpf", "expScLpf",
-        "compLink"
+        "compLink", "expKnee"
     };
 
-    const float expectedDefaults[32] =
+    const float expectedDefaults[33] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
@@ -6052,12 +6055,12 @@ void testCostesStripKnobDefaultsAndCaps()
         -50.0f, 0.0f, 0.3f, 2.0f, 100.0f,
         0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 16.0f,
         24000.0f, 16.0f, 24000.0f,
-        3.0f
+        3.0f, 0.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[32] =
+    const float perturbed[33] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
@@ -6066,13 +6069,13 @@ void testCostesStripKnobDefaultsAndCaps()
         -22.5f, 18.0f, 1.4f, 7.0f, 35.0f,
         -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f,
         2500.0f, 400.0f, 2500.0f,
-        0.0f
+        0.0f, 16.0f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 32; ++i)
+    for (int i = 0; i < 33; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -7247,6 +7250,264 @@ void testCostesStripCompLinkAndGrTiers()
     }
 }
 
+void testCostesStripKneeAndLayoutTightening()
+{
+    beginTest ("v2.73.0: the expander's KNEE plate, the compressor's 18 dB ceiling, the tightened dynamics layout");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    // ---- the expander's KNEE parameter (Clement's choice, option B):
+    // six even plates - "hard" at rest, the corner every session born
+    // before v2.73 already knows, then 4 / 8 / 12 / 16 / 20 dB ----
+    expectNear (strip->getApvts().getRawParameterValue ("expKnee")->load(), 0.0, 0.0001,
+                "the knee parks at hard (0 dB) - the pre-2.73 corner, bit-exact");
+
+    auto* kneeParam = dynamic_cast<juce::RangedAudioParameter*> (
+        strip->getApvts().getParameter ("expKnee"));
+    expectTrue (kneeParam != nullptr,
+                "the expKnee parameter is a ranged parameter");
+
+    if (kneeParam != nullptr)
+    {
+        expectNear (kneeParam->convertFrom0to1 (1.0f), 20.0, 0.01,
+                    "the knee's last plate tops at 20 dB");
+
+        expectTrue (kneeParam->getText (kneeParam->getValue(), 100) == "hard",
+                    "the readout speaks the plate's own words - \"hard\" at rest");
+
+        expectNear (kneeParam->convertFrom0to1 (kneeParam->getValueForText ("hard")), 0.0, 0.01,
+                    "a typed hard parses back to the parked corner");
+
+        expectNear (kneeParam->convertFrom0to1 (kneeParam->getValueForText ("16 dB")), 16.0, 0.01,
+                    "a typed 16 dB parses to its plate");
+
+        strip->getApvts().getParameterAsValue ("expKnee").setValue (16.0f);
+        expectTrue (kneeParam->getText (kneeParam->getValue(), 100) == "16 dB",
+                    "the readout speaks the plate's number once it leaves hard");
+        strip->getApvts().getParameterAsValue ("expKnee").setValue (0.0f);
+    }
+
+    // ---- the compressor's GAIN rides the same 18 dB ceiling as its
+    // GR ladder's new full scale (Clement's remark 4) ----
+    {
+        auto* compGainParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compGain"));
+
+        expectTrue (compGainParam != nullptr
+                        && std::abs (compGainParam->convertFrom0to1 (1.0f) - 18.0) < 0.01,
+                    "the compressor's GAIN knob tops at 18 dB now");
+
+        if (compGainParam != nullptr)
+            expectNear (compGainParam->convertFrom0to1 (
+                            compGainParam->getValueForText ("19 dB")),
+                        18.0, 0.01,
+                        "a typed 19 dB clamps to the new 18 dB ceiling");
+    }
+
+    // ---- the KNEE's DSP (Clement's choice): the static curve bends
+    // through the threshold's neighbourhood instead of folding at it,
+    // and never touches the deep floor. A 2:1 expansion under a -25 dB
+    // threshold, the range parked wide open: 4 dB under the threshold
+    // the softest knee's parabola reads -4.92 where the hard corner
+    // reads -4.03; above the threshold the soft knee still speaks
+    // 1.60 dB where the hard one is silent; and 18 dB under, past the
+    // whole knee zone, both plates read the same floor ----
+    {
+        auto setParam = [strip] (const char* id, juce::var value)
+        {
+            strip->getApvts().getParameterAsValue (id).setValue (value);
+        };
+
+        setParam ("expThreshold", -25.0f);
+        setParam ("expRatio", 2.0f);
+        setParam ("expRange", 36.0f);
+        setParam ("expMix", 100.0f);
+
+        const int lockinBlocks = 240;
+
+        auto measureAmplitude = [&] (double amplitude) -> double
+        {
+            SineSource src (1000.0, 48000.0, (float) amplitude);
+            juce::AudioBuffer<float> block (2, 480);
+
+            for (int i = 0; i < lockinBlocks; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            const double probeOmega = juce::MathConstants<double>::twoPi * 1000.0 / 48000.0;
+            const double phase0 = probeOmega * (double) (lockinBlocks * 480);
+
+            double c = 0.0, s = 0.0;
+
+            for (int i = 0; i < 480; ++i)
+            {
+                const double phase = phase0 + probeOmega * (double) i;
+                const double sample = block.getSample (0, i);
+                c += sample * std::cos (phase);
+                s += sample * std::sin (phase);
+            }
+
+            return 2.0 * std::sqrt (c * c + s * s) / 480.0;
+        };
+
+        // the tone 4 dB under the threshold (-29.03 dB RMS at 0.05):
+        // the softest knee bends the corner instead of folding it
+        setParam ("expKnee", 20.0f);
+        expectNear (juce::Decibels::gainToDecibels (measureAmplitude (0.05) / 0.05), -4.92, 0.6,
+                    "a 20 dB knee bends the corner - 4 dB under the threshold reads -4.92, not the hard -4.03");
+
+        setParam ("expKnee", 0.0f);
+        expectNear (juce::Decibels::gainToDecibels (measureAmplitude (0.05) / 0.05), -4.03, 0.5,
+                    "the parked hard knee keeps the classic corner arithmetic");
+
+        // the tone above the threshold (-23.01 dB RMS at 0.10): the
+        // soft knee is already at work where the hard one is silent
+        setParam ("expKnee", 20.0f);
+        expectNear (juce::Decibels::gainToDecibels (measureAmplitude (0.10) / 0.10), -1.60, 0.5,
+                    "the soft knee starts working before the threshold - 1.60 dB down above it");
+
+        setParam ("expKnee", 0.0f);
+        expectNear (juce::Decibels::gainToDecibels (measureAmplitude (0.10) / 0.10), 0.0, 0.3,
+                    "the hard corner is silent above the threshold");
+
+        // deep under the whole knee zone (-43.01 dB RMS at 0.01): the
+        // knee hands the curve back to the hard branch untouched
+        setParam ("expKnee", 20.0f);
+        const double deepSoftDb = juce::Decibels::gainToDecibels (measureAmplitude (0.01) / 0.01);
+
+        setParam ("expKnee", 0.0f);
+        const double deepHardDb = juce::Decibels::gainToDecibels (measureAmplitude (0.01) / 0.01);
+
+        expectNear (deepSoftDb, -18.0, 0.6,
+                    "18 dB under the threshold the soft knee reads the same expansion as the hard one");
+
+        expectNear (deepHardDb, -18.0, 0.6,
+                    "the deep floor is the hard curve's own -18 dB");
+
+        expectTrue (std::abs (deepSoftDb - deepHardDb) < 0.3,
+                    "the knee never touches the deep floor");
+    }
+
+    // ---- the tightened layout (Clement's remarks 1, 2, 3 and 5), on
+    // a fresh strip and editor so the pass is the user's own ----
+    CostesStrip stripForLayout;
+    stripForLayout.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editor (stripForLayout);
+
+    // the click probes below ask the editor who sits at a point - and
+    // a bare editor built in the harness carries JUCE's default
+    // INVISIBLE flag, so getComponentAt answers nullptr for every
+    // point and every probe reads as "swallowed". Show it first: the
+    // probes then read exactly the component the peer would hand a
+    // real click to when the strip runs in a host
+    editor.setVisible (true);
+
+    const auto meters    = editor.getDynMeters();
+    const auto plates    = editor.getDynPlateButtons();
+    const auto cutPlates = editor.getCutPlateButtons();
+    const auto sliders  = editor.getStripSliders();
+
+    // remark 1: the meters tightened - the IN ladder keeps the ONE
+    // engraved scale its OUT neighbour shares, so IN stays its own
+    // width and OUT reads from beside it, one even seam apart
+    expectTrue (meters[0] != nullptr && meters[0]->getWidth() == 52
+                    && meters[1] != nullptr && meters[1]->getWidth() == 40
+                    && meters[2] != nullptr && meters[2]->getWidth() == 52,
+                "the expander's meters tightened - IN and GR at 52 px, the OUT at 40 between them");
+
+    expectTrue (meters[3] != nullptr && meters[3]->getWidth() == 52
+                    && meters[4] != nullptr && meters[4]->getWidth() == 40
+                    && meters[5] != nullptr && meters[5]->getWidth() == 52,
+                "the compressor's meters tightened the same way");
+
+    expectTrue (meters[0] != nullptr && meters[1] != nullptr && meters[2] != nullptr
+                    && meters[3] != nullptr && meters[4] != nullptr && meters[5] != nullptr
+                    && meters[1]->getBounds().getX() - meters[0]->getBounds().getRight() == 4
+                    && meters[2]->getBounds().getX() - meters[1]->getBounds().getRight() == 4
+                    && meters[4]->getBounds().getX() - meters[3]->getBounds().getRight() == 4
+                    && meters[5]->getBounds().getX() - meters[4]->getBounds().getRight() == 4,
+                "the three ladders of each stage sit one even 4 px seam apart - close enough to read as one meter");
+
+    // remark 2: FAST ATK and LISTEN stacked as one column
+    expectTrue (plates[0] != nullptr && plates[1] != nullptr
+                    && plates[1]->getBounds().getY() - plates[0]->getBounds().getBottom() >= 0
+                    && plates[1]->getBounds().getY() - plates[0]->getBounds().getBottom() <= 2,
+                "the expander's FAST ATK and LISTEN plates stack with barely a seam between them");
+
+    expectTrue (plates[2] != nullptr && plates[3] != nullptr
+                    && plates[3]->getBounds().getY() - plates[2]->getBounds().getBottom() >= 0
+                    && plates[3]->getBounds().getY() - plates[2]->getBounds().getBottom() <= 2,
+                "the compressor's FAST ATK and LISTEN plates stack the same way");
+
+    // remarks 2 and 5: the LINK and KNEE selectors live under their
+    // stage's LISTEN push - the same 76 px selector geometry the SC
+    // pair wears, its value box reading under it the same way
+    expectTrue (sliders[31] != nullptr && sliders[28] != nullptr && plates[3] != nullptr
+                    && sliders[31]->getBounds().getX() == plates[3]->getBounds().getX()
+                    && sliders[31]->getBounds().getY() > plates[3]->getBounds().getBottom()
+                    && sliders[31]->getWidth() == sliders[28]->getWidth(),
+                "the compressor's LINK slider sits straight under LISTEN, wearing the SC selectors' own geometry");
+
+    expectTrue (sliders[32] != nullptr && sliders[30] != nullptr && plates[1] != nullptr
+                    && sliders[32]->getBounds().getX() == plates[1]->getBounds().getX()
+                    && sliders[32]->getBounds().getY() > plates[1]->getBounds().getBottom()
+                    && sliders[32]->getWidth() == sliders[30]->getWidth(),
+                "the expander's KNEE slider sits straight under LISTEN, wearing the SC selectors' own geometry");
+
+    // and both take their own clicks on their track - the v2.72 LINK
+    // bug was a section label covering the slider and swallowing the
+    // mouse; nothing may sit above either selector now (the probe is
+    // the track's own centre, the half above the value box)
+    if (sliders[31] != nullptr && sliders[32] != nullptr)
+    {
+        expectTrue (editor.getComponentAt (
+                        sliders[31]->getBounds().removeFromTop (18).getCentre()) == sliders[31],
+                    "the LINK slider takes its own clicks on its track - nothing covers it (the v2.72 fix)");
+
+        expectTrue (editor.getComponentAt (
+                        sliders[32]->getBounds().removeFromTop (18).getCentre()) == sliders[32],
+                    "the KNEE slider takes its own clicks on its track too");
+    }
+
+    // remark 3: the cut ON/OFF plates moved to their knob's TOP-LEFT
+    // corner - the plate and its knob share the corner of the column,
+    // and the plate sits ABOVE its knob so the corner's clicks switch
+    // the cut instead of dragging the disc behind it
+    expectTrue (cutPlates[0] != nullptr && sliders[1] != nullptr
+                    && cutPlates[0]->getBounds().getTopLeft() == sliders[1]->getBounds().getTopLeft(),
+                "the HPF's ON/OFF plate sits at its knob's top-left corner");
+
+    expectTrue (cutPlates[1] != nullptr && sliders[2] != nullptr
+                    && cutPlates[1]->getBounds().getTopLeft() == sliders[2]->getBounds().getTopLeft(),
+                "the LPF's ON/OFF plate sits at its knob's top-left corner");
+
+    if (cutPlates[0] != nullptr && cutPlates[1] != nullptr)
+    {
+        expectTrue (editor.getComponentAt (cutPlates[0]->getBounds().getCentre()) == cutPlates[0],
+                    "the HPF's ON/OFF plate takes its own clicks - it sits above its knob, not under it");
+
+        expectTrue (editor.getComponentAt (cutPlates[1]->getBounds().getCentre()) == cutPlates[1],
+                    "the LPF's ON/OFF plate takes its own clicks too");
+    }
+}
+
 void testIntegrationRealConsole()
 {
     beginTest ("integration: real console from the saved plugin database");
@@ -7397,6 +7658,7 @@ int main (int argc, char* argv[])
     testCostesStripDynamics();
     testCostesStripDynamicsMeters();
     testCostesStripCompLinkAndGrTiers();
+    testCostesStripKneeAndLayoutTightening();
 
     if (integration)
         testIntegrationRealConsole();

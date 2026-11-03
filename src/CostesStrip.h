@@ -294,6 +294,7 @@ private:
     std::atomic<float>* expFastAttack = nullptr; // 0.0 / 1.0 (v2.66.0)
     std::atomic<float>* expRelease    = nullptr;
     std::atomic<float>* expRatio      = nullptr;
+    std::atomic<float>* expKnee       = nullptr;  // 0-20 dB in 4 dB plates (v2.73.0)
     std::atomic<float>* expMix        = nullptr;
     std::atomic<float>* expScHpf      = nullptr;  // v2.66.0
     std::atomic<float>* expScLpf      = nullptr;  // v2.66.0
@@ -510,11 +511,12 @@ public:
     // offline test harness: the five row-1 knobs, the two cut slopes,
     // the EQ's FREQ/GAIN knobs and width sweeps band by band, then the
     // expander's five knobs and the compressor's five (both attack
-    // plates are buttons, not sliders, since v2.66.0), and the four
+    // plates are buttons, not sliders, since v2.66.0), the four
     // sidechain selectors - the compressor's SC HPF and SC LPF, the
-    // expander's own pair - plus the compressor's LINK selector
-    // (v2.72.0) as index 31
-    std::array<CostesSlider*, 32> getStripSliders()
+    // expander's own pair - the compressor's LINK selector (v2.72.0)
+    // as index 31, and the expander's KNEE selector (v2.73.0) as
+    // index 32
+    std::array<CostesSlider*, 33> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
@@ -526,7 +528,7 @@ public:
                  &compGainKnob, &compMixKnob,
                  &compHpfSlider, &compScLpfSlider,
                  &expScHpfSlider, &expScLpfSlider,
-                 &compLinkSlider };
+                 &compLinkSlider, &expKneeSlider };
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob, painted
@@ -634,12 +636,14 @@ public:
         // more numbers than the old three anchors, drawn positive
         // beside the ladder. One list per stage, public for the harness
         static constexpr int expGrMarks[10]  { 0, 2, 4, 6, 8, 10, 14, 20, 30, 36 };
-        static constexpr int compGrMarks[8]  { 0, 2, 4, 6, 8, 10, 14, 20 };
+        static constexpr int compGrMarks[8]  { 0, 2, 4, 6, 8, 10, 14, 18 };
 
         // v2.72.0 (Clement's request): the GR ladders' THREE-TIER
         // geometry - each tier owns exactly a THIRD of the ladder. The
         // expander reads 0-6, 6-18 and 18-36 dB (the range itself now
-        // tops at 36 dB), the compressor 0-5, 5-10 and 10-20. The
+        // tops at 36 dB), the compressor 0-3, 3-9 and 9-18 (v2.73.0,
+        // Clement's request - the compressor's full-scale reduction is
+        // 18 dB now). The
         // divisions stay one dB - only their heights change, so the
         // working zone at the top keeps the room. Pure and public so
         // the offline harness can pin the geometry: 0 dB is fraction
@@ -682,6 +686,22 @@ public:
     {
         return { &expInMeter, &expOutMeter, &expGrMeter,
                  &compInMeter, &compOutMeter, &compGrMeter };
+    }
+
+    // v2.73.0: the dynamics plates in stable order - the expander's
+    // FAST ATK and LISTEN, then the compressor's - so the offline
+    // harness can pin their stacked geometry
+    std::array<juce::Button*, 4> getDynPlateButtons()
+    {
+        return { &expFastAttackButton, &expListenButton,
+                 &compFastAttackButton, &compListenButton };
+    }
+
+    // v2.73.0: the two cut ON/OFF plates, for the harness to pin their
+    // top-left corner beside the knob they switch
+    std::array<juce::Button*, 2> getCutPlateButtons()
+    {
+        return { &lowCutOnButton, &highCutOnButton };
     }
 
 private:
@@ -748,9 +768,19 @@ private:
     // v2.72.0 (Clement's request): the compressor's LINK selector - a
     // four-position slider (dual / 50% link / 80% link / link) that
     // blends the two channels' detectors towards the stereo-linked
-    // one. It reads the mode in its own text box and sits in the
-    // compressor block's header, right of the section caption
+    // one. v2.73.0 (Clement's remark 2): it moved out of the block's
+    // header (the section label swallowed its clicks there) into the
+    // bottom row's third cell, right under the LISTEN push, reading
+    // its mode under the slider like the SC selectors
     CostesSlider compLinkSlider;
+
+    // v2.73.0 (Clement's choice, option B): the expander's KNEE
+    // selector - six plates (hard / 4 / 8 / 12 / 16 / 20 dB) that
+    // soften the static curve's corner at the threshold, parked at
+    // "hard" so every session born before v2.73 keeps its classic
+    // corner untouched. It sits under the expander's LISTEN push,
+    // the expander's own third-cell selector
+    CostesSlider expKneeSlider;
 
     juce::Label expThresholdLabel, expRangeLabel;
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
@@ -842,11 +872,14 @@ private:
     // the dynamics meters' instances (v2.65.0, grown in v2.66.0) - the
     // public struct and the harness accessor sit above. Each stage
     // carries its IN and OUT pair over 70 dB (marks every 20) and its
-    // GR ladder on the v2.71.0 TWO-RATE scale: one dB per division as
-    // in v2.70.0, but the first tier of dB owns the fat divisions -
-    // 36 LEDs over the expander's 0 to 36 range (v2.72.0), 20 over
-    // the compressor's 0 to 20 - with the full value lists engraved at
-    // the ladder's right (expGrMarks / compGrMarks)
+    // GR ladder on the THREE-TIER scale (v2.72.0, recut in v2.73.0):
+    // one dB per division as ever, each tier owning exactly a third
+    // - 36 LEDs over the expander's 0 to 36 range (v2.72.0), 18 over
+    // the compressor's 0 to 18 (v2.73.0, Clement's request) - with
+    // the full value lists engraved at the ladder's right
+    // (expGrMarks / compGrMarks). v2.73.0 (Clement's remark 1): only
+    // the IN ladder engraves the shared scale now - the OUT meter's
+    // own copy is gone, the one series serves the tightened pair
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
                                 true, -70.0f, 0.0f, 14, 20.0f, "IN" };
     DynamicsMeter expOutMeter { owner, DynamicsMeter::Mode::output,
@@ -858,7 +891,7 @@ private:
     DynamicsMeter compOutMeter { owner, DynamicsMeter::Mode::output,
                                 false, -70.0f, 0.0f, 14, 20.0f, "OUT" };
     DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
-                                false, -20.0f, 0.0f, 20, 1.0f, "GR" };
+                                false, -18.0f, 0.0f, 18, 1.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
@@ -909,6 +942,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compScLpfAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compListenAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compLinkAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expKneeAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
