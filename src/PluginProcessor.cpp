@@ -597,6 +597,17 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         hostedStrip.processBlock (buffer);
     }
 
+    // v2.67.0 (Clement's remark): the shell's own compressor joins the
+    // Studio One gain-reduction forwarding. When the Costes strip is
+    // the hosted voice, its per-block GR snapshot rides beside the
+    // console's own value (the PreSonus sum contract); any other voice
+    // - a console, or a fresh switch - reports 0.0 so a stale
+    // reading never leaks across the swap
+    if (auto* costes = dynamic_cast<CostesStrip*> (hostedStrip.getActivePlugin()))
+        grForwarder.reportStripGainReductionDb (costes->getCompGrDb());
+    else
+        grForwarder.reportStripGainReductionDb (0.0f);
+
     if (measure)
     {
         lufsOut.process (buffer);

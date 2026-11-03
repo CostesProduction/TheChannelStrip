@@ -153,6 +153,7 @@
 #include "../src/PluginProcessor.h"
 #include "../src/PluginEditor.h"   // v2.19: SpectrumPanel readout statics
 #include "../src/CostesStrip.h"    // v2.55.0: the internal strip's API
+#include "../src/GRForwarder.h"    // v2.67.0: the Studio One GR forwarding
 
 // The plugin entry point is defined in PluginProcessor.cpp but not declared
 // in any header (the wrapper targets pick it up from
@@ -4566,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 23,
-                "the strip's twenty-three parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 43,
+                "the strip's forty-three parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 23,
-                "the strip exposes exactly twenty-three parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 43,
+                "the strip exposes exactly forty-three parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -4966,6 +4967,40 @@ void testCostesStripAudio()
         strip->getApvts().getParameterAsValue ("driveDb").setValue (0.0f);
         strip->getApvts().getParameterAsValue ("driveOversampled").setValue (false);
     }
+
+    // ------------------------------------------------------------------
+    // v2.70.0 (Clement's remarks 4 and 5): the discrete knob feel on
+    // the INPUT front end - the cut corners move in two significant
+    // digits, the tilt and the drive in whole dB, while the trim keeps
+    // its fine 0.1 dB touch
+    // ------------------------------------------------------------------
+    {
+        strip->getApvts().getParameterAsValue ("lowCutHz").setValue (633.0f);
+        expectNear (strip->getApvts().getRawParameterValue ("lowCutHz")->load(), 630.0, 0.0001,
+                    "a low cut corner set to 633 Hz snaps to two significant digits (630)");
+        strip->getApvts().getParameterAsValue ("lowCutHz").setValue (500.0f);
+
+        strip->getApvts().getParameterAsValue ("highCutHz").setValue (17550.0f);
+        expectNear (strip->getApvts().getRawParameterValue ("highCutHz")->load(), 18000.0, 0.0001,
+                    "a high cut corner set to 17550 Hz snaps to two significant digits (18000)");
+        strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
+
+        strip->getApvts().getParameterAsValue ("tiltDb").setValue (3.4f);
+        expectNear (strip->getApvts().getRawParameterValue ("tiltDb")->load(), 3.0, 0.0001,
+                    "the tilt set to 3.4 dB lands on the whole-dB grid at 3");
+        strip->getApvts().getParameterAsValue ("tiltDb").setValue (0.0f);
+
+        strip->getApvts().getParameterAsValue ("driveDb").setValue (6.4f);
+        expectNear (strip->getApvts().getRawParameterValue ("driveDb")->load(), 6.0, 0.0001,
+                    "the drive set to 6.4 dB lands on the whole-dB grid at 6");
+        strip->getApvts().getParameterAsValue ("driveDb").setValue (0.0f);
+
+        // the trim keeps its fine 0.1 dB touch (Clement's remark 5)
+        strip->getApvts().getParameterAsValue ("trimInDb").setValue (3.3f);
+        expectNear (strip->getApvts().getRawParameterValue ("trimInDb")->load(), 3.3, 0.001,
+                    "the trim still moves in its fine 0.1 dB steps");
+        strip->getApvts().getParameterAsValue ("trimInDb").setValue (0.0f);
+    }
 }
 
 void testCostesStripSession()
@@ -4999,11 +5034,21 @@ void testCostesStripSession()
 
     // the EQ section (v2.61.0): a recognisable position on every band -
     // a moved corner on band 1, a gain and a bandwidth on band 2, and
-    // band 4 switched to its shelf
+    // band 4 switched to its shelf. v2.62.0: the bandwidth is one of
+    // the seven legal widths now, so the round-trip is exact
     strip->getApvts().getParameterAsValue ("eq1Hz").setValue (250.0f);
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-3.5f);
-    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.7f);
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.5f);
     strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
+
+    // the dynamics section (v2.64.0): a recognisable position on both
+    // halves - a moved expander threshold and range, and a compressor
+    // ratio, a switched-on FAST ATTACK plate and a moved mix
+    strip->getApvts().getParameterAsValue ("expThreshold").setValue (-35.0f);
+    strip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+    strip->getApvts().getParameterAsValue ("compRatio").setValue (4.0f);
+    strip->getApvts().getParameterAsValue ("compFastAttack").setValue (true);
+    strip->getApvts().getParameterAsValue ("compMix").setValue (60.0f);
 
     juce::MemoryBlock state;
     proc.getStateInformation (state);
@@ -5048,14 +5093,24 @@ void testCostesStripSession()
                     "the EQ band 1 corner restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq2Gain")->load(), -3.5, 0.01,
                     "the EQ band 2 gain restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.7, 0.01,
+        expectNear (rehosted->getApvts().getRawParameterValue ("eq2Oct")->load(), 1.5, 0.01,
                     "the EQ band 2 bandwidth restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq4Bell")->load(), 0.0, 0.01,
                     "the EQ band 4 shelf mode restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("expThreshold")->load(), -35.0, 0.01,
+                    "the expander threshold restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                    "the expander range restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compRatio")->load(), 4.0, 0.01,
+                    "the compressor ratio restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compFastAttack")->load(), 1.0, 0.01,
+                    "the compressor's FAST ATTACK plate restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compMix")->load(), 60.0, 0.01,
+                    "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 23,
-                "the restored strip's twenty-three parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 43,
+                "the restored strip's forty-three parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5146,6 +5201,11 @@ void testCostesStripSectionIcons()
     // and sitting inside the panel after the layout pass
     CostesStripEditor editor (stripProc);
 
+    // v2.67.0 (Clement's remark): the panel adopts the shell's own
+    // minimum window size - the footprint of the consoles it hosts
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 645,
+                "the strip panel opens at the shell's own minimum size (860 x 645)");
+
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
     {
@@ -5177,10 +5237,197 @@ void testCostesStripSectionIcons()
                     && editor.getLocalBounds().contains (eqIcon->getBounds()),
                 "the EQ glyph is laid out inside the panel");
 
+    // v2.70.0 (Clement's remark 9): only the two MID bands keep a free
+    // glyph any more - the two bells, now at the right of their Q
+    // readout's own "oct" - while the outer bands' shelf shapes moved
+    // INSIDE their BELL/SHELF plates
+    const auto bandIcons = editor.getEqBandIcons();
+    const CostesStripEditor::SectionIcon::Icon expectedBandTypes[2] =
+    {
+        CostesStripEditor::SectionIcon::Icon::eq,
+        CostesStripEditor::SectionIcon::Icon::eq
+    };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        expectTrue (bandIcons[(size_t) i] != nullptr
+                        && bandIcons[(size_t) i]->type == expectedBandTypes[i],
+                    "the two mid bands keep their bell glyphs");
+        expectTrue (bandIcons[(size_t) i] != nullptr && bandIcons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (bandIcons[(size_t) i]->getBounds()),
+                    "every mid-band glyph is laid out inside the panel");
+    }
+
+    // the outer bands' BELL/SHELF plates (v2.70.0, Clement's remark 9):
+    // each plate carries its band's own shelf shape inside the button -
+    // the low shelf on band 1, the high shelf on band 4 - laid out and
+    // visible like every other control on the panel
+    const auto modeButtons = editor.getEqModeButtons();
+    const CostesStripEditor::SectionIcon::Icon expectedShelfGlyphs[2] =
+    {
+        CostesStripEditor::SectionIcon::Icon::lowShelf,
+        CostesStripEditor::SectionIcon::Icon::highShelf
+    };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        expectTrue (modeButtons[(size_t) i] != nullptr
+                        && modeButtons[(size_t) i]->shelfGlyph == expectedShelfGlyphs[i],
+                    "the BELL/SHELF plates carry their bands' shelf glyphs inside the button");
+        expectTrue (modeButtons[(size_t) i] != nullptr && modeButtons[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (modeButtons[(size_t) i]->getBounds()),
+                    "every BELL/SHELF plate is laid out inside the panel");
+    }
+
+    // the INPUT section's own written name (v2.70.0, Clement's remarks 5
+    // and 7): the front-end block finally speaks its name on the panel,
+    // centred in the top band over the left half - the signature moved
+    // to the left edge and left the band to it
+    auto* inputLabel = editor.getInputSectionLabel();
+    expectTrue (inputLabel != nullptr && inputLabel->getText() == "INPUT"
+                    && inputLabel->isVisible()
+                    && editor.getLocalBounds().contains (inputLabel->getBounds())
+                    && inputLabel->getBounds().getCentreX() < 380,
+                "the INPUT block carries its name, centred over the left half of the panel");
+
+    // the console front's grain (v2.70.0, Clement's remark 1): a
+    // deterministic 96 x 96 speckle tile baked once at construction,
+    // ready to be tiled over the cream at paint time
+    const auto& grain = editor.getGrainTexture();
+    expectTrue (grain.isValid() && grain.getWidth() == 96 && grain.getHeight() == 96,
+                "the panel bakes a 96 x 96 grain tile for its speckled front");
+
+
+
+    // the fourteen dynamics sliders (v2.64.0, the sidechain pair grown
+    // to four in v2.66.0): every knob and the sidechain selectors laid
+    // out and visible inside the panel after the pass - the stable
+    // slider order's indices 17 to 30
+    const auto sliders = editor.getStripSliders();
+
+    for (int i = 17; i < 31; ++i)
+        expectTrue (sliders[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (sliders[(size_t) i]->getBounds()),
+                    "every dynamics knob and slider is laid out inside the panel");
+
+    // v2.70.0 (Clement's remark 2): the dynamics stages read MIX,
+    // THRESH, RELEASE across the top, RANGE (GAIN on the compressor)
+    // and RATIO across the middle - the stable slider order's indices:
+    // expander MIX 21, THRESH 17, RELEASE 19, RANGE 18, RATIO 20;
+    // compressor MIX 26, THRESH 22, RELEASE 24, GAIN 25, RATIO 23
+    expectTrue (sliders[21] != nullptr && sliders[17] != nullptr && sliders[19] != nullptr
+                    && sliders[18] != nullptr && sliders[20] != nullptr
+                    && sliders[21]->getBounds().getX() < sliders[17]->getBounds().getX()
+                    && sliders[17]->getBounds().getX() < sliders[19]->getBounds().getX()
+                    && sliders[19]->getBounds().getY() < sliders[18]->getBounds().getY()
+                    && sliders[18]->getBounds().getY() == sliders[20]->getBounds().getY(),
+                "the expander reads MIX, THRESH, RELEASE across the top, RANGE and RATIO below");
+    expectTrue (sliders[26] != nullptr && sliders[22] != nullptr && sliders[24] != nullptr
+                    && sliders[25] != nullptr && sliders[23] != nullptr
+                    && sliders[26]->getBounds().getX() < sliders[22]->getBounds().getX()
+                    && sliders[22]->getBounds().getX() < sliders[24]->getBounds().getX()
+                    && sliders[24]->getBounds().getY() < sliders[25]->getBounds().getY()
+                    && sliders[25]->getBounds().getY() == sliders[23]->getBounds().getY(),
+                "the compressor reads MIX, THRESH, RELEASE across the top, GAIN and RATIO below");
+
+    // the mid bells' glyphs sit at the RIGHT of their Q readout
+    // (v2.70.0, Clement's remark 9): the LO MID band's bell hugs the
+    // right edge of the 76 px "oct" box it follows
+    expectTrue (sliders[11] != nullptr && bandIcons[0] != nullptr
+                    && bandIcons[0]->getBounds().getX()
+                        > sliders[11]->getBounds().getCentreX() + 30,
+                "the LO MID bell glyph sits at the right of its own oct readout");
+
+    // the six dynamics meters (v2.65.0, the OUT ladders joined in
+    // v2.66.0): the expander's IN/OUT/GR trio then the compressor's,
+    // each laid out and visible inside the panel - the IN and OUT
+    // ladders together at the stage's left edge, the GR ladder at the
+    // stage's right edge
+    const auto meters = editor.getDynMeters();
+
+    for (int i = 0; i < 6; ++i)
+        expectTrue (meters[(size_t) i] != nullptr && meters[(size_t) i]->isVisible()
+                        && editor.getLocalBounds().contains (meters[(size_t) i]->getBounds()),
+                    "every dynamics meter is laid out inside the panel");
+
+    expectTrue (meters[0] != nullptr && meters[0]->mode == CostesStripEditor::DynamicsMeter::Mode::input
+                    && meters[1] != nullptr && meters[1]->mode == CostesStripEditor::DynamicsMeter::Mode::output
+                    && meters[2] != nullptr && meters[2]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction
+                    && meters[3] != nullptr && meters[3]->mode == CostesStripEditor::DynamicsMeter::Mode::input
+                    && meters[4] != nullptr && meters[4]->mode == CostesStripEditor::DynamicsMeter::Mode::output
+                    && meters[5] != nullptr && meters[5]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction,
+                "the meters come as IN, OUT then GR, stage by stage");
+
+    expectTrue (meters[0] != nullptr && meters[0]->expander
+                    && meters[1] != nullptr && meters[1]->expander
+                    && meters[2] != nullptr && meters[2]->expander
+                    && meters[3] != nullptr && ! meters[3]->expander
+                    && meters[4] != nullptr && ! meters[4]->expander
+                    && meters[5] != nullptr && ! meters[5]->expander,
+                "the first trio reads the expander, the second the compressor");
+
+    // v2.70.0 (Clement's remark 3): the GR ladders went LINEAR - one
+    // division is one dB everywhere, only the number of divisions
+    // changes: 40 LEDs over the expander's 0 to 40, 20 over the
+    // compressor's 0 to 20
+    expectTrue (meters[2] != nullptr && meters[2]->leds == 40
+                    && meters[5] != nullptr && meters[5]->leds == 20
+                    && meters[2]->leds == juce::roundToInt (-meters[2]->lowDb)
+                    && meters[5]->leds == juce::roundToInt (-meters[5]->lowDb),
+                "the GR ladders give one LED per dB - 40 over the expander's 0 to 40, 20 over the compressor's 0 to 20");
+
+    // and their engraved scales carry their full value lists (v2.70.0,
+    // Clement's remark 3) - more numbers than the old three anchors,
+    // drawn positive beside each ladder
+    const int expectedExpGrMarks[10] = { 0, 2, 4, 6, 8, 10, 14, 20, 30, 40 };
+    const int expectedCompGrMarks[8] = { 0, 2, 4, 6, 8, 10, 14, 20 };
+    bool expMarksMatch = true, compMarksMatch = true;
+
+    for (int i = 0; i < 10; ++i)
+        expMarksMatch = expMarksMatch
+            && CostesStripEditor::DynamicsMeter::expGrMarks[i] == expectedExpGrMarks[i];
+
+    for (int i = 0; i < 8; ++i)
+        compMarksMatch = compMarksMatch
+            && CostesStripEditor::DynamicsMeter::compGrMarks[i] == expectedCompGrMarks[i];
+
+    expectTrue (expMarksMatch,
+                "the expander's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20, 30, 40");
+    expectTrue (compMarksMatch,
+                "the compressor's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20");
+
+    // v2.68.0 (Clement's remark): the two stages stand as two VERTICAL
+    // blocks side by side - the expander's whole trio at the LEFT of
+    // the band, the compressor's at the RIGHT, both the same height
+    expectTrue (meters[0] != nullptr && meters[3] != nullptr
+                    && meters[0]->getBounds().getX() < meters[3]->getBounds().getX()
+                    && meters[0]->getHeight() == meters[3]->getHeight()
+                    && meters[2]->getHeight() == meters[5]->getHeight(),
+                "the expander's block sits at the left of the dynamics band, the compressor's at the right, one row tall");
+
+    // the dynamics knobs wear the EQ's own cap colours (v2.68.0,
+    // Clement's remark): the expander the HI MID band's ivory, the
+    // compressor the LO MID band's saturated blue - index 17 is the
+    // expander's THRESH, 22 the compressor's
+    expectTrue (sliders[17] != nullptr
+                    && sliders[17]->findColour (juce::Slider::backgroundColourId)
+                           == juce::Colour (0xffefe0bc),
+                "the expander's knobs wear the HI MID band's saturated ivory cap");
+    expectTrue (sliders[22] != nullptr
+                    && sliders[22]->findColour (juce::Slider::backgroundColourId)
+                           == juce::Colour (0xff6f9fd4),
+                "the compressor's knobs wear the LO MID band's saturated blue cap");
+
+    // the knobs sit smaller than the row-1 columns (v2.68.0, Clement's
+    // remark) - the SSL 500-series density inside the one-row band
+    expectTrue (sliders[17] != nullptr && sliders[0] != nullptr
+                    && sliders[17]->getHeight() < sliders[0]->getHeight(),
+                "the dynamics knobs sit smaller than the row-1 columns");
+
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 880, 380 }, { 400, 120 }, { 3, 3 }, { 2000, 600 } };
+        const int testSizes[][2] = { { 860, 645 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -5196,11 +5443,43 @@ void testCostesStripSectionIcons()
             if (eqIcon != nullptr)
                 eqIcon->paint (g);
 
+            for (auto* icon : bandIcons)
+                icon->paint (g);
+
+
+
+            // the meters paint against degenerate bounds too - an
+            // empty ladder, never a division
+            for (auto* meter : meters)
+                meter->paint (g);
+
             editor.paint (g);
         }
     }
 
-    editor.setSize (880, 380);
+    // the peak hold (v2.67.0, Clement's remark): every ladder takes
+    // its reading's own extreme from the first paint and holds it - a
+    // fresh strip holds silence (the IN and OUT ladders) and unity
+    // (the GR ladders). The degenerate sizes above paint nothing
+    // (the early return), so the first real paint here arms the hold
+    {
+        juce::Image canvas (juce::Image::ARGB, 860, 645, true);
+        juce::Graphics g (canvas);
+
+        for (int i = 0; i < 6; ++i)
+        {
+            meters[(size_t) i]->paint (g);
+
+            const float expected = (i % 3 == 2) ? 0.0f : -120.0f;
+
+            expectTrue (meters[(size_t) i]->holdSet,
+                        "every ladder takes its first peak from its first paint");
+            expectTrue (std::abs (meters[(size_t) i]->getPeakHoldDb() - expected) < 0.01f,
+                        "a fresh strip holds silence on the IN and OUT ladders, unity on the GR ladders");
+        }
+    }
+
+    editor.setSize (860, 645);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -5227,6 +5506,116 @@ void testCostesStripSectionIcons()
                         "every legal order round-trips through its knob step without drift");
         }
     }
+}
+
+void testCostesStripKnobDefaultsAndCaps()
+{
+    beginTest ("v2.63.0: command-click defaults on every knob and slider, and the SSL cap colours");
+
+    CostesStrip stripProc;
+    stripProc.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editor (stripProc);
+
+    // every knob and slider of the strip, in the accessor's stable
+    // order: the five row-1 knobs, the two cut slopes, the EQ's
+    // FREQ/GAIN knobs and width sweeps band by band, then each stage's
+    // five knobs and its sidechain pair (v2.66.0: the expander's
+    // attack knob became a FAST/SLOW plate, so the sliders count 31)
+    const auto sliders = editor.getStripSliders();
+
+    const char* paramIds[31] =
+    {
+        "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
+        "lowCutOrder", "highCutOrder",
+        "eq1Hz", "eq1Gain", "eq2Hz", "eq2Gain", "eq2Oct",
+        "eq3Hz", "eq3Gain", "eq3Oct", "eq4Hz", "eq4Gain",
+        "expThreshold", "expRange", "expRelease", "expRatio", "expMix",
+        "compThreshold", "compRatio", "compRelease", "compGain", "compMix",
+        "compHpf", "compScLpf", "expScHpf", "expScLpf"
+    };
+
+    const float expectedDefaults[31] =
+    {
+        0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
+        2.0f, 2.0f,
+        100.0f, 0.0f, 400.0f, 0.0f, 1.0f,
+        1600.0f, 0.0f, 1.0f, 7200.0f, 0.0f,
+        -50.0f, 0.0f, 0.3f, 2.0f, 100.0f,
+        0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 16.0f,
+        24000.0f, 16.0f, 24000.0f
+    };
+
+    // a legal non-default position per control, so the restore below is
+    // never a no-op
+    const float perturbed[31] =
+    {
+        3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
+        6.0f, 3.0f,
+        250.0f, -3.5f, 1000.0f, 4.0f, 3.0f,
+        2500.0f, -6.0f, 2.0f, 9000.0f, 7.5f,
+        -22.5f, 18.0f, 1.4f, 7.0f, 35.0f,
+        -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f,
+        2500.0f, 400.0f, 2500.0f
+    };
+
+    // ---- the command-click default (Clement's remark 2): every control
+    // knows its default, and the exact path the mouse takes - through
+    // the attachment, into the parameter tree - lands it there ----
+    for (int i = 0; i < 31; ++i)
+    {
+        expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
+                    "every knob and slider carries its command-click default");
+
+        stripProc.getApvts().getParameterAsValue (paramIds[i]).setValue (perturbed[i]);
+        sliders[(size_t) i]->applyCmdClickDefault();
+
+        expectNear (stripProc.getApvts().getRawParameterValue (paramIds[i])->load(),
+                    expectedDefaults[i], 0.0001,
+                    "a command-click restores the parameter's default through the attachment");
+    }
+
+    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 23
+    // rotary knobs carry their band's colour on the
+    // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
+    // red HIGH CUT (v2.63.0), the EQ bands speak the SSL colours, and
+    // the dynamics knobs wear their stage's own colour (v2.68.0,
+    // Clement's remark): the expander borrows the HI MID band's
+    // off-white, the compressor the LO MID band's pastel blue - the
+    // two stages echo the EQ's own palette. The expander's attack
+    // knob became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
+    // loop. The eight linear selectors draw no cap, so they are not in
+    // the loop ----
+    const int knobIndex[23] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
+                               17, 18, 19, 20, 21,
+                               22, 23, 24, 25, 26 };
+    const unsigned int knobCap[23] =
+    {
+        0xff23232au, 0xff23232au, 0xffcd7f6du, 0xff23232au, 0xff23232au,
+        0xff23232au, 0xff23232au,
+        0xff6f9fd4u, 0xff6f9fd4u,
+        0xffefe0bcu, 0xffefe0bcu,
+        0xffcd7f6du, 0xffcd7f6du,
+        0xffefe0bcu, 0xffefe0bcu, 0xffefe0bcu,
+        0xffefe0bcu, 0xffefe0bcu,
+        0xff6f9fd4u, 0xff6f9fd4u, 0xff6f9fd4u,
+        0xff6f9fd4u, 0xff6f9fd4u
+    };
+
+    for (int k = 0; k < 23; ++k)
+        expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
+                        == juce::Colour (knobCap[k]),
+                    "each rotary knob wears its band's cap colour (high cut and HF saturated red, LO MID saturated blue, HI MID saturated ivory, saturated ivory expander, saturated blue compressor)");
+
+    // v2.69.0 (Clement's remark): the MVP and the EQ stand side by
+    // side in one band - the trim knob lives in the left half, the
+    // EQ's first band in the right one, and the two blocks share the
+    // same vertical span instead of stacking
+    expectTrue (sliders[0] != nullptr && sliders[7] != nullptr
+                    && sliders[0]->getBounds().getRight() <= 380
+                    && sliders[7]->getBounds().getX() >= 380
+                    && sliders[7]->getBounds().getY() < sliders[0]->getBounds().getBottom(),
+                "the MVP sits at the left of the band and the EQ beside it - the two blocks share one row");
 }
 
 void testCostesStripEq()
@@ -5325,12 +5714,27 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), 6.0, 0.3,
                 "band 2 bell +6 dB reads +6 dB at its 400 Hz centre");
-    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.3f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 0.12, 0.4,
-                "a 0.3-octave band 2 bell reaches +0.12 dB one octave above its centre");
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.4f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 0.21, 0.4,
+                "a 0.4-octave band 2 bell reaches +0.21 dB one octave above its centre");
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), 3.0, 0.4,
                 "a 2.0-octave band 2 bell reaches +3.00 dB one octave above its centre");
+
+    // v2.62.0 (Clement's remark 1): a narrow bell still reads
+    // exactly its gain at its centre - the widest and the narrowest
+    // legal widths behave the same, an RBJ property. The dip Clement
+    // saw reading ~-3 dB instead of -6 dB on the analyser is the
+    // ANALYSER's own 31-bin frequency smoothing diluting dips narrower
+    // than about half an octave - the filter itself is exact at any
+    // width, and this lock-in probe (immune to that smearing) proves it.
+    // v2.63.0 (remark 1): 0.4 octaves is the narrowest legal width now
+    strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.4f);
+    strip->getApvts().getParameterAsValue ("eq2Gain").setValue (-6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (400.0, 400.0) / unity1k), -6.0, 0.3,
+                "a 0.4-octave band 2 bell at -6 dB still reads EXACTLY -6 dB at its centre");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (800.0, 800.0) / unity1k), -0.21, 0.15,
+                "the same 0.4-octave dip is nearly closed one octave above its centre");
     strip->getApvts().getParameterAsValue ("eq2Gain").setValue (0.0f);
     strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
 
@@ -5368,7 +5772,7 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
 
     // the readouts' own parse plumbing (v2.61.0): a typed "0.50 oct"
-    // lands on the 0.5-octave step, and the shape plate parses its
+    // lands on the nearest legal width, and the shape plate parses its
     // words - "shelf" switches band 1 off its bell, "bell" back on
     auto* eq2OctParam = dynamic_cast<juce::RangedAudioParameter*> (
         strip->getApvts().getParameter ("eq2Oct"));
@@ -5376,8 +5780,48 @@ void testCostesStripEq()
                 "the band 2 bandwidth parameter is a ranged parameter");
 
     if (eq2OctParam != nullptr)
-        expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.5, 0.01,
-                    "a typed 0.50 oct parses to the 0.5-octave bandwidth");
+    {
+        expectNear (eq2OctParam->convertFrom0to1 (eq2OctParam->getValueForText ("0.50 oct")), 0.4, 0.01,
+                    "a typed 0.50 oct parses to the nearest legal width (0.4 oct)");
+
+        // v2.62.0 (Clement's remarks 2-3) / v2.63.0 (remark 1): the
+        // bandwidth sweep runs 0.4 to 4.0 octaves and holds exactly
+        // seven legal widths, spread EQUALLY across the knob travel -
+        // the positions are i/6, not linear in value - and every legal
+        // width round-trips through its normalised step with no drift,
+        // so sessions load exactly as they were saved
+        const float legalWidths[] = { 0.4f, 0.7f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f };
+
+        for (int i = 0; i < 7; ++i)
+        {
+            strip->getApvts().getParameterAsValue ("eq2Oct").setValue (legalWidths[i]);
+
+            expectNear (eq2OctParam->getValue(), (float) i / 6.0f, 0.001,
+                        "the seven legal widths sit at seven EQUAL knob positions (spacing 1/6)");
+            expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(),
+                        legalWidths[i], 0.0001,
+                        "every legal width round-trips through its knob step without drift");
+        }
+
+        // a session value outside the legal set snaps to the nearest
+        // legal width on load - and a tie resolves to the NARROWER width
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (0.2f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 0.4, 0.0001,
+                    "an old 0.2-octave width snaps up to the 0.4-octave step");
+        // 0.85 octaves is NOT an exact tie in float arithmetic
+        // (0.85f sits 6e-8 closer to 1.0f than to 0.7f), so the tie is
+        // proven with 1.25 instead: an EXACT float tie between the
+        // 1.0 and 1.5 steps that must resolve to the NARROWER 1.0
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.25f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 1.0, 0.0001,
+                    "a tie (1.25 oct) snaps to the NARROWER 1.0-octave step");
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (2.5f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq2Oct")->load(), 2.0, 0.0001,
+                    "a tie (2.5 oct) snaps to the NARROWER 2.0-octave step");
+
+        // park the bandwidth back on its default
+        strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
+    }
 
     auto* eq1BellParam = dynamic_cast<juce::RangedAudioParameter*> (
         strip->getApvts().getParameter ("eq1Bell"));
@@ -5391,6 +5835,725 @@ void testCostesStripEq()
         expectNear (eq1BellParam->convertFrom0to1 (eq1BellParam->getValueForText ("bell")), 1.0, 0.01,
                     "a typed bell parses back to the bell shape");
     }
+
+    // ---- v2.70.0 (Clement's remark 4): the discrete knob feel ----
+    // the EQ gains move in exact 0.5 dB steps and the frequencies in
+    // two significant digits - the range itself quantizes both ways,
+    // so every path in (a drag, a typed value, a session, an
+    // automation) lands on the same grid ----
+    {
+        strip->getApvts().getParameterAsValue ("eq1Gain").setValue (3.3f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq1Gain")->load(), 3.5, 0.0001,
+                    "an EQ gain set to 3.3 dB lands on the 0.5 dB grid at 3.5");
+        strip->getApvts().getParameterAsValue ("eq1Gain").setValue (3.2f);
+        expectNear (strip->getApvts().getRawParameterValue ("eq1Gain")->load(), 3.0, 0.0001,
+                    "an EQ gain set to 3.2 dB lands on the 0.5 dB grid at 3.0");
+        strip->getApvts().getParameterAsValue ("eq1Gain").setValue (0.0f);
+
+        auto* eq2HzParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("eq2Hz"));
+        expectTrue (eq2HzParam != nullptr,
+                    "the band 2 frequency parameter is a ranged parameter");
+
+        if (eq2HzParam != nullptr)
+        {
+            strip->getApvts().getParameterAsValue ("eq2Hz").setValue (737.0f);
+            expectNear (strip->getApvts().getRawParameterValue ("eq2Hz")->load(), 740.0, 0.0001,
+                        "an EQ frequency set to 737 Hz snaps to two significant digits (740)");
+            expectNear (eq2HzParam->convertFrom0to1 (eq2HzParam->getValueForText ("737 Hz")), 740.0, 0.01,
+                        "a typed 737 Hz parses onto the same two-significant-digit grid");
+            strip->getApvts().getParameterAsValue ("eq2Hz").setValue (400.0f);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v2.64.0 (Clement's spec, roadmap C3): the dynamics section - the
+// gate/expander and the classic compressor. Every expected value is the
+// float64 simulation of the exact DSP (the 10 ms RMS power detector,
+// the static curves, the attack/release one-poles), measured the
+// harness way: the coherent lock-in on a settled tone. The settle runs
+// 240 blocks (2.4 s) - the expander's release reaches 3 s, so the audio
+// test's short 24-block settle would leave the gain a full
+// time-constant short of its steady state
+// ---------------------------------------------------------------------------
+void testCostesStripDynamics()
+{
+    beginTest ("v2.64.0: the dynamics - expander range/ratio/mix, compressor ratio/gain/mix, the FAST ATTACK plate, the sidechain HPF");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    const int lockinBlocks = 240;
+
+    auto measureAmplitude = [&] (double frequencyHz, double probeHz,
+                                  double amplitude) -> double
+    {
+        SineSource src (frequencyHz, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < lockinBlocks; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        // the source phase at the measured block start: omega times
+        // the total number of samples filled before it
+        const double probeOmega = juce::MathConstants<double>::twoPi * probeHz / 48000.0;
+        const double phase0 = probeOmega * (double) (lockinBlocks * 480);
+
+        double c = 0.0, s = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+        {
+            const double phase = phase0 + probeOmega * (double) i;
+            const double sample = block.getSample (0, i);
+            c += sample * std::cos (phase);
+            s += sample * std::sin (phase);
+        }
+
+        return 2.0 * std::sqrt (c * c + s * s) / 480.0;
+    };
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // the parked defaults are the strip's own identity: the expander
+    // parks at range 0 and the compressor at threshold 0, both halves
+    // are skipped wholesale, and a 1 kHz tone comes out at its own
+    // amplitude (the parked cuts and the identity EQ move 1 kHz by
+    // less than a thousandth of a dB)
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / 0.25), 0.0, 0.2,
+                "the parked dynamics section is a true bypass (bit-skipped at range 0 and threshold 0)");
+
+    // the bypassed references the ratios below read against
+    const double flatRef1k  = measureAmplitude (1000.0, 1000.0, 0.25);
+    const double flatRef05  = measureAmplitude (1000.0, 1000.0, 0.05);
+    const double flatRef100 = measureAmplitude (100.0, 100.0, 0.25);
+
+    // ---- the EXPANDER: a loud tone (-15.05 dB RMS) rides above a -35
+    // dB threshold and must pass untouched even at the deepest gate
+    // settings; a quiet one (-29.03 dB RMS) sits 9.03 dB under the -20
+    // dB threshold, and the expansion reads the ratio arithmetic, the
+    // range clamp and the mix blend straight off the static curve ----
+    setParam ("expThreshold", -35.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.3,
+                "the expander stays fully open above its threshold");
+
+    setParam ("expThreshold", -20.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -40.0, 1.0,
+                "deep under the threshold the expander floors at its RANGE (40 dB)");
+
+    setParam ("expRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -9.0, 0.6,
+                "a 2:1 expansion turns 9 dB under the threshold into 9 dB down");
+
+    setParam ("expRatio", 4.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -27.0, 0.8,
+                "a 4:1 expansion turns 9 dB under the threshold into 27 dB down");
+
+    setParam ("expRatio", 1.2f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -1.8, 0.4,
+                "the gentlest 1.2:1 slope still expands (1.8 dB down)");
+
+    setParam ("expRatio", 2.0f);
+    setParam ("expRange", 5.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -5.0, 0.5,
+                "the RANGE clamps the expansion at its own 5 dB floor");
+
+    setParam ("expRange", 40.0f);
+    setParam ("expMix", 50.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), -3.4, 0.5,
+                "a 50 % mix halves the expansion in the blend (the sim says -3.38 dB)");
+    setParam ("expMix", 100.0f);
+
+    setParam ("expRatio", 12.0f);
+    setParam ("expOn", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.05) / flatRef05), 0.0, 0.3,
+                "the expander's OFF plate bypasses the whole section");
+    setParam ("expOn", true);
+
+    // back to the parked expander: range 0 is the true bypass
+    setParam ("expThreshold", -50.0f);
+    setParam ("expRange", 0.0f);
+    setParam ("expRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
+                "the parked expander (range 0) is a true bypass");
+
+    // ---- the expander's own sidechain pair (v2.66.0, Clement's
+    // remarks D and E): the SC HPF and SC LPF shape what the gate's
+    // detector hears. At their 16 Hz / 24000 Hz rest positions the
+    // pair is hard-bypassed and the detector hears the flat band; a
+    // 1600 Hz SC HPF lifts the 100 Hz bass out of the detector so the
+    // gate floors at its RANGE, and a 100 Hz SC LPF lifts the 1 kHz
+    // tone the same way ----
+    setParam ("expThreshold", -20.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), 0.0, 0.5,
+                "a 100 Hz tone above the gate threshold holds it open (the flat sidechain)");
+
+    setParam ("expScHpf", 1600.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -40.0, 1.5,
+                "a 1600 Hz SC HPF lifts the bass out of the detector - the gate floors at its RANGE");
+    setParam ("expScHpf", 16.0f);
+
+    setParam ("expScLpf", 100.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -40.0, 1.5,
+                "a 100 Hz SC LPF lifts the tone out of the detector - the gate floors at its RANGE");
+    setParam ("expScLpf", 24000.0f);
+
+    // ---- the expander's FAST ATTACK plate (v2.67.0, Clement's
+    // spec): 120 blocks of silence park the detector at its floor and
+    // close the gate at its RANGE, then a single 480-sample tone block
+    // lands. The block's RMS reads how far the gate re-opened inside
+    // its own 10 ms: the sim says -0.44 dB with the 0.3 ms fast attack
+    // (the gate snaps open almost before the tone is through) and
+    // -6.15 dB with the 3 ms slow one ----
+    setParam ("expThreshold", -35.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 12.0f);
+    setParam ("expRelease", 0.1f);
+    setParam ("expMix", 100.0f);
+
+    auto expOnsetRmsDb = [&] (bool fastAttack) -> double
+    {
+        setParam ("expFastAttack", fastAttack);
+
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 120; ++i)
+            proc.processBlock (silence, noMidi);
+
+        SineSource src (1000.0, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 480);
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double energy = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            energy += (double) block.getSample (0, i) * block.getSample (0, i);
+
+        return juce::Decibels::gainToDecibels (std::sqrt (energy / 480.0)
+                                              / (0.25 / std::sqrt (2.0)));
+    };
+
+    expectNear (expOnsetRmsDb (true), -0.4, 1.2,
+                "the expander's FAST attack (0.3 ms) re-opens the gate almost inside the first 10 ms (the sim says -0.44 dB)");
+    expectNear (expOnsetRmsDb (false), -6.2, 1.2,
+                "the expander's SLOW attack (3 ms) lets the tone through half-closed (the sim says -6.15 dB)");
+    setParam ("expRelease", 0.3f);
+
+    // back to the parked expander: range 0 is the true bypass
+    setParam ("expThreshold", -50.0f);
+    setParam ("expRange", 0.0f);
+    setParam ("expRatio", 2.0f);
+
+    // ---- the COMPRESSOR: the loud tone (-15.05 dB RMS) sits 9.95 dB
+    // over a -25 dB threshold, and the reduction reads the ratio
+    // arithmetic straight off the static curve ----
+    setParam ("compThreshold", -25.0f);
+    setParam ("compRatio", 2.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -5.0, 0.6,
+                "a 2:1 compressor turns 9.95 dB over threshold into 4.97 dB down");
+
+    setParam ("compRatio", 20.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -9.5, 0.6,
+                "a 20:1 compressor limits 9.95 dB over threshold to 9.48 dB down");
+
+    setParam ("compRatio", 10.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -9.0, 0.6,
+                "a 10:1 compressor reads between the two");
+
+    setParam ("compRatio", 2.0f);
+    setParam ("compGain", 6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 1.0, 0.7,
+                "the make-up gain rides the wet half (+6 dB on a -4.97 dB reduction)");
+    setParam ("compGain", 0.0f);
+
+    setParam ("compMix", 50.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -2.1, 0.5,
+                "a 50 % mix halves the reduction in the blend (the sim says -2.14 dB)");
+    setParam ("compMix", 100.0f);
+
+    setParam ("compRatio", 20.0f);
+    setParam ("compOn", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.3,
+                "the compressor's OFF plate bypasses the whole section");
+    setParam ("compOn", true);
+
+    // ---- the FAST ATTACK plate (Clement's spec): 120 blocks of
+    // silence park the detector at its floor and the gain open, then a
+    // single 480-sample tone block lands. The block's RMS reads how
+    // much of the reduction engaged inside its own 10 ms: the sim says
+    // -4.6 dB with the 3 ms fast attack and -1.1 dB with the classic
+    // 30 ms - the FAST plate clamps the transient, the SLOW one lets
+    // its point through ----
+    setParam ("compThreshold", -30.0f);
+    setParam ("compRatio", 20.0f);
+    setParam ("compHpf", 16.0f);
+
+    auto onsetRmsDb = [&] (bool fastAttack) -> double
+    {
+        setParam ("compFastAttack", fastAttack);
+
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 120; ++i)
+            proc.processBlock (silence, noMidi);
+
+        SineSource src (1000.0, 48000.0, 0.25f);
+        juce::AudioBuffer<float> block (2, 480);
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double energy = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            energy += (double) block.getSample (0, i) * block.getSample (0, i);
+
+        return juce::Decibels::gainToDecibels (std::sqrt (energy / 480.0)
+                                              / (0.25 / std::sqrt (2.0)));
+    };
+
+    expectNear (onsetRmsDb (true), -4.6, 1.2,
+                "the FAST attack engages most of the reduction inside the first 10 ms (the sim says -4.6 dB)");
+    expectNear (onsetRmsDb (false), -1.1, 1.2,
+                "the SLOW attack lets most of the transient through (the sim says -1.1 dB)");
+
+    // both plates converge on the same steady reduction: 14.95 dB over
+    // threshold at 20:1 is 14.2 dB down (the sim says -14.23)
+    setParam ("compFastAttack", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -14.2, 0.8,
+                "the fast attack settles on the full 14.2 dB reduction");
+    setParam ("compFastAttack", false);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), -14.2, 0.8,
+                "the slow attack settles on the same 14.2 dB reduction");
+
+    // ---- the sidechain HPF (Clement's spec): a 100 Hz tone at -25 dB
+    // threshold and 20:1 compresses with the corner at its 16 Hz rest
+    // position (the honest "off", a flat band since v2.66.0), but a
+    // 1000 Hz corner removes it from the
+    // detector and the compressor opens. The sim pins the exact
+    // reading, Jensen ripple included: -9.86 dB ----
+    setParam ("compThreshold", -25.0f);
+    setParam ("compHpf", 16.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -9.9, 0.9,
+                "the sidechain HPF at its 16 Hz rest position leaves the bass in the detector");
+
+    setParam ("compHpf", 1000.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), 0.0, 0.5,
+                "a 1000 Hz sidechain corner frees the bass from the detector");
+
+    // the compressor's own SC LPF (v2.66.0, remark E): a 100 Hz corner
+    // lifts the 1 kHz tone out of the detector and the compressor
+    // opens - the LPF is the HPF's mirror, its 24000 Hz rest position
+    // a flat band
+    setParam ("compScLpf", 100.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.5,
+                "a 100 Hz SC LPF lifts the tone out of the compressor's detector - it opens");
+    setParam ("compScLpf", 24000.0f);
+
+    // ---- the honest IN ladders (v2.67.0, Clement's remark): the
+    // sidechain corners shape the detector and its GR curve, never
+    // the IN meter - it reads the TRUE full-band input in its own
+    // 10 ms one-pole. A corner that lifts the tone out of the
+    // detector (the old detector-view IN reading sat ~48 dB down)
+    // leaves the IN ladder at the tone's own level ----
+    {
+        setParam ("expScHpf", 1600.0f);
+
+        juce::AudioBuffer<float> tone (2, 480);
+        SineSource (100.0, 48000.0, 0.25f).fill (tone);
+
+        for (int i = 0; i < 10; ++i)
+            proc.processBlock (tone, noMidi);
+
+        expectNear (strip->getExpInDb(), -15.05, 0.6,
+                    "the expander's IN ladder reads the true full-band input - the SC corner never touches it");
+        setParam ("expScHpf", 16.0f);
+
+        setParam ("compScLpf", 100.0f);
+
+        SineSource (1000.0, 48000.0, 0.25f).fill (tone);
+
+        for (int i = 0; i < 10; ++i)
+            proc.processBlock (tone, noMidi);
+
+        expectNear (strip->getCompInDb(), -15.05, 0.6,
+                    "the compressor's IN ladder reads the true full-band input too");
+        setParam ("compScLpf", 24000.0f);
+    }
+
+    // ---- the dry/wet mix is a linear, phase-coherent interpolation
+    // (v2.67.0, Clement's remark): dry and wet are the SAME signal in
+    // phase, so the blend is plain gain-domain arithmetic - out = dry
+    // * (1 - m) + wet * m - and with the wet untouched (the gate open
+    // above its threshold, the compressor below its own) the blend
+    // collapses to exactly 1 at ANY mix position. The proof rides the
+    // harness's own lock-in: the settled amplitude at mix 50 reads
+    // against the same tone at mix 100, and an equal-power law would
+    // sit a full +3.01 dB up instead of the 0.00 dB the linear blend
+    // pins ----
+    {
+        // the expander's half: the loud tone holds the gate open, the
+        // compressor's plate is off so only the expander's blend runs
+        setParam ("compOn", false);
+        setParam ("expThreshold", -35.0f);
+        setParam ("expRange", 40.0f);
+        setParam ("expRatio", 12.0f);
+        setParam ("expMix", 100.0f);
+
+        const double wetRef1k = measureAmplitude (1000.0, 1000.0, 0.25);
+
+        setParam ("expMix", 50.0f);
+
+        expectNear (juce::Decibels::gainToDecibels (
+                        measureAmplitude (1000.0, 1000.0, 0.25) / wetRef1k),
+                    0.0, 0.01,
+                    "the expander's 50 % dry/wet mix leaves the level mathematically constant with the gate open - no equal-power bump");
+
+        // the compressor's half: a quiet tone sits below the
+        // threshold, the reduction is zero, and the same arithmetic
+        // holds on the compressor's own blend
+        setParam ("expRange", 0.0f);
+        setParam ("expMix", 100.0f);
+
+        setParam ("compOn", true);
+        setParam ("compThreshold", -30.0f);
+        setParam ("compRatio", 2.0f);
+        setParam ("compMix", 100.0f);
+
+        const double quietRef1k = measureAmplitude (1000.0, 1000.0, 0.005);
+
+        setParam ("compMix", 50.0f);
+
+        expectNear (juce::Decibels::gainToDecibels (
+                        measureAmplitude (1000.0, 1000.0, 0.005) / quietRef1k),
+                    0.0, 0.01,
+                    "the compressor's 50 % dry/wet mix leaves the level mathematically constant below its threshold - the phase-coherent level never moves");
+    }
+
+    // ---- the strip's own GR reaches Studio One (v2.67.0, Clement's
+    // remark): the forwarder hands the host the console's value PLUS
+    // the strip compressor's per-block snapshot - with no console
+    // hosted the strip's own value is the whole answer, and a reset
+    // to 0 never lets a stale reading leak across a voice swap ----
+    {
+        GRForwarder forwarder;
+        expectNear (forwarder.pullGainReductionDb(), 0.0, 0.0001,
+                    "a fresh forwarder reports silence (the PreSonus contract)");
+        forwarder.reportStripGainReductionDb (-5.5f);
+        expectNear (forwarder.pullGainReductionDb(), -5.5, 0.0001,
+                    "the strip compressor's gain reduction is forwarded to the host");
+        forwarder.reportStripGainReductionDb (0.0f);
+        expectNear (forwarder.pullGainReductionDb(), 0.0, 0.0001,
+                    "the report resets with the voice - a stale reduction never leaks");
+    }
+
+    // ---- the LISTEN plates (v2.66.0, Clement's remark A): while a
+    // plate is lit the strip's voice becomes its own sidechain - the
+    // filtered signal the detector hears - handed to the output in
+    // place of the programme. The compressor's plate wins when both
+    // are lit: the later stage, the last one you reached for ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compHpf", 16.0f);
+    setParam ("compListen", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.4,
+                "the lit LISTEN plate hands the strip's flat sidechain to the output");
+
+    setParam ("compHpf", 1600.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0, 0.25) / flatRef100), -48.0, 3.0,
+                "the monitored sidechain carries its SC HPF's corner (a 2nd-order attenuation)");
+    setParam ("compListen", false);
+
+    setParam ("expListen", true);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.4,
+                "the expander's LISTEN plate speaks the same language on its own stage");
+    setParam ("expListen", false);
+    setParam ("compHpf", 16.0f);
+
+    // ---- the readouts' own parse plumbing: the knob speaks its format
+    // and a typed value lands through the parameter's text functions ----
+    {
+        auto* ratioParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compRatio"));
+        expectTrue (ratioParam != nullptr,
+                    "the compressor ratio parameter is a ranged parameter");
+
+        if (ratioParam != nullptr)
+            expectNear (ratioParam->convertFrom0to1 (ratioParam->getValueForText ("8 : 1")), 8.0, 0.01,
+                        "a typed 8 : 1 ratio parses to 8.0");
+
+        auto* releaseParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compRelease"));
+        expectTrue (releaseParam != nullptr,
+                    "the compressor release parameter is a ranged parameter");
+
+        if (releaseParam != nullptr)
+            expectNear (releaseParam->convertFrom0to1 (releaseParam->getValueForText ("0.50 s")), 0.5, 0.001,
+                        "a typed 0.50 s release parses to half a second");
+
+        auto* expFastParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expFastAttack"));
+        expectTrue (expFastParam != nullptr,
+                    "the expander's FAST ATTACK plate is a ranged parameter");
+
+        if (expFastParam != nullptr)
+            expectNear (expFastParam->convertFrom0to1 (expFastParam->getValueForText ("fast")), 1.0, 0.001,
+                        "a typed fast attack parses to the plate's lit position");
+
+        auto* hpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compHpf"));
+        expectTrue (hpfParam != nullptr,
+                    "the sidechain HPF parameter is a ranged parameter");
+
+        if (hpfParam != nullptr)
+            expectNear (hpfParam->convertFrom0to1 (hpfParam->getValueForText ("400 Hz")), 400.0, 0.01,
+                        "a typed 400 Hz sidechain corner parses to 400 Hz");
+
+        auto* mixParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expMix"));
+        expectTrue (mixParam != nullptr,
+                    "the expander mix parameter is a ranged parameter");
+
+        if (mixParam != nullptr)
+            expectNear (mixParam->convertFrom0to1 (mixParam->getValueForText ("45 %")), 45.0, 0.01,
+                        "a typed 45 % mix parses to 45");
+
+        auto* thresholdParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expThreshold"));
+        expectTrue (thresholdParam != nullptr,
+                    "the expander threshold parameter is a ranged parameter");
+
+        if (thresholdParam != nullptr)
+            expectNear (thresholdParam->convertFrom0to1 (thresholdParam->getValueForText ("-12 dB")), -12.0, 0.01,
+                        "a typed -12 dB threshold parses to -12 dB");
+    }
+
+    // ---- v2.69.0 (Clement's remark): the sidechain corners are
+    // discrete cranks - a set value snaps to its nearest legal
+    // corner, an equidistant tie lands on the gentler filter (the
+    // lower HPF, the higher LPF), and the "off" rest positions parse
+    // back and forth through the selector's own text ----
+    setParam ("expScHpf", 500.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScHpf")->load(), 400.0, 0.01,
+                "an expander SC HPF set between corners snaps to the nearest one (500 Hz -> 400 Hz, the gentler tie)");
+    setParam ("expScHpf", 200.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScHpf")->load(), 200.0, 0.01,
+                "a legal expander SC HPF corner (200 Hz) lands exactly on its own crank");
+    setParam ("expScHpf", 16.0f);
+
+    setParam ("expScLpf", 2500.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScLpf")->load(), 3200.0, 0.01,
+                "an expander SC LPF set between corners snaps to the nearest one (2500 Hz -> 3200 Hz)");
+    setParam ("expScLpf", 12000.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("expScLpf")->load(), 12800.0, 0.01,
+                "a bright expander SC LPF corner snaps up to 12800 Hz");
+    setParam ("expScLpf", 24000.0f);
+
+    {
+        auto* scHpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("expScHpf"));
+        expectTrue (scHpfParam != nullptr,
+                    "the expander SC HPF parameter is a ranged parameter");
+
+        if (scHpfParam != nullptr)
+        {
+            expectNear (scHpfParam->convertFrom0to1 (scHpfParam->getValueForText ("90 Hz")), 90.0, 0.01,
+                        "a typed 90 Hz SC corner parses to its own legal crank");
+            expectNear (scHpfParam->convertFrom0to1 (scHpfParam->getValueForText ("off")), 16.0, 0.01,
+                        "a typed off parses to the flat-band rest position (16 Hz)");
+        }
+
+        auto* scLpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compScLpf"));
+        expectTrue (scLpfParam != nullptr,
+                    "the compressor SC LPF parameter is a ranged parameter");
+
+        if (scLpfParam != nullptr)
+            expectNear (scLpfParam->convertFrom0to1 (scLpfParam->getValueForText ("off")), 24000.0, 0.01,
+                        "a typed off on the SC LPF parses to its own flat-band rest (24000 Hz)");
+    }
+
+    setParam ("compHpf", 1000.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("compHpf")->load(), 800.0, 0.01,
+                "the compressor SC HPF tie at 1000 Hz lands on the gentler lower corner (800 Hz)");
+    setParam ("compHpf", 16.0f);
+
+    // ---- back to the parked defaults: threshold 0, ratio 2, mix 100,
+    // the SC pair at rest (16 Hz / 24000 Hz) - the compressor is
+    // skipped wholesale again ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compHpf", 16.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0, 0.25) / flatRef1k), 0.0, 0.2,
+                "the parked compressor (threshold 0) is a true bypass");
+}
+
+void testCostesStripDynamicsMeters()
+{
+    beginTest ("v2.65.0 (grown in v2.66.0): the dynamics meters - the IN/OUT/GR ladders read the stages' truth, parked or working");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    // the meter readings settle with the same discipline as the audio
+    // checks: 2.4 s of lock-in rides out the 0.3 s releases, and the
+    // meters snapshot the state at the very last sample of the final
+    // block - the sim pins each reading, ripple included
+    const int lockinBlocks = 240;
+
+    auto runTone = [&] (double frequencyHz, double amplitude)
+    {
+        SineSource src (frequencyHz, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < lockinBlocks; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+    };
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- at rest: the IN ladders read the detector's floor (an
+    // EMPTY ladder, never a lying 0 dB) and the GR ladders read unity
+    {
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+        proc.processBlock (silence, noMidi);
+
+        expectNear ((double) strip->getExpInDb(),  -120.0, 0.01,
+                    "a fresh strip's IN ladder reads the detector's floor, never a lying 0 dB");
+        expectNear ((double) strip->getCompInDb(), -120.0, 0.01,
+                    "the compressor's IN ladder starts empty too");
+        expectNear ((double) strip->getExpGrDb(),    0.0, 0.01,
+                    "a fresh strip's GR ladder reads unity");
+        expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
+                    "the compressor's GR ladder starts at unity");
+        expectNear ((double) strip->getExpOutDb(),  -120.0, 0.01,
+                    "a fresh strip's OUT ladder reads the floor, never a lying 0 dB");
+        expectNear ((double) strip->getCompOutDb(), -120.0, 0.01,
+                    "the compressor's OUT ladder starts empty too");
+    }
+
+    // ---- the PARKED defaults: the detectors run even while both
+    // halves are skipped, so the IN ladders track the -15 dB RMS tone
+    // while the GR ladders stay honestly at unity (the sim pins
+    // -15.05 dB, the 10 Hz sidechain's ripple included)
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getExpInDb(),  -15.05, 0.2,
+                "the IN ladder tracks the RMS level even while the section is parked");
+    expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
+                "the compressor's IN ladder hears the same level through its flat sidechain");
+    expectNear ((double) strip->getExpGrDb(),    0.0, 0.01,
+                "a parked expander reports no reduction");
+    expectNear ((double) strip->getCompGrDb(),   0.0, 0.01,
+                "a parked compressor reports no reduction");
+    expectNear ((double) strip->getExpOutDb(),  -15.05, 0.2,
+                "the OUT ladder tracks the level the parked stage leaves behind");
+    expectNear ((double) strip->getCompOutDb(), -15.05, 0.2,
+                "the compressor's OUT ladder hears the same untouched level");
+
+    // ---- the expander working: a -29 dB RMS tone sits 9 dB under
+    // the -20 dB threshold, the 2:1 expansion pulls 9 dB down, and the
+    // COMPRESSOR's IN ladder hears the gated signal - the stages
+    // cascade in the metering exactly as they do in the audio path
+    setParam ("expThreshold", -20.0f);
+    setParam ("expRange", 40.0f);
+    setParam ("expRatio", 2.0f);
+    runTone (1000.0, 0.05);
+
+    expectNear ((double) strip->getExpInDb(), -29.03, 0.2,
+                "the IN ladder reads the quiet tone's RMS level");
+    expectNear ((double) strip->getExpGrDb(),  -9.0, 0.25,
+                "the GR ladder reads the 2:1 expansion working on a signal 9 dB under the threshold");
+    expectNear ((double) strip->getCompInDb(), -38.03, 0.25,
+                "the compressor's IN ladder hears the GATED signal - the stages cascade");
+    expectNear ((double) strip->getCompGrDb(), 0.0, 0.01,
+                "the parked compressor still reports no reduction while it listens");
+    expectNear ((double) strip->getExpOutDb(), -38.03, 0.25,
+                "the expander's OUT ladder reads the level after its 9 dB gate");
+    expectNear ((double) strip->getCompOutDb(), -38.03, 0.25,
+                "the compressor's OUT ladder hears the same gated level (it is parked)");
+
+    // ---- the expander's OFF plate: the audio bypasses the section
+    // and the GR ladder snaps open with it - no stale reading
+    setParam ("expOn", false);
+    runTone (1000.0, 0.05);
+
+    expectNear ((double) strip->getExpGrDb(), 0.0, 0.01,
+                "the OFF plate snaps the GR ladder open - no stale reduction");
+    setParam ("expOn", true);
+    setParam ("expRange", 0.0f);
+
+    // ---- the compressor working: 9.95 dB over a -25 dB threshold at
+    // 2:1 is a 4.98 dB reduction (the sim pins -4.98, the detector's
+    // 2f ripple included)
+    setParam ("compThreshold", -25.0f);
+    setParam ("compRatio", 2.0f);
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getCompGrDb(), -4.98, 0.25,
+                "the GR ladder reads the 2:1 reduction");
+    expectNear ((double) strip->getCompInDb(), -15.05, 0.2,
+                "the IN ladder still reads the level at the detector");
+    expectNear ((double) strip->getExpOutDb(), -15.05, 0.25,
+                "the parked expander's OUT ladder still reads the untouched tone");
+    expectNear ((double) strip->getCompOutDb(), -20.03, 0.25,
+                "the compressor's OUT ladder reads the level after its 4.98 dB reduction");
+
+    // ---- the compressor's OFF plate: the same snap to unity
+    setParam ("compOn", false);
+    runTone (1000.0, 0.25);
+
+    expectNear ((double) strip->getCompGrDb(), 0.0, 0.01,
+                "the compressor's OFF plate snaps its GR ladder to unity");
+    setParam ("compOn", true);
+
+    // ---- back to the parked defaults ----
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
 }
 
 void testIntegrationRealConsole()
@@ -5536,7 +6699,10 @@ int main (int argc, char* argv[])
     testCostesStripSession();
     testCostesStripMigration();
     testCostesStripSectionIcons();
+    testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();
+    testCostesStripDynamics();
+    testCostesStripDynamicsMeters();
 
     if (integration)
         testIntegrationRealConsole();

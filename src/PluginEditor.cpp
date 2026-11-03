@@ -2360,14 +2360,21 @@ void TheChannelStripAudioProcessorEditor::resized()
     //      the bottom ----
     int y = zoneY;
 
+    // ---- v2.63.0 (Clement's remark 5): the ANALYSER button pinned at
+    //      the VERY TOP of the sidebar - the title follows right under
+    //      it, and the rest of the v2.37 order is untouched below. ----
+    analyserToggle.setBounds (sideX, y, sw, 26);
+    y += 26 + 8;
+
     titleLabel.setBounds (sideX, y, sw, 32);
     y += 36;  // v2.38.0 (Clement): less air between title and presets
 
     // ---- v2.37.0 (Clement's proposal, v2.36 follow-up): the sidebar
-    //      reads top to bottom as title, presets + consoles (the
-    //      consoles a preset belongs to, together), logo, analyser
-    //      section, gain staging, then the name & alarm block above the
-    //      pinned Rescan row. ----
+    //      reads top to bottom as the analyser toggle, title, presets +
+    //      consoles (the consoles a preset belongs to, together), logo,
+    //      gain staging, then the name & alarm block above the
+    //      pinned Rescan row. v2.63.0 (Clement's remark 5): the analyser
+    //      toggle moved from the logo's block to the very top. ----
 
     // ---- v2.26 (roadmap point 4): the presets section (a heading, the
     //      global preset list, then one row of icon buttons).
@@ -2404,30 +2411,20 @@ void TheChannelStripAudioProcessorEditor::resized()
     const int alarmY  = rescanY - 42;   // 40 px zone, ends 2 px above Rescan
     const int nameY   = alarmY - 22;
 
-    // ---- block heights: logo + analyser 96 (58 logo, 4 inner gap, 34
-    //      analyser toggle + its trailing gap - v2.52: the Fast/Slow
-    //      and tilt rows moved onto the analyser strip, freeing 77 px
-    //      that now breathe into the three block gaps), gain staging
-    //      105 (heading + IN/OUT + correction + the v2.57.0 CPU row);
-    //      the leftover splits into the gaps. ----
-    const int leftover = (nameY - y) - (96 + 105);
+    // ---- block heights: the logo 62 (58 logo + its 4 px trailing
+    //      gap - v2.63.0: the analyser toggle moved to the very top of
+    //      the sidebar, its 34 px given to the first block, so the
+    //      leftover that breathes into the block gaps is unchanged),
+    //      gain staging 105 (heading + IN/OUT + correction + the
+    //      v2.57.0 CPU row); the leftover splits into the gaps. ----
+    const int leftover = (nameY - y) - (62 + 105);
     const int gap      = juce::jmax (4, leftover / 3);
 
     // ---- block 2: the frame-free monochrome logo (one click to the
-    //      contact card) with the analyser section right under it. ----
+    //      contact card). ----
     y += gap;
     studioLogo.setBounds (sideX, y, sw, 58);
     y += 58 + 4;
-
-    // ---- v2.8: show/hide the analyser strip. v2.37.0 (Clement's
-    //      design): the toggle carries the section heading - the
-    //      "ANALYSER" label and the spectrum glyph share the button,
-    //      saving the v2.36 heading row. Same toggle behaviour: blue
-    //      when the analyser strip is shown. v2.52 (point B): the
-    //      section keeps ONLY this toggle - the tilt and Fast/Slow
-    //      buttons live on the analyser strip itself now. ----
-    analyserToggle.setBounds (sideX, y, sw, 26);
-    y += 26 + 8;
 
     // (v2.52: the Fast/Slow row and the TILT label + button row that
     // lived here moved onto the analyser strip - SpectrumPanel's own
@@ -3449,8 +3446,10 @@ public:
 
         // v2.40.0 (Clement): the studio lines are gone, and "Ingénieur
         // Centrale Nantes" now comes before the DJ Network certification.
+        // v2.63.0 (Clement): the diploma year joins the degree - 2014,
+        // the same year style the DJ Network certification carries.
         frLabel.setText (juce::String (juce::CharPointer_UTF8 ("Ingénieur son : prise de son, mixage & mastering.\n"
-                                                "Ingénieur Centrale Nantes - Certifié DJ Network 2022.")),
+                                                "Ingénieur Centrale Nantes 2014 - Certifié DJ Network 2022.")),
                          juce::dontSendNotification);
         frLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
         frLabel.setJustificationType (juce::Justification::centred);
@@ -3460,8 +3459,9 @@ public:
         // v2.40.0: studio lines gone, Centrale Nantes first - and the
         // translation now renders at the SAME SIZE as the French block
         // (was 11 px); the italic + grey still tell the two apart.
+        // v2.63.0 (Clement): the diploma year, 2014, here too.
         enLabel.setText ("Sound engineer: recording, mixing & mastering.\n"
-                         "Engineer, Centrale Nantes - DJ Network certified 2022.",
+                         "Engineer, Centrale Nantes 2014 - DJ Network certified 2022.",
                          juce::dontSendNotification);
         enLabel.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::italic)));
         enLabel.setJustificationType (juce::Justification::centred);

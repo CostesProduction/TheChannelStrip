@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.61.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.69.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -151,12 +151,13 @@ them in a clean, focused workflow:
   plugin is actually visible and usable. The layout is a **condensed left
   sidebar + centre column, nothing else** (v2.4): the sidebar reads as
   one column of four blocks with an identical vertical space between
-  them (v2.39.0) — (1) the shell's title, PRESETS and the nine console
-  buttons pinned at the top; (2) the frame-free Costes logo (which
-  opens a contact card) with the ANALYSER section right under it (its
-  toggle carries the heading: "ANALYSER" and the spectrum glyph share
-  the button — since v2.52.0 it is the section's only control: the
-  tilt and response-speed buttons live on the analyser strip itself); (3) GAIN STAGING
+  them (v2.39.0) — (1) the ANALYSER button (v2.63.0: pinned at the very
+  top of the sidebar; its toggle carries the heading: "ANALYSER" and
+  the spectrum glyph share the button — since v2.52.0 the tilt and
+  response-speed buttons live on the analyser strip itself), the
+  shell's title, PRESETS and the nine console buttons pinned at the
+  top; (2) the frame-free Costes logo (which
+  opens a contact card); (3) GAIN STAGING
   (LUFS/delta readouts); (4) the hosted name with its alarm zone glued
   to the Rescan / Doctor row at the bottom; the centre column is used only by the
   analyzer strip and the hosted plugin itself. The frame around
@@ -309,6 +310,287 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.70.0** — *The grained front, the discrete knobs, and the
+  linear gain-reduction ladders.*
+  Following Clement's nine remarks on the v2.69 panel:
+  - **The console front is grained.** A deterministic 96 px speckle
+    tile - one dark speckle in eight, one light one, each at a
+    whisper of alpha - bakes once at construction and tiles over
+    the cream at paint time: the painted-steel finish of a real
+    module, identical every launch (Clement's remark 1).
+  - **The dynamics stages read MIX, THRESH, RELEASE.** Release moved
+    up beside mix and threshold on both stages; the expander carries
+    RANGE and RATIO across the middle, the compressor GAIN and RATIO
+    (remark 2).
+  - **The GR ladders are linear.** One division is one dB
+    everywhere, only the number of divisions changes - 40 LEDs over
+    the expander's 0 to 40, 20 over the compressor's 0 to 20 - and
+    the engraved scales grew to their full value lists, drawn
+    positive: 0, 2, 4, 6, 8, 10, 14, 20, 30, 40 on the expander,
+    0, 2, 4, 6, 8, 10, 14, 20 on the compressor (remark 3).
+  - **The knobs are discrete.** The EQ gains step in 0.5 dB, every
+    frequency knob (the EQ corners and both cut corners) in two
+    significant digits, the tilt and the drive in whole dB - the
+    quantization lives in the parameter range itself, so a drag, a
+    typed value, a session and an automation all land on the same
+    grid, while the trim keeps its fine 0.1 dB touch (remarks 4
+    and 5).
+  - **The plates say the whole word.** FAST ATK / SLOW ATK on the
+    attack plates, no ATTACK caption under them; the LISTEN caption
+    is gone too - the push is clear enough on its own (remark 6).
+  - **The INPUT section speaks its name.** The front-end block
+    (trim, cuts, tilt, drive) is the channel's INPUT, the SSL
+    idiom - its name sits centred in the top band over the left
+    half. The COSTES CONSOLE signature left the band and reads
+    along the panel's LEFT EDGE, rotated a quarter turn the way a
+    real console silkscreens its name down the side of its input
+    module (remark 7).
+  - **The rules follow the blocks.** The stray horizontal rule that
+    crossed the two LISTEN plates is gone; a vertical rule now
+    separates the expander's block from the compressor's, the
+    mirror of the INPUT/EQ divider above (remark 8).
+  - **The EQ glyphs sit where they belong.** The shelf shapes ride
+    inside their BELL/SHELF plates - the low shelf on band 1, the
+    high shelf on band 4, the bell bump when the plate reads BELL -
+    and the two mid bells hug the right edge of their own "oct"
+    readout (remark 9).
+
+- **2.69.0** — *The engraved signature, the saturated caps, and the
+  MVP beside the EQ.*
+  Following Clement's seven remarks on the v2.68 panel:
+  - **The name plate is an engraved silkscreen.** The dark chip is
+    gone; the brand reads straight off the cream like an SL 4000's
+    own front panel - a dotted rule, the Costes seismic line, COSTES
+    in dark engraving, CONSOLE in dim caps, all in one 26 px band
+    (Clement's pick P2 of the five proposals).
+  - **The saturated caps (variant A).** The pastel EQ hues read
+    washed-out against the cream; the LO MID cap speaks a full
+    saturation blue, the HI MID a warm ivory, the HF (and the HIGH
+    CUT) a saturated red - the expander and compressor follow their
+    own bands' retint.
+  - **The OFF plates speak white.** A dark push button's caption now
+    draws in the plate's own cream instead of dim grey - EQ OFF,
+    BELL/SHELF, FAST/SLOW, LISTEN and the cut plates read at a
+    glance.
+  - **The sidechain corners are discrete cranks.** The SC HPF reads
+    off / 40 / 60 / 90 / 120 / 150 / 200 / 250 / 300 / 400 / 600 /
+    800 / 1200 / 1600 Hz and the SC LPF 120 / 150 / 200 / 250 / 300 /
+    400 / 600 / 800 / 1200 / 1600 / 3200 / 6400 / 12800 Hz / off,
+    one legal corner per step like the slope selectors, a tie landing
+    on the gentler filter; a pre-2.69 session snaps to its nearest
+    corner, and the readout says "off" at the rest positions.
+  - **The meters read above their ladder.** The IN, OUT and GR
+    captions sit centred straight up from the LED column; the peak
+    hold grew thicker on every ladder (3.4 px on the GR bar, 2.4 on
+    the IN/OUT markers); and the GR ladders' engraved scale finally
+    agrees with its own LEDs - 0 at the top, the hinge (10 dB / 6 dB)
+    at the exact middle, the floor at the bottom, a true 50/50.
+  - **The MVP and the EQ stand side by side.** The left 380 px stack
+    the MVP's five sections as two sub-rows (TRIM, TONE and DRIVE
+    across the top, the two cuts across the bottom), the right 480 px
+    read the EQ's four bands as a 2 x 2 grid (LF | LO MID over
+    HI MID | HF), an engraved vertical divider between them - the
+    whole band one row tall, the panel still 860 x 645.
+- **2.68.0** — *Two dynamics blocks, standing side by side.*
+  Following Clement's remarks on the v2.67 layout:
+  - **The dynamics band is one row of two VERTICAL blocks.** The
+    expander owns the left half, the compressor the right; each block
+    carries its IN and OUT ladders at its left edge, its GR ladder at
+    its right, and a 3 x 3 control grid between them - MIX, THRESH,
+    RATIO across the top, RELEASE, RANGE (GAIN on the compressor) and
+    the FAST/SLOW plate across the middle, the SC HPF and SC LPF
+    selectors and the LISTEN push across the bottom. The panel drops
+    from 860 x 911 to 860 x 645; the row-1 band and the EQ sit a
+    touch tighter too, and the dynamics knobs are smaller - the SSL
+    500-series density.
+  - **The caps speak the EQ's own colours.** The expander's knobs
+    wear the HI MID band's off-white, the compressor's the LO MID
+    band's pastel blue - the two stages identify at a glance.
+  - **The dynamics glyphs are gone.** The v2.67 knob glyphs never
+    read right and are removed wholesale; the sections speak through
+    their captions, their cap colours and their ladders alone.
+  - **The GR peak hold is a thick pastel-blue bar** - the LO MID
+    colour - so the held reduction reads across the orange LEDs; the
+    IN and OUT ladders keep their cream hairline.
+
+- **2.67.0** — *The stages read like the hardware they imitate.*
+  Following Clement's remarks on the v2.66 layout:
+  - **Honest IN ladders.** The IN meters now read the TRUE full-band
+    level each stage receives, in their own 10 ms one-pole - the
+    sidechain corners still shape the detector (and the GR curve),
+    but an IN ladder can no longer read below its OUT twin just
+    because a corner shaved the detector's band.
+  - **Peak hold.** Every ladder (IN, OUT and GR) holds its extreme
+    - the loudest level, the deepest reduction - for 3 s, then
+    glides back to the live reading at 20 dB/s. The marker is a
+    cream hairline across the ladder, bending at the hinge on the
+    two-half GR scale.
+  - **The knob skirt.** Every full-size knob prints its range's end
+    values at the arc's own ends, SSL silkscreen style - bare
+    numbers trimmed from the knob's own value formatting ("+10",
+    "12:1", "16 Hz" reads "16"). The little sidechain selectors
+    keep their clean skirts.
+  - **A glyph on every dynamics knob.** MIX, THRESHOLD, RATIO,
+    RELEASE, RANGE, GAIN and the sidechain pair each carry their
+    own 16 px vector glyph beside their caption - the same language
+    as the row-1 knobs, so both stages identify at a glance.
+  - **The strip compressor's GR reaches Studio One.** The shell
+    already forwarded the hosted console's gain reduction through
+    PreSonus' IGainReductionInfo extension; its own compressor now
+    joins it - the strip reports its per-block GR, summed with the
+    console's per the PreSonus contract, reset to 0 the moment
+    another voice takes the slot.
+  - **The expander's attack plate speaks the J.** FAST is now
+    0.3 ms and SLOW 3 ms (the compressor keeps its own 3 ms / 30 ms
+    pair - the gate has to beat it to the punch).
+  - **The panel adopts the shell's own minimum size**, 860 x 911 -
+    the footprint of the consoles it hosts, so switching between
+    the strip and a console keeps the desk stable. The taller stages
+    breathe for it.
+
+- **2.66.0** — *The two dynamics stages speak the same language.*
+  Following Clement's remarks A to F on the v2.65 layout:
+  - **A shared stage layout.** Both stages carry the SAME control set
+    in the SAME order: the IN and OUT ladders together at the left
+    edge (marked IN and OUT - the level the section hears and the
+    level it leaves behind), then MIX, THRESHOLD, RATIO and RELEASE,
+    then a vertical block with the FAST/SLOW attack plate, the SC HPF
+    and SC LPF selectors and the LISTEN push, then RANGE on the
+    expander / GAIN on the compressor, and the GR ladder at the
+    right.
+  - **The expander's attack became a plate.** The old 0.5-100 ms knob
+    is gone; the gate now speaks the compressor's own language - a
+    FAST/SLOW plate, 1 ms lit / 30 ms dark. Sessions saved with the
+    old knob find no value and load FAST (its old default). The
+    expander and the compressor read identically at a glance.
+  - **Two-half GR scales.** The GR ladders carry the J's segmented
+    scale: 0-10-40 dB on the expander (the top half of the ladder
+    reads the working region wide), 0-6-20 dB on the compressor.
+  - **A sidechain pair per stage.** The SC HPF sweeps 16-1600 Hz and
+    the SC LPF 100-24000 Hz (both 12 dB/oct biquads); their rest
+    positions - 16 Hz and 24000 Hz - are hard bypasses, so the
+    parked strip stays bit-exact and every existing reading holds.
+    The compressor's own SC HPF moved from its old 10-1000 Hz range
+    to the shared 16-1600 Hz.
+  - **LISTEN plates.** One push per stage: while it is lit the
+    strip's voice becomes its own sidechain - the filtered signal
+    the detector hears - handed to the output in place of the
+    programme (the compressor's plate wins when both are lit).
+  - **Stage colours.** The expander's knobs wear the HI MID band's
+    off-white cap, the compressor's the LO MID band's pastel blue -
+    the two stages echoing the EQ's own palette.
+
+- **2.65.0** — *The dynamics grow into two stages, each with its own
+  SSL meters.* Following Clement's photos of a real SSL 9000 J
+  dynamics section:
+  - **Two stages instead of one cramped row.** The expander and the
+    compressor each own a FULL row of the panel (six and seven wide
+    columns instead of the thirteen 80-px ones), separated by an
+    engraved silkscreen line like the J's own two dynamics halves.
+    The panel grows from 1040x600 to **1040x800**.
+  - **An IN ladder per stage.** A vertical LED meter at the LEFT of
+    each row - right beside the THRESHOLD knob, so setting a
+    threshold against the actual programme level reads naturally.
+    It shows the stereo-linked RMS level the section's own detector
+    hears, on a -70 to 0 dB scale (green, the top segments amber).
+    The compressor's IN ladder reads through its sidechain HPF, so
+    it shows the level the compressor will actually act on.
+  - **A GR ladder per stage.** The classic reduction meter at the
+    RIGHT of each row: 0 dB at the top, growing down in the SSL's
+    reduction orange - 40 dB of span for the expander (its RANGE),
+    20 for the compressor, one LED per 2 dB.
+  - **Metering never waits for the plates.** The detectors now run
+    unconditionally: a parked or OFF section still reads its input
+    level, and its GR ladder snaps to unity the moment the section
+    stops working - no stale readings. The gain arithmetic stays
+    gated exactly as before, so the parked strip still processes
+    sample-for-sample identically to v2.63.
+  - **The ladders repaint at 30 Hz** straight off the per-block
+    snapshots - the detectors are already smoothed (10 ms RMS,
+    attack/release one-poles), so no display ballistics are needed.
+- **2.64.0** — *Roadmap C3: the strip grows its dynamics stage.* The
+  internal Costes channel strip gains a full dynamics row (a third
+  control row, panel resized to 1040x600) between its EQ and its tilt,
+  built as two classic halves:
+  - **Expander/gate.** THRESHOLD (-70 to 0 dB, default -50), RANGE
+    (0 to 40 dB, how far the gate can pull signal down at most),
+    ATTACK (0.5 to 100 ms, default 1 ms - a fast, controlled gate
+    needs its own attack so slow transients do not click open),
+    RELEASE (0.1 to 3 s, default 0.3), RATIO (1.2 to 12) and a MIX
+    knob (0-100 % wet, so the pull-down can be parallelled like an
+    upward expander blend). Detection is a true-RMS power detector
+    (one-pole, 10 ms time constant) on the stereo-linked signal:
+    unlike a peak or 2f-ripple detector it does not pump on bass.
+    The gain curve is the static expander law smoothed in the dB
+    domain with separate attack/release one-poles: below threshold,
+    the target is -(threshold - level) * (ratio - 1), clamped to
+    RANGE.
+  - **Compressor.** THRESHOLD (-60 to 0 dB), RATIO (1 to 20),
+    RELEASE (0.05 to 1.5 s, default 0.25), a **FAST attack plate**
+    (3 ms) versus the classic 30 mm-style slow program attack
+    (30 ms), MAKEUP GAIN (0 to +20 dB, applied to the compressed
+    path only), MIX (0-100 %) and a **sidechain HPF** (10 to
+    1000 Hz, Q = 1/sqrt(2) RBJ biquad on the detector path only,
+    default 10 Hz = honestly off) so big kick tails stop sucking
+    the bass out of the program. Same RMS stereo-linked detector;
+    gain engages with the attack time and recovers with the
+    release.
+  - **Honest bypass.** Both sections are bit-exact neutral at
+    their defaults (and for any pre-2.64 session, whose dynamics
+    parameters all read as defaults): when a section is off, its
+    range is zero or its mix is dry, its stage is skipped
+    entirely, so the strip processes sample-for-sample exactly
+    as v2.63 did.
+  - **Both halves get an ON/OFF plate** in the row header, new
+    engraved section glyphs (expander and compressor transfer
+    curves), and full cmd-click-to-default + session persistence
+    on every new control. The check relay now reports **38
+    checks** (up from 23; 709 in the test suite).
+- **2.63.1**
+  - **Test-only patch, no behaviour change.** The bandwidth tie test
+    used 0.85 octaves, which is *not* an exact tie in float arithmetic
+    (0.85f is 6e-8 closer to 1.0f than to 0.7f), so the snap to 1.0 was
+    legitimate and the expectation wrong. The tie now rests on 1.25
+    octaves — an exact float tie between 1.0 and 1.5 — and still
+    resolves to the **narrower** 1.0 step, alongside the existing
+    exact 2.5 → 2.0 tie.
+- **2.63.0**
+  - **New bandwidth steps.** The Costes strip's EQ width selector now
+    holds **0.4 / 0.7 / 1 / 1.5 / 2 / 3 / 4 octaves** — the same seven
+    equal knob positions, re-centred on the useful widths (a stale
+    session width snaps to the nearest legal one; an exact tie resolves
+    to the narrower step).
+  - **Command-click back to default.** A **cmd-click** on any knob or
+    slider of the Costes strip parks it back on its default value —
+    the same default as double-click, and the linear selectors
+    (slopes, bandwidths) gain the behaviour too.
+  - **The diploma year on the contact card.** Clicking the logo now
+    reads « Ingénieur Centrale Nantes **2014** — Certifié DJ Network
+    2022 » (and its English translation).
+  - **The HIGH CUT knob wears the pastel red cap**, matching the EQ's
+    HF band.
+  - **The ANALYSER button moved to the very top of the sidebar** — the
+    title follows right under it, the rest of the order is untouched.
+- **2.62.0**
+  - **Seven equal bandwidth steps on the Costes strip's EQ.** The mid
+    bells' Q knob now runs **0.1 to 3.0 octaves** in exactly seven legal
+    widths — **0.1, 0.3, 0.5, 1, 1.5, 2, 3 oct** — spread **equally
+    across the knob travel** (the positions are i/6, not linear in
+    value), the same equal-step construction the cut slopes use.
+    Sessions saved by 2.61.x are safe: a bandwidth outside the new set
+    snaps to the nearest legal one on load (0.2 → 0.1, 0.7 → 0.5).
+  - **A very narrow bell is exact.** The narrow 0.1-octave step reads
+    exactly its gain at its centre (asserted by the harness): a dip that
+    *looks* shallower on the analyser is the analyser's own frequency
+    smoothing diluting dips narrower than about half an octave — the
+    filter itself is exact at any width.
+  - **SSL band colours.** The EQ knobs wear their band's colour: LF
+    keeps the black aluminium cap, LO MID a pastel blue, HI MID an
+    off-white, HF a pastel red, with a pointer that flips dark on the
+    bright caps.
+  - **Band glyphs.** Each EQ band carries a small engraved icon under
+    its selector: the LF low-shelf response, the two mid bells and the
+    HF high shelf.
 - **2.61.0**
   - **A four-band SSL-style EQ on the Costes strip.** The internal Costes
     channel strip grows an EQ section between its cuts and its tilt,

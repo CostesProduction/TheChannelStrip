@@ -288,12 +288,23 @@ public:
 
     double pullGainReductionDb() const
     {
+        // v2.67.0 (Clement's remark): the console's GR plus the strip
+        // compressor's own - the PreSonus contract asks for the sum
+        // when several stages reduce gain, and the strip reports 0.0
+        // whenever it is not the hosted voice (the processor resets
+        // the value on every block it does not host the strip)
         const juce::ScopedLock grLockRef (grLock);
 
-        if (consoleGainReduction != nullptr)
-            return consoleGainReduction->getGainReductionValueInDb();
+        const double consoleGr = (consoleGainReduction != nullptr)
+            ? consoleGainReduction->getGainReductionValueInDb()
+            : 0.0;
 
-        return 0.0;
+        return consoleGr + (double) stripGainReductionDb.load (std::memory_order_relaxed);
+    }
+
+    void reportStripGainReductionDb (float grDb)
+    {
+        stripGainReductionDb.store (grDb, std::memory_order_relaxed);
     }
 
     VST3Extensions extensions;
@@ -334,6 +345,11 @@ private:
     Steinberg::Vst::IEditController* consoleEditController = nullptr;
     Presonus::IGainReductionInfo*    consoleGainReduction   = nullptr;
 
+    // v2.67.0: the strip compressor's own gain reduction, reported per
+    // block by the processor (0.0 whenever the Costes strip is not the
+    // hosted voice) and summed into the console's value on the pull
+    std::atomic<float> stripGainReductionDb { 0.0f };
+
     juce::CriticalSection swapGuard;              // serialises connect/disconnect
     mutable juce::CriticalSection grLock;        // protects the three pointers
 };
@@ -359,6 +375,11 @@ void GRForwarder::connect (juce::AudioPluginInstance& instance)
 void GRForwarder::disconnect()
 {
     pimpl->disconnect();
+}
+
+void GRForwarder::reportStripGainReductionDb (float grDb)
+{
+    pimpl->reportStripGainReductionDb (grDb);
 }
 
 double GRForwarder::pullGainReductionDb() const
