@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.69.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.70.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,30 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.70.1** — *The session-restore deep tests, and the strip state
+  diagnostics.*
+  Following Clement's Studio One report - some strip knobs coming
+  back wrong at every song reopen (an SC LPF back at 120 Hz, the
+  expander range back at 40 dB):
+  - **Every reported knob now rides a regression test.** Five new
+    test blocks drive the four sidechain corners and the expander
+    range through the exact paths a host adds around a restore: a
+    double restore with the same state, the away-and-back
+    per-ident memory, an open editor, a second restore after it
+    closes, and fifty save/restore cycles as a byte-identical
+    fixed point. A pre-2.69 continuous corner (812.4 Hz) also
+    verifies it snaps to its nearest legal corner, never to a
+    ladder's end.
+  - **The session restore publishes what it restored.** The moment
+    a song's blob lands on the strip, the status line prints the
+    four sidechain corners and the expander range exactly as they
+    were applied - wrong here means the blob itself was already
+    corrupt when the host handed it over.
+  - **The doctor report watches the strip.** The shell's doctor
+    (the logo) gains a "costes strip" section: the live corners
+    and range next to what the last session restore published -
+    the pair pinpoints the moment a value is lost, blob versus
+    post-restore.
 - **2.70.0** — *The grained front, the discrete knobs, and the
   linear gain-reduction ladders.*
   Following Clement's nine remarks on the v2.69 panel:

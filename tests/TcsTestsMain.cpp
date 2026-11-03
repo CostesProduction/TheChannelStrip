@@ -5188,6 +5188,289 @@ void testCostesStripMigration()
                 "the migrated OFF plate survives a re-save");
 }
 
+// v2.70.1: Clement's Studio One report - some strip parameters come
+// back wrong at every song reopen (an SC LPF back at 120 Hz, the
+// expander range back at 40 dB). The v2.59 session test covers the
+// trim, the cuts, the EQ and a couple of dynamics knobs, but never the
+// sidechain selectors; these blocks drive the exact reported knobs
+// through the paths a host adds around a restore: a second restore
+// with the same state, the away-and-back per-ident memory, an open
+// editor, and the save/restore fixed point. If any of these fail, the
+// printed reading (got vs expected) IS the diagnosis.
+void testCostesStripSessionDeep()
+{
+    // ---- 1: the four SC corners and the expander range ride the
+    //          shell's own blob, and a host's SECOND restore with the
+    //          same state keeps them too ----
+    beginTest ("v2.70.1: the SC corners and the expander range survive the roundtrip (and a double restore)");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted before the save");
+
+    if (strip != nullptr)
+    {
+        strip->getApvts().getParameterAsValue ("compHpf").setValue (90.0f);
+        strip->getApvts().getParameterAsValue ("compScLpf").setValue (800.0f);
+        strip->getApvts().getParameterAsValue ("expScHpf").setValue (150.0f);
+        strip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+        // expScLpf stays at its 24000 Hz "off" rest position: the
+        // untouched rest position must ride the blob untouched too
+
+        juce::MemoryBlock state;
+        proc.getStateInformation (state);
+        expectTrue (state.getSize() > 0, "the session state is non-empty");
+
+        TheChannelStripAudioProcessor restored;
+        restored.prepareToPlay (48000.0, 512);
+        restored.setStateInformation (state.getData(), (int) state.getSize());
+
+        expectTrue (restored.isCostesStripActive(),
+                    "the restore re-hosts the internal strip");
+
+        auto* rehosted = dynamic_cast<CostesStrip*> (restored.getHostedStrip().getActivePlugin());
+        expectTrue (rehosted != nullptr, "the restored strip is reachable");
+
+        if (rehosted != nullptr)
+        {
+            expectNear (rehosted->getApvts().getRawParameterValue ("compHpf")->load(), 90.0, 0.01,
+                        "the compressor's 90 Hz SC HPF corner restores");
+            expectNear (rehosted->getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                        "the compressor's 800 Hz SC LPF corner restores (the reported knob)");
+            expectNear (rehosted->getApvts().getRawParameterValue ("expScHpf")->load(), 150.0, 0.1,
+                        "the expander's 150 Hz SC HPF corner restores");
+            expectNear (rehosted->getApvts().getRawParameterValue ("expScLpf")->load(), 24000.0, 0.1,
+                        "the expander's untouched SC LPF rest position restores as off");
+            expectNear (rehosted->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                        "the expander range restores (the reported knob)");
+        }
+
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 43,
+                    "the restored strip's forty-three parameters are relayed");
+
+        // a host can restore twice (Studio One's launch sequence does):
+        // the second pass re-hosts a fresh strip and re-applies the
+        // same blob - every knob must still be where the session left it
+        restored.setStateInformation (state.getData(), (int) state.getSize());
+
+        auto* rehosted2 = dynamic_cast<CostesStrip*> (restored.getHostedStrip().getActivePlugin());
+        expectTrue (rehosted2 != nullptr, "the strip is re-hosted by the second restore");
+
+        if (rehosted2 != nullptr)
+        {
+            expectNear (rehosted2->getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                        "the SC LPF corner survives a second restore with the same state");
+            expectNear (rehosted2->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                        "the expander range survives a second restore with the same state");
+        }
+    }
+
+    // ---- 2: a pre-2.69 continuous corner snaps to its nearest legal
+    //          corner on load - never to the ladder's ends ----
+    beginTest ("v2.70.1: a pre-2.69 continuous SC corner snaps to its nearest legal corner, never the ends");
+
+    CostesStrip agedStrip;
+    agedStrip.prepareToPlay (48000.0, 512);
+
+    juce::MemoryBlock agedState;
+    agedStrip.getStateInformation (agedState);
+
+    auto agedXml = juce::AudioProcessor::getXmlFromBinary (agedState.getData(),
+                                                           (int) agedState.getSize());
+    expectTrue (agedXml != nullptr, "the strip state parses as XML");
+
+    if (agedXml != nullptr)
+    {
+        // the v2.68 way: continuous log-spaced values that sit BETWEEN
+        // two legal corners, and the old span's own floor (100 Hz)
+        for (int i = 0; i < agedXml->getNumChildElements(); ++i)
+        {
+            auto* child = agedXml->getChildElement (i);
+            const auto id = child->getStringAttribute ("id");
+
+            if (id == "compScLpf")
+                child->setAttribute ("value", "812.4");
+            else if (id == "expRange")
+                child->setAttribute ("value", "33.37");
+        }
+
+        juce::MemoryBlock aged;
+        juce::AudioProcessor::copyXmlToBinary (*agedXml, aged);
+        expectTrue (aged.getSize() > 0, "the aged session state is non-empty");
+
+        CostesStrip loaded;
+        loaded.prepareToPlay (48000.0, 512);
+        loaded.setStateInformation (aged.getData(), (int) aged.getSize());
+
+        expectNear (loaded.getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                    "an aged 812.4 Hz continuous corner snaps to the 800 Hz legal corner");
+        expectNear (loaded.getApvts().getRawParameterValue ("expRange")->load(), 33.4, 0.01,
+                    "an aged 33.37 dB range snaps onto the 0.1 dB grid at 33.4");
+
+        // the old span's floor: 100 Hz is legal in the pre-2.69
+        // continuous range but BELOW the first corner now - it must
+        // clamp UP to 120 Hz, not park anywhere else
+        for (int i = 0; i < agedXml->getNumChildElements(); ++i)
+        {
+            auto* child = agedXml->getChildElement (i);
+
+            if (child->getStringAttribute ("id") == "compScLpf")
+                child->setAttribute ("value", "100");
+        }
+
+        juce::MemoryBlock agedFloor;
+        juce::AudioProcessor::copyXmlToBinary (*agedXml, agedFloor);
+        expectTrue (agedFloor.getSize() > 0, "the floor-aged session state is non-empty");
+
+        CostesStrip loadedFloor;
+        loadedFloor.prepareToPlay (48000.0, 512);
+        loadedFloor.setStateInformation (agedFloor.getData(), (int) agedFloor.getSize());
+
+        expectNear (loadedFloor.getApvts().getRawParameterValue ("compScLpf")->load(), 120.0, 0.1,
+                    "the old span's 100 Hz floor clamps up to the first legal corner (120 Hz)");
+    }
+
+    // ---- 3: the away-and-back per-ident memory keeps every knob ----
+    beginTest ("v2.70.1: switching away and back keeps every knob (the per-ident memory)");
+
+    TheChannelStripAudioProcessor memoryProc;
+    memoryProc.prepareToPlay (48000.0, 512);
+    memoryProc.toggleCostesStrip();
+
+    auto* hosted = dynamic_cast<CostesStrip*> (memoryProc.getHostedStrip().getActivePlugin());
+    expectTrue (hosted != nullptr, "the strip is hosted for the memory test");
+
+    if (hosted != nullptr)
+    {
+        hosted->getApvts().getParameterAsValue ("compScLpf").setValue (3200.0f);
+        hosted->getApvts().getParameterAsValue ("expRange").setValue (12.5f);
+        hosted->getApvts().getParameterAsValue ("expScHpf").setValue (90.0f);
+
+        memoryProc.toggleCostesStrip();   // away: the state is remembered
+        memoryProc.toggleCostesStrip();   // and back: the memory applies
+
+        auto* back = dynamic_cast<CostesStrip*> (memoryProc.getHostedStrip().getActivePlugin());
+        expectTrue (back != nullptr, "the strip is re-hosted by the second toggle");
+
+        if (back != nullptr)
+        {
+            expectNear (back->getApvts().getRawParameterValue ("compScLpf")->load(), 3200.0, 0.1,
+                        "the away-and-back memory keeps the SC LPF corner");
+            expectNear (back->getApvts().getRawParameterValue ("expRange")->load(), 12.5, 0.01,
+                        "the away-and-back memory keeps the expander range");
+            expectNear (back->getApvts().getRawParameterValue ("expScHpf")->load(), 90.0, 0.1,
+                        "the away-and-back memory keeps the SC HPF corner");
+        }
+    }
+
+    // ---- 4: an editor opened on the restored strip, and a second
+    //          restore after it closes - the exact GUI-timing paths ----
+    beginTest ("v2.70.1: an open editor never disturbs the restored knobs");
+
+    TheChannelStripAudioProcessor editorProc;
+    editorProc.prepareToPlay (48000.0, 512);
+    editorProc.toggleCostesStrip();
+
+    auto* editorStrip = dynamic_cast<CostesStrip*> (editorProc.getHostedStrip().getActivePlugin());
+    expectTrue (editorStrip != nullptr, "the strip is hosted before the editor-open save");
+
+    if (editorStrip != nullptr)
+    {
+        editorStrip->getApvts().getParameterAsValue ("compScLpf").setValue (800.0f);
+        editorStrip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+
+        juce::MemoryBlock editorState;
+        editorProc.getStateInformation (editorState);
+
+        TheChannelStripAudioProcessor editorRestored;
+        editorRestored.prepareToPlay (48000.0, 512);
+        editorRestored.setStateInformation (editorState.getData(), (int) editorState.getSize());
+
+        auto* restoredStrip = dynamic_cast<CostesStrip*> (editorRestored.getHostedStrip().getActivePlugin());
+
+        if (restoredStrip != nullptr)
+        {
+            // the GUI opens on the freshly restored strip: the slider
+            // attachments' initial sync must pull, never push
+            {
+                CostesStripEditor editor (*restoredStrip);
+
+                expectNear (restoredStrip->getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                            "the SC LPF corner is untouched by the editor's opening");
+                expectNear (restoredStrip->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                            "the expander range is untouched by the editor's opening");
+            }
+
+            // the editor is gone, THEN the host restores again (a
+            // reopen with the GUI already visited): same blob, same
+            // knobs
+            editorRestored.setStateInformation (editorState.getData(), (int) editorState.getSize());
+        }
+
+        auto* afterEditor = dynamic_cast<CostesStrip*> (editorRestored.getHostedStrip().getActivePlugin());
+        expectTrue (afterEditor != nullptr, "the strip is re-hosted after the editor's cycle");
+
+        if (afterEditor != nullptr)
+        {
+            expectNear (afterEditor->getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                        "the SC LPF corner survives the editor cycle and the second restore");
+            expectNear (afterEditor->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                        "the expander range survives the editor cycle and the second restore");
+        }
+    }
+
+    // ---- 5: fifty save / restore cycles with the real strip are a
+    //          byte-identical fixed point ----
+    beginTest ("v2.70.1: fifty save / restore cycles are a byte-identical fixed point with the real strip");
+
+    TheChannelStripAudioProcessor cycleProc;
+    cycleProc.prepareToPlay (48000.0, 512);
+    cycleProc.toggleCostesStrip();
+
+    auto* cycleStrip = dynamic_cast<CostesStrip*> (cycleProc.getHostedStrip().getActivePlugin());
+    expectTrue (cycleStrip != nullptr, "the strip is hosted before the fixed-point cycles");
+
+    if (cycleStrip != nullptr)
+    {
+        cycleStrip->getApvts().getParameterAsValue ("compScLpf").setValue (800.0f);
+        cycleStrip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+        cycleStrip->getApvts().getParameterAsValue ("expScHpf").setValue (150.0f);
+
+        juce::MemoryBlock reference;
+        cycleProc.getStateInformation (reference);
+
+        bool fixedPoint = true;
+
+        for (int n = 0; n < 50; ++n)
+        {
+            juce::MemoryBlock saved;
+            cycleProc.getStateInformation (saved);
+            fixedPoint = fixedPoint && saved == reference;
+
+            cycleProc.setStateInformation (saved.getData(), (int) saved.getSize());
+        }
+
+        expectTrue (fixedPoint,
+                    "50 save / restore cycles are a byte-identical fixed point");
+
+        auto* cycledStrip = dynamic_cast<CostesStrip*> (cycleProc.getHostedStrip().getActivePlugin());
+
+        if (cycledStrip != nullptr)
+        {
+            expectNear (cycledStrip->getApvts().getRawParameterValue ("compScLpf")->load(), 800.0, 0.1,
+                        "the SC LPF corner is intact after 50 cycles");
+            expectNear (cycledStrip->getApvts().getRawParameterValue ("expRange")->load(), 20.0, 0.01,
+                        "the expander range is intact after 50 cycles");
+        }
+
+        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 43,
+                    "the cycled strip's parameters stay relayed");
+    }
+}
+
 void testCostesStripSectionIcons()
 {
     beginTest ("v2.60.0: the five section icons and the equally spaced slope knob");
@@ -6698,6 +6981,7 @@ int main (int argc, char* argv[])
     testCostesStripAudio();
     testCostesStripSession();
     testCostesStripMigration();
+    testCostesStripSessionDeep();
     testCostesStripSectionIcons();
     testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();

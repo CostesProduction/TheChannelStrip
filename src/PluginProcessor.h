@@ -356,6 +356,13 @@ public:
     // and writes it to a file next to the plugin database.
     juce::String buildDoctorReport();
 
+    // v2.70.1: what the last session restore applied to the internal
+    // strip, as published the moment its blob landed (see the restore
+    // branch of instantiateCostesStrip). The doctor report prints it
+    // next to the strip's live reading - the pair pinpoints whether a
+    // value was already wrong when the blob landed. Thread-safe.
+    juce::String getLastRestoreSummary() const;
+
     // v2.16.1: the latency currently forwarded to the host (the editor
     // logs it to the Terminal whenever it changes).
     int getForwardedLatency() const { return lastReportedLatency; }
@@ -485,6 +492,12 @@ private:
     juce::String hostStatus;
     juce::MemoryBlock savedHostedStateForRestore; // uses reset()/append(): MemoryBlock has no clear()
     std::atomic<bool> pendingRestore { false };
+
+    // v2.70.1: the summary the last session restore published when its
+    // blob landed on the hosted strip (see costesStripSummary in
+    // the .cpp and getLastRestoreSummary for the public read).
+    juce::String lastRestoreSummary;
+    mutable juce::CriticalSection restoreSummaryLock;
     std::atomic<bool> scanning { false };
     std::atomic<float> tiltDb { -4.5f };
 

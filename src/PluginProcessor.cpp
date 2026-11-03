@@ -31,6 +31,46 @@ struct HostedStatePushGuard
     std::atomic<bool>& f;
 };
 
+// v2.70.1: the four sidechain selectors and the expander range read
+// back in the panel's own language (Clement's Studio One report: some
+// strip knobs come back wrong at every song reopen - an SC LPF back
+// at 120 Hz and, likely, the expander range back at 40 dB). Reads the four
+// sidechain selectors and the expander range straight from the strip's
+// own parameters, in the panel's language - "off" at the rest positions,
+// plain hertz and tenths of a dB elsewhere - so the status line the
+// session restore publishes, and the doctor report's live reading, can
+// be compared against what the knobs actually show without touching a
+// single control.
+static juce::String costesStripSummary (CostesStrip& strip)
+{
+    const auto value = [&strip] (const char* id)
+    {
+        if (auto* p = strip.getApvts().getRawParameterValue (id))
+            return p->load();
+
+        return 0.0f;
+    };
+
+    const auto hpfText = [] (float v)
+    {
+        return v < 16.5f ? juce::String ("off")
+                        : juce::String (juce::roundToInt (v)) + " Hz";
+    };
+    const auto lpfText = [] (float v)
+    {
+        return v > 23999.5f ? juce::String ("off")
+                            : juce::String (juce::roundToInt (v)) + " Hz";
+    };
+
+    juce::String s;
+    s << "comp SC HPF " << hpfText (value ("compHpf"))
+      << ", comp SC LPF " << lpfText (value ("compScLpf"))
+      << ", exp SC HPF " << hpfText (value ("expScHpf"))
+      << ", exp SC LPF " << lpfText (value ("expScLpf"))
+      << ", range " << juce::String (value ("expRange"), 1) << " dB";
+    return s;
+}
+
 static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -373,6 +413,26 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
     else
     {
         report << "  none\n";
+    }
+
+    // v2.70.1: when the hosted console is the internal strip, its four
+    // sidechain corners and the expander range are printed straight
+    // from the live parameters (the doctor opens without touching a
+    // single knob), next to what the last session restore published
+    // the moment its blob landed - the pair pinpoints where a value
+    // was lost if a song ever comes back wrong again.
+    if (auto* strip = dynamic_cast<CostesStrip*> (hostedStrip.getActivePlugin()))
+    {
+        const auto restoreSummary = getLastRestoreSummary();
+
+        report << "\n"
+               << "costes strip:\n"
+               << "  now:      " << costesStripSummary (*strip) << "\n"
+               << "  restored: "
+               << (restoreSummary.isEmpty()
+                       ? juce::String ("(no session restore since launch)")
+                       : restoreSummary)
+               << "\n";
     }
 
     report << "\n"
@@ -1597,6 +1657,16 @@ void TheChannelStripAudioProcessor::parameterValueChanged (int, float)
 
 void TheChannelStripAudioProcessor::parameterGestureChanged (int, bool) {}
 
+// v2.70.1: the doctor report prints this next to the strip's live
+// reading - the pair pinpoints whether a value was already wrong when
+// the session blob landed (see the restore branch of
+// instantiateCostesStrip and costesStripSummary above).
+juce::String TheChannelStripAudioProcessor::getLastRestoreSummary() const
+{
+    const juce::ScopedLock lock (restoreSummaryLock);
+    return lastRestoreSummary;
+}
+
 // ---------------------------------------------------------------------------
 // v2.11: per-console settings memory. Switching consoles destroys and
 // re-creates the hosted plugin, which reset every knob to factory
@@ -2409,6 +2479,25 @@ void TheChannelStripAudioProcessor::instantiateCostesStrip (bool applyPendingSta
 
             const juce::ScopedLock lock (consoleStateLock);
             consoleStates[targetIdent] = savedHostedStateForRestore;
+        }
+
+        // v2.70.1: read the four sidechain corners and the expander
+        // range back the moment the session blob has landed, and
+        // publish them - the status line right after a reopen, and the
+        // doctor report later. If a song ever comes back with its knobs
+        // moved again, this splits the fault in two: wrong HERE means
+        // the blob itself was already corrupt when the host handed it
+        // over (the save path, or the host's own state stream); right
+        // HERE but wrong on the panel means something after the restore
+        // (a second restore, the editor, the host) is at fault.
+        if (auto* restoredNow = dynamic_cast<CostesStrip*> (hostedStrip.getActivePlugin()))
+        {
+            const auto summary = costesStripSummary (*restoredNow);
+
+            logHostStatus ("Session restore: " + summary);
+
+            const juce::ScopedLock summaryLock (restoreSummaryLock);
+            lastRestoreSummary = summary;
         }
 
         savedHostedStateForRestore.reset();
