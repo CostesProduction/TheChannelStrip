@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.70.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.70.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,30 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.70.2** — *The host now hears every state change.* Clement's
+  Studio One report: after turning knobs inside the shell (consoles or
+  the Costes strip), the song was never marked modified - "Save"
+  stayed greyed out - while any other plugin's knobs saved fine. The
+  cause is structural: the shell exposes **zero parameters to the
+  DAW** (by design, everything lives inside its own state blob), so
+  the host had no signal that anything had changed.
+  - **Every state-changing action now notifies the host** through
+    JUCE's official channel for non-parameter state changes
+    (`updateHostDisplay` with `nonParameterStateChanged`), which the
+    VST3 wrapper translates into `setDirty (true)` - the exact
+    mechanism Steinberg provides for "this plugin has unsaved
+    changes". Covered: knob moves in the hosted consoles and the
+    Costes strip, console switches, strip on/off, tilt / dB-div /
+    response-speed / loudness-reference / analyser-visibility
+    settings, and every preset action (save, save-as, load, delete).
+  - **The session restore stays silent.** Reopening a song never
+    marks it dirty - every restore and preset push runs behind the
+    same guard that keeps the preset "*" tracking clean, so only
+    genuine user actions notify.
+  - **New regression test** (`testHostDirtyNotification`): a test
+    listener counts the host notifications for knob moves, toggles
+    and setters, and asserts that a session restore raises none.
 
 - **2.70.1** — *The session-restore deep tests, and the strip state
   diagnostics.*

@@ -5471,6 +5471,168 @@ void testCostesStripSessionDeep()
     }
 }
 
+// v2.70.2: Clement's Studio One report - turning knobs inside the shell
+// (consoles or the Costes strip) never marked the song modified, while
+// any other plugin's knobs saved fine. The shell exposes no parameter
+// to the DAW, so the host only hears about a state change if the shell
+// says so: updateHostDisplay with nonParameterStateChanged (the VST3
+// wrapper maps it to setDirty). This listener counts those
+// notifications; the blocks below verify that every user action
+// raises one and that a session restore raises none.
+struct HostDirtyCountingListener : public juce::AudioProcessorListener
+{
+    int nonParameterCount = 0;
+
+    void audioProcessorChanged (juce::AudioProcessor*,
+                                const juce::AudioProcessorListener::ChangeDetails& details) override
+    {
+        if (details.nonParameterStateChanged)
+            ++nonParameterCount;
+    }
+
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+};
+
+void testHostDirtyNotification()
+{
+    // ---- 1: a knob move inside the hosted strip notifies the host ----
+    beginTest ("v2.70.2: a strip knob move notifies the host of a state change");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.toggleCostesStrip();
+
+    HostDirtyCountingListener listener;
+    proc.addListener (&listener);
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted before the knob move");
+
+    if (strip != nullptr)
+    {
+        expectTrue (listener.nonParameterCount == 0,
+                    "no notification before any user action");
+
+        strip->getApvts().getParameterAsValue ("compScLpf").setValue (800.0f);
+
+        expectTrue (listener.nonParameterCount >= 1,
+                    "a hosted knob move raises the host notification");
+    }
+
+    proc.removeListener (&listener);
+
+    // ---- 2: a session restore never notifies (the song stays clean) ----
+    beginTest ("v2.70.2: a session restore never marks the song dirty");
+
+    TheChannelStripAudioProcessor saver;
+    saver.prepareToPlay (48000.0, 512);
+    saver.toggleCostesStrip();
+
+    auto* saverStrip = dynamic_cast<CostesStrip*> (saver.getHostedStrip().getActivePlugin());
+    expectTrue (saverStrip != nullptr, "the saving strip is hosted");
+
+    if (saverStrip != nullptr)
+        saverStrip->getApvts().getParameterAsValue ("expRange").setValue (20.0f);
+
+    juce::MemoryBlock state;
+    saver.getStateInformation (state);
+    expectTrue (state.getSize() > 0, "the saved session state is non-empty");
+
+    TheChannelStripAudioProcessor restored;
+    restored.prepareToPlay (48000.0, 512);
+
+    HostDirtyCountingListener restoreListener;
+    restored.addListener (&restoreListener);
+
+    // the listener is attached BEFORE the restore, so any spurious
+    // notification would be counted - and Studio One restores twice
+    restored.setStateInformation (state.getData(), (int) state.getSize());
+    restored.setStateInformation (state.getData(), (int) state.getSize());
+
+    expectTrue (restoreListener.nonParameterCount == 0,
+                "a session restore (twice, listener attached first) raises no notification");
+
+    restored.removeListener (&restoreListener);
+
+    // ---- 3: toggling the strip off and on notifies (the slot is state) ----
+    beginTest ("v2.70.2: toggling the strip notifies the host");
+
+    TheChannelStripAudioProcessor toggler;
+    toggler.prepareToPlay (48000.0, 512);
+    toggler.toggleCostesStrip(); // on
+
+    HostDirtyCountingListener toggleListener;
+    toggler.addListener (&toggleListener);
+
+    expectTrue (toggleListener.nonParameterCount == 0,
+                "the toggle test starts clean");
+
+    toggler.toggleCostesStrip(); // off: the slot empties
+    expectTrue (toggleListener.nonParameterCount >= 1,
+                "switching the strip off raises the host notification");
+
+    toggler.toggleCostesStrip(); // on again
+    expectTrue (toggleListener.nonParameterCount >= 2,
+                "switching the strip back on raises the host notification");
+
+    toggler.removeListener (&toggleListener);
+
+    // ---- 4: the UI-only setters notify (their values ride the state) ----
+    beginTest ("v2.70.2: the display setters notify the host");
+
+    TheChannelStripAudioProcessor setterProc;
+    setterProc.prepareToPlay (48000.0, 512);
+
+    HostDirtyCountingListener setterListener;
+    setterProc.addListener (&setterListener);
+
+    setterProc.setTiltDb (-3.0f);
+    expectTrue (setterListener.nonParameterCount >= 1,
+                "the tilt notifies");
+
+    setterProc.setAnaDbDiv (12.0f);
+    setterProc.setEqDbDiv (4.0f);
+    setterProc.setSpecTau (0.15f);
+    setterProc.setLufsTarget (-37.0f);
+    expectTrue (setterListener.nonParameterCount >= 5,
+                "every display setter notifies");
+
+    setterProc.setAnalyserVisible (false);
+    expectTrue (setterListener.nonParameterCount >= 6,
+                "the analyser visibility notifies");
+
+    setterProc.removeListener (&setterListener);
+
+    // ---- 5: preset actions notify (the tracking rides the state) ----
+    beginTest ("v2.70.2: preset save / load / delete notify the host");
+
+    const auto unique = juce::String ("Tcs Test Preset 2702 HostDirty");
+
+    TheChannelStripAudioProcessor presetProc;
+    presetProc.prepareToPlay (48000.0, 512);
+    presetProc.toggleCostesStrip();
+
+    // clean slate (a leftover from an interrupted earlier run)
+    presetProc.deletePreset (unique);
+
+    HostDirtyCountingListener presetListener;
+    presetProc.addListener (&presetListener);
+
+    expectTrue (presetProc.savePreset (unique), "the strip state saves as a preset");
+    expectTrue (presetListener.nonParameterCount >= 1,
+                "saving a preset raises the host notification");
+
+    expectTrue (presetProc.applyPreset (unique), "the preset loads back on the strip");
+    expectTrue (presetListener.nonParameterCount >= 2,
+                "loading a preset raises the host notification");
+
+    expectTrue (presetProc.deletePreset (unique), "the preset file is deleted");
+    expectTrue (presetListener.nonParameterCount >= 3,
+                "deleting a preset raises the host notification");
+
+    presetProc.removeListener (&presetListener);
+}
+
 void testCostesStripSectionIcons()
 {
     beginTest ("v2.60.0: the five section icons and the equally spaced slope knob");
@@ -6982,6 +7144,7 @@ int main (int argc, char* argv[])
     testCostesStripSession();
     testCostesStripMigration();
     testCostesStripSessionDeep();
+    testHostDirtyNotification();
     testCostesStripSectionIcons();
     testCostesStripKnobDefaultsAndCaps();
     testCostesStripEq();

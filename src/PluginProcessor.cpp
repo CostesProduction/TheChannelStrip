@@ -750,6 +750,10 @@ void TheChannelStripAudioProcessor::setAnalyserVisible (bool visible)
         analyzerOut.reset();
         transferAnalyzer.reset();
     }
+
+    // v2.70.2: a UI toggle is a session change. The restore path
+    // stores the atomics directly, so a reload never hits this.
+    markSessionStateChanged();
 }
 
 // v2.8: the editor calls this from its constructor/destructor (see
@@ -957,6 +961,11 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     // in-flight request can detect that it has been superseded.
     setCurrentPluginIdent (identFor (slot.desc));
 
+    // v2.70.2: the hosted plugin is part of the session state - the
+    // host must offer to save. The session restore path never comes
+    // through here (it goes through maybeRestoreHosted directly).
+    markSessionStateChanged();
+
     logHostStatus ("Instantiating '" + slot.desc.name + "'...");
     juce::Thread::launch ([this, desc = slot.desc] () { instantiateHosted (desc, false); });
 }
@@ -982,6 +991,10 @@ void TheChannelStripAudioProcessor::clearHostedPlugin()
     }
 
     hostedStrip.clearPlugin();
+
+    // v2.70.2: an emptied slot must be saved too. Only the user toggle
+    // and the tests call this - the restore path never does.
+    markSessionStateChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,6 +1058,9 @@ void TheChannelStripAudioProcessor::selectCostesStrip()
 
     logHostStatus ("Instantiating 'Costes Strip'...");
     instantiateCostesStrip (false);
+
+    // v2.70.2: same as selectConsole - the swap changed the state.
+    markSessionStateChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -1239,6 +1255,9 @@ bool TheChannelStripAudioProcessor::savePreset (const juce::String& presetName)
 
     logHostStatus ("Preset '" + trimmed + "' saved (" + consoleName + ").");
 
+    // v2.70.2: preset bookkeeping is part of the session state.
+    markSessionStateChanged();
+
     return true;
 }
 
@@ -1316,6 +1335,10 @@ bool TheChannelStripAudioProcessor::applyPresetFile (const juce::File& file)
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
+
+            // v2.70.2: the preset changed the session state.
+            markSessionStateChanged();
+
             return true;
         }
 
@@ -1372,6 +1395,10 @@ bool TheChannelStripAudioProcessor::applyPresetFile (const juce::File& file)
             }
 
             logHostStatus ("Preset '" + info.name + "' loaded on " + info.consoleName + ".");
+
+            // v2.70.2: the preset changed the session state.
+            markSessionStateChanged();
+
             return true;
         }
     }
@@ -1402,6 +1429,10 @@ bool TheChannelStripAudioProcessor::deletePreset (const juce::String& presetName
     disownPresetIfItsFileIs (file);
 
     logHostStatus ("Preset '" + presetName.trim() + "' deleted.");
+
+    // v2.70.2: preset bookkeeping is part of the session state.
+    markSessionStateChanged();
+
     return true;
 }
 
@@ -1428,6 +1459,10 @@ bool TheChannelStripAudioProcessor::deletePresetFile (const juce::File& file)
     disownPresetIfItsFileIs (file);
 
     logHostStatus ("Preset file '" + file.getFileName() + "' deleted.");
+
+    // v2.70.2: preset bookkeeping is part of the session state.
+    markSessionStateChanged();
+
     return true;
 }
 
@@ -1571,6 +1606,9 @@ bool TheChannelStripAudioProcessor::savePresetTo (const juce::File& destination)
                                      : destination.getParentDirectory().getFullPathName())
                    + ").");
 
+    // v2.70.2: preset bookkeeping is part of the session state.
+    markSessionStateChanged();
+
     return true;
 }
 
@@ -1645,14 +1683,36 @@ void TheChannelStripAudioProcessor::drainPresetDirtyFlag()
     flushPresetDirtyIntoCurrentConsole();
 }
 
+// v2.70.2: tells the host that the plugin state changed in a way a
+// save must capture. JUCE's official channel for state changes that
+// are NOT parameter values: the VST3 wrapper maps
+// nonParameterStateChanged to setDirty (true) (see
+// juce_audio_plugin_client_VST3.cpp, 8.0.6 - pluginShouldBeMarkedDirtyFlag
+// -> ComponentRestarter -> setDirty), which marks the song modified in
+// Studio One. Safe from any thread: updateHostDisplay only walks the
+// listener list under the processor's lock, and the wrapper defers the
+// actual host call to the message thread (ComponentRestarter is an
+// AsyncUpdater).
+void TheChannelStripAudioProcessor::markSessionStateChanged()
+{
+    updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+}
+
 void TheChannelStripAudioProcessor::parameterValueChanged (int, float)
 {
     // v2.27: any hosted-console knob move flags the current preset as
     // modified. The callback can fire on any thread (the plugin's own
     // editor, automation), so only a lock-free flag is raised here;
     // drainPresetDirtyFlag (message thread) turns it into "*".
+    // v2.70.2: the host must hear it too - the shell exposes no
+    // parameter, so without this the DAW never marks the song dirty.
+    // Restores and preset pushes run under HostedStatePushGuard and
+    // never reach this branch.
     if (! suppressPresetDirty.load (std::memory_order_relaxed))
+    {
         presetDirtyPending.store (true, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
 }
 
 void TheChannelStripAudioProcessor::parameterGestureChanged (int, bool) {}
@@ -2330,6 +2390,13 @@ void TheChannelStripAudioProcessor::applyRememberedOrQueuedState (
             consolePresetNames[targetIdent] = presetNameToApply;
             consolePresetModified[targetIdent] = false;
             consolePresetFiles[targetIdent] = presetFileToApply;
+
+            // v2.70.2: the queued preset just landed on the freshly
+            // hosted console - a real session change (the background
+            // thread is fine: the flag is deferred to the message
+            // thread by the wrapper). The remembered-state branch
+            // below is the restore/switch-back path and stays silent.
+            markSessionStateChanged();
         }
         else
         {

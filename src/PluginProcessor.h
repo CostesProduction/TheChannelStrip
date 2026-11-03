@@ -115,6 +115,19 @@ public:
     void parameterValueChanged (int parameterIndex, float newValue) override;
     void parameterGestureChanged (int parameterIndex, bool gestureIsStarting) override;
 
+    // ---- v2.70.2: session-dirty notification ----
+    // The shell exposes NO parameter to the DAW, so the host has no
+    // way to know that a knob move, a console switch or a preset
+    // action changed the plugin state - Studio One never marked the
+    // song modified and "Save" stayed greyed out. JUCE's official
+    // channel for exactly this is updateHostDisplay with
+    // nonParameterStateChanged: the VST3 wrapper maps it to setDirty
+    // (true) (verified in juce_audio_plugin_client_VST3.cpp, 8.0.6),
+    // which tells the host the state needs saving. Only genuine user
+    // actions call it - every restore / preset push runs under
+    // HostedStatePushGuard and never reaches this.
+    void markSessionStateChanged();
+
     // v2.24 (roadmap point 7): a slot is no longer just found / greyed
     // out. Three distinct situations are reported to the editor so a
     // dead button always has an explanation:
@@ -256,7 +269,15 @@ public:
     TransferAnalyzer& getTransferAnalyzer() { return transferAnalyzer; }
 
     float getTiltDb() const { return tiltDb.load (std::memory_order_relaxed); }
-    void setTiltDb (float tilt) { tiltDb.store (tilt, std::memory_order_relaxed); }
+    // v2.70.2: the UI-only setters also flag the session - these values
+    // are persisted with the state, so the host must know they moved.
+    // The session restore bypasses the setters (direct stores), so a
+    // reload never raises a spurious dirty.
+    void setTiltDb (float tilt)
+    {
+        tiltDb.store (tilt, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
 
     // ---- v2.8: analyser display options (persisted with the state) ----
     // v2.51: spectrum vertical scale: dB per division over a six-division
@@ -264,11 +285,19 @@ public:
     // ladder is 15/12/9; legacy 10/6 values are mapped on load (see
     // setStateInformation).
     float getAnaDbDiv() const { return anaDbDiv.load (std::memory_order_relaxed); }
-    void setAnaDbDiv (float div) { anaDbDiv.store (div, std::memory_order_relaxed); }
+    void setAnaDbDiv (float div)
+    {
+        anaDbDiv.store (div, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
     // v2.51: EQ transfer curve scale: dB per division (+/- 3 divisions,
     // ladder 8/6/4/2 = +/-24/18/12/6 dB; legacy 4/2 mapped on load).
     float getEqDbDiv() const { return eqDbDiv.load (std::memory_order_relaxed); }
-    void setEqDbDiv (float div) { eqDbDiv.store (div, std::memory_order_relaxed); }
+    void setEqDbDiv (float div)
+    {
+        eqDbDiv.store (div, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
     // Show/hide the analyser strip (the window re-fits when it changes).
     // v2.41: defined in the .cpp - re-showing the strip resets the
     // spectrum analysers, so no pre-hide frame leaks into the display
@@ -279,7 +308,11 @@ public:
     // constant. v2.12 keeps two speeds: Fast ~0.15 s / Slow ~1 s,
     // persisted with the state.
     float getSpecTau() const { return specTau.load (std::memory_order_relaxed); }
-    void setSpecTau (float tauSeconds) { specTau.store (tauSeconds, std::memory_order_relaxed); }
+    void setSpecTau (float tauSeconds)
+    {
+        specTau.store (tauSeconds, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
 
     // ---- v2.13: selectable loudness reference for the analyser axis ----
     // The "0 dB" line of the analyser scale means "this many LUFS
@@ -288,7 +321,11 @@ public:
     // analyser cycles through them; the choice is persisted with the
     // state (missing attribute in an older session = Mix).
     float getLufsTarget() const { return lufsTarget.load (std::memory_order_relaxed); }
-    void setLufsTarget (float targetLufs) { lufsTarget.store (targetLufs, std::memory_order_relaxed); }
+    void setLufsTarget (float targetLufs)
+    {
+        lufsTarget.store (targetLufs, std::memory_order_relaxed);
+        markSessionStateChanged();
+    }
 
     // ---- v2.8: measurements only run while the editor is open ----
     // The LUFS meters and spectrum analysers cost a tiny bit of CPU per
