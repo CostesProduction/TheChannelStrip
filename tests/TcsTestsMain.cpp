@@ -5784,6 +5784,22 @@ void testCostesStripSectionIcons()
                         - editor.getEqBandLabels()[1]->getBounds().getBottom() == 1,
                 "the LMF bell glyph stands right under its band's name");
 
+    // v2.79.0 (Clement's remark 2): the mids' width sweeps lost their
+    // selector line - each sweep rides its band's own margin column
+    // now, all small UNDER its glyph, its readout shrunk to the bare
+    // "1.0 oct" (11 is the LMF's sweep, 14 the HMF's)
+    expectTrue (sliders[11] != nullptr && sliders[14] != nullptr
+                    && bandIcons[0] != nullptr && bandIcons[1] != nullptr
+                    && sliders[11]->getBounds().getX() >= 16
+                    && sliders[11]->getBounds().getRight() <= 72
+                    && sliders[11]->getBounds().getY()
+                        > bandIcons[0]->getBounds().getBottom()
+                    && sliders[14]->getBounds().getX() >= 16
+                    && sliders[14]->getBounds().getRight() <= 72
+                    && sliders[14]->getBounds().getY()
+                        > bandIcons[1]->getBounds().getBottom(),
+                "the mids' width sweeps ride their margin columns, under their glyphs");
+
     // the six dynamics meters (v2.65.0, the OUT ladders joined in
     // v2.66.0): the expander's IN/OUT/GR trio then the compressor's,
     // each laid out and visible inside the panel - the IN and OUT
@@ -5925,16 +5941,17 @@ void testCostesStripSectionIcons()
     // v2.78.0 (Clement's remarks): the EQ reads SSL-style - the HIGHS
     // at the top of the stack, the lows at the bottom (15 is the HF
     // band's FREQ, 12 HMF's, 9 LMF's, 7 the LF's) - and the four rows
-    // sit at one tight 117 px pitch, the caption words gone
+    // sit at one tight 115 px pitch (v2.79.0: the selector lines are
+    // gone, the rows own their whole room), the caption words gone
     expectTrue (sliders[15] != nullptr && sliders[12] != nullptr
                     && sliders[9] != nullptr && sliders[7] != nullptr
                     && sliders[15]->getBounds().getY() < sliders[12]->getBounds().getY()
                     && sliders[12]->getBounds().getY() < sliders[9]->getBounds().getY()
                     && sliders[9]->getBounds().getY() < sliders[7]->getBounds().getY()
-                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 117
-                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 117
-                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 117,
-                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 117 px pitch");
+                    && sliders[12]->getBounds().getY() - sliders[15]->getBounds().getY() == 115
+                    && sliders[9]->getBounds().getY() - sliders[12]->getBounds().getY() == 115
+                    && sliders[7]->getBounds().getY() - sliders[9]->getBounds().getY() == 115,
+                "the EQ reads SSL-style - HF at the top, LF at the bottom, four rows at one tight 115 px pitch");
 
     // and the band names themselves: each name stands in a slim
     // margin column at its row's left, LEVEL WITH ITS KNOBS (LMF's
@@ -6015,11 +6032,14 @@ void testCostesStripSectionIcons()
                            == juce::Colour (0xff6f9fd4),
                 "the compressor's knobs wear the LMF band's saturated blue cap");
 
-    // the knobs sit smaller than the row-1 columns (v2.68.0, Clement's
-    // remark) - the SSL 500-series density inside the one-row band
+    // the dynamics knobs grew to the SSL's own 72 px square (v2.79.0,
+    // Clement's remark 4): the caption line the SC row once took is
+    // gone, so the two knob rows own their whole height
     expectTrue (sliders[17] != nullptr && sliders[0] != nullptr
-                    && sliders[17]->getHeight() < sliders[0]->getHeight(),
-                "the dynamics knobs sit smaller than the row-1 columns");
+                    && sliders[17]->getHeight() <= sliders[0]->getHeight()
+                    && sliders[17]->getHeight() > 64
+                    && sliders[17]->getWidth() == 72,
+                "the dynamics knobs grew to the row-1 columns' own 72");
 
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
@@ -7203,8 +7223,9 @@ void testCostesStripCompLinkAndGrTiers()
                     "the expander's RANGE knob tops at 36 dB now");
     }
 
-    // ---- the mid bands' width readout (Clement's remark 1): the full
-    // sentence, parsed as happily as the old bare "oct" ----
+    // ---- the mid bands' width readout (v2.79.0, Clement's remark 2):
+    // the sweep moved into its band's margin column, so the readout is
+    // the bare number and its unit, parsed as happily as ever ----
     {
         strip->getApvts().getParameterAsValue ("eq2Oct").setValue (1.0f);
 
@@ -7213,8 +7234,8 @@ void testCostesStripCompLinkAndGrTiers()
 
         expectTrue (eq2OctParam != nullptr
                         && eq2OctParam->getText (eq2OctParam->getValue(), 100)
-                               == "Width : 1.0 octave",
-                    "the mid bands' width readout speaks its own sentence");
+                               == "1.0 oct",
+                    "the mid bands' width readout speaks its bare \"1.0 oct\"");
 
         if (eq2OctParam != nullptr)
             expectNear (eq2OctParam->convertFrom0to1 (
@@ -7369,8 +7390,8 @@ void testCostesStripKneeAndLayoutTightening()
         expectNear (kneeParam->convertFrom0to1 (1.0f), 20.0, 0.01,
                     "the knee's last plate tops at 20 dB");
 
-        expectTrue (kneeParam->getText (kneeParam->getValue(), 100) == "hard",
-                    "the readout speaks the plate's own words - \"hard\" at rest");
+        expectTrue (kneeParam->getText (kneeParam->getValue(), 100) == "KNEE hard",
+                    "the readout says its own name at rest - \"KNEE hard\"");
 
         expectNear (kneeParam->convertFrom0to1 (kneeParam->getValueForText ("hard")), 0.0, 0.01,
                     "a typed hard parses back to the parked corner");
@@ -7382,6 +7403,30 @@ void testCostesStripKneeAndLayoutTightening()
         expectTrue (kneeParam->getText (kneeParam->getValue(), 100) == "16 dB",
                     "the readout speaks the plate's number once it leaves hard");
         strip->getApvts().getParameterAsValue ("expKnee").setValue (0.0f);
+    }
+
+    // ---- the sidechain readouts identify themselves now (v2.79.0,
+    // Clement's remark 4): the SC selector line lost its captions, so
+    // each readout says its own name at rest - once you move one, its
+    // own hertz speak for it ----
+    {
+        auto* scHpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compHpf"));
+        auto* scLpfParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("compScLpf"));
+
+        expectTrue (scHpfParam != nullptr && scLpfParam != nullptr
+                        && scHpfParam->getText (scHpfParam->getValue(), 100)
+                               == "SC HPF off"
+                        && scLpfParam->getText (scLpfParam->getValue(), 100)
+                               == "SC LPF off",
+                    "the sidechain readouts speak their own name at rest - \"SC HPF off\" and \"SC LPF off\"");
+
+        if (scHpfParam != nullptr)
+            expectNear (scHpfParam->convertFrom0to1 (
+                            scHpfParam->getValueForText ("SC HPF off")),
+                        16.0, 0.01,
+                        "the named \"SC HPF off\" parses back to its own rest corner");
     }
 
     // ---- the compressor's GAIN rides the same 18 dB ceiling as its
@@ -7622,6 +7667,39 @@ void testCostesStripKneeAndLayoutTightening()
 
         expectTrue (editor.getComponentAt (cutPlates[1]->getBounds().getCentre()) == cutPlates[1],
                     "the LPF's ON/OFF plate takes its own clicks too");
+    }
+
+    // v2.79.0 (Clement's remark 3): the cut glyphs ride UNDER their
+    // captions now - the words above, the curve at the knob square's
+    // empty top-left corner, the corner the rotary disc never reaches
+    {
+        const auto icons = editor.getSectionIcons();
+        expectTrue (icons[(size_t) 1] != nullptr && sliders[1] != nullptr
+                        && icons[(size_t) 1]->getBounds().getX()
+                            == sliders[1]->getBounds().getX() + 2
+                        && icons[(size_t) 1]->getBounds().getY()
+                            == sliders[1]->getBounds().getY() + 2,
+                    "the HPF's glyph stands right under its caption, at its knob square's top-left corner");
+
+        expectTrue (icons[(size_t) 2] != nullptr && sliders[2] != nullptr
+                        && icons[(size_t) 2]->getBounds().getX()
+                            == sliders[2]->getBounds().getX() + 2
+                        && icons[(size_t) 2]->getBounds().getY()
+                            == sliders[2]->getBounds().getY() + 2,
+                    "the LPF's glyph stands right under its caption too");
+    }
+
+    // v2.79.0 (Clement's remark 5): the dynamics ON plates own the
+    // room their own widest words need - "COMP OFF" at 11 px bold never
+    // clips into "COMP O..." again (the LED's 24 plus the margins' 2
+    // stay inside the plate's own 88)
+    {
+        const auto onButtons = editor.getDynOnButtons();
+        expectTrue (onButtons[(size_t) 1] != nullptr
+                        && onButtons[(size_t) 1]->getWidth() == 88
+                        && juce::Font (juce::FontOptions (11.0f, juce::Font::bold))
+                               .getStringWidth ("COMP OFF") + 26 <= 88,
+                    "the COMP plate owns its own widest words - its OFF never clips");
     }
 }
 

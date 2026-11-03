@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.78.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.79.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,35 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.79.0** — *Five remarks, five fixes - the SC caption line goes,
+  the dynamics knobs breathe, and nothing clips any more.*
+  - **A real breath before the EQ.** The merged block's last line and
+    the EQ ON plate never touch - a 16 px gap of open panel sits
+    between the filters' line and the section's own name.
+  - **The mids' width sweeps moved into their margin columns.** The
+    selector lines are gone: each sweep rides its band's own slim
+    column, all small under its glyph, its readout shrunk to the bare
+    "1.0 oct" - so every EQ row is one knob line and the knobs own
+    their whole room, at the tight 115 px pitch.
+  - **The cut glyphs ride under their captions.** The words above,
+    the curve just under them, at the knob square's empty top-left
+    corner - the corner the disc never reaches. And the HPF curve
+    itself is corrected: it was the LPF's vertical flip, not its
+    mirror; the knee now bends at the left and the plateau rides
+    high at the right, the response a high-pass actually draws.
+  - **The SC caption line is gone.** The sidechain selectors ride a
+    slim uncaptioned strip at each stage's foot, their readouts
+    identifying themselves at rest - "SC HPF off", "SC LPF off",
+    "KNEE hard" - and speaking plain hertz once you move them, which
+    is all the naming a hand on the slider needs. The height the
+    caption row once took goes to the knobs: every dynamics knob
+    grows to the SSL's own 72 px square, the stages keeping their
+    exact 245 px height.
+  - **COMP OFF never clips.** The ON plates own the room their widest
+    words need - the plate widened to 88 px, so the OFF state reads
+    in full instead of "COMP O...".
+  - **DSP unchanged.** Layout and readouts only - the audio chain
+    keeps its exact order, and the full harness now runs 931 checks.
 - **2.78.0** — *One COSTES CONSOLE block, an EQ that reads like the
   SSL's own meter bridge - and another 50 px won.*
   - **The front end is ONE block now.** INPUT and FILTERS merge into a

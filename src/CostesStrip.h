@@ -725,6 +725,17 @@ public:
         return { &lowCutOnButton, &highCutOnButton };
     }
 
+    // v2.79.0 (Clement's remark 5): the two dynamics ON/OFF plates -
+    // the harness pins their width against their own widest words
+    // ("COMP OFF" at 11 px bold), so the plate can never clip its
+    // state into "COMP O..." again (a juce::Button*, like the cut
+    // plates above - PlateToggle itself is defined below, past the
+    // public section, so the name is not in reach here)
+    std::array<juce::Button*, 2> getDynOnButtons()
+    {
+        return { &expOnButton, &compOnButton };
+    }
+
 private:
     CostesStrip& owner;
 
@@ -809,13 +820,9 @@ private:
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
     juce::Label compThresholdLabel, compRatioLabel, compReleaseLabel;
     juce::Label compGainLabel, compMixLabel;
-    juce::Label compHpfLabel, compScLpfLabel;
-    juce::Label expScHpfLabel, expScLpfLabel;
-    // v2.74.0 (Clement's remark 1): the KNEE / LINK selectors moved to
-    // the dynamics stages' third bottom cell, horizontally aligned
-    // with the SC selectors - and they carry their own captions the
-    // same way their SC LPF neighbours do
-    juce::Label expKneeLabel, compLinkLabel;
+    // v2.79.0 (Clement's remark 4): the SC selectors lost their
+    // caption labels - their readouts identify themselves now
+    // ("SC HPF off", "SC LPF off", "KNEE hard", the LINK's own words)
     juce::Label expSectionLabel, compSectionLabel;
 
     // v2.75.0 (Clement's request): the reserved slots the future
