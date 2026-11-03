@@ -591,6 +591,16 @@ public:
     // header names the right one
     juce::Label* getInputSectionLabel() { return &inputSectionLabel; }
 
+    // v2.75.0 (Clement's request): the reserved slots, public so the
+    // offline harness can pin the three-column grid - the TRANSIENT
+    // slot waits between the two dynamics stages, and the five
+    // named-but-empty frames stack down column 3 in the signal's
+    // own order: PHASE INVERT, STEREO PAN, STEREO WIDTH, MONO MAKER,
+    // OUTPUT TRIM (DRIVE already lives in its own slot between the
+    // last two)
+    const juce::Rectangle<int>& getTransientFrame() const { return transientFrame; }
+    const std::array<juce::Rectangle<int>, 5>& getReservedFrames() const { return reservedFrames; }
+
     // v2.70.0 (Clement's remark 1): the panel front's own grain - a
     // 96 x 96 deterministic speckle tile baked once at construction
     // and tiled over the cream at paint time. Public for the harness
@@ -801,6 +811,18 @@ private:
     // same way their SC LPF neighbours do
     juce::Label expKneeLabel, compLinkLabel;
     juce::Label expSectionLabel, compSectionLabel;
+    // v2.75.0 (Clement's request): the three-column grid names its
+    // own sections - TILT and FILTERS carry their headers the same
+    // engraved way INPUT always has
+    juce::Label tiltSectionLabel, filtersSectionLabel;
+
+    // v2.75.0 (Clement's request): the reserved slots the future
+    // builds will fill - the TRANSIENT stage's slot between the two
+    // dynamics halves, and the output chain's yet-to-come sections
+    // down column 3. Painted as engraved empty frames that name
+    // their section; laid out in resized
+    juce::Rectangle<int> transientFrame;
+    std::array<juce::Rectangle<int>, 5> reservedFrames {};
 
     // v2.68.0 (Clement's remark): every glyph of the dynamics sections
     // is gone - the two stages read through their captions, their knob

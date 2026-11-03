@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.74.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.75.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,33 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.75.0** — *The three-column console - the ground floor for the
+  coming features.*
+  - **The grid.** The panel grows to 860 x 1144 and reads as THREE
+    vertical columns, the sound flowing top-to-bottom and
+    left-to-right: column 1 stacks INPUT, TILT, FILTERS and the
+    four-band EQ (one band per row, LF to HF); column 2 stacks the
+    EXPANDER, the reserved TRANSIENT slot and the COMPRESSOR, each
+    stage keeping its full horizontal layout (IN/OUT/GR ladders,
+    the three-row control grid); column 3 is the output chain -
+    five engraved reserved frames (PHASE INVERT, STEREO PAN, STEREO
+    WIDTH, MONO MAKER, OUTPUT TRIM) around the DRIVE section, the
+    one live control there today.
+  - **The silkscreen follows.** Two vertical dividers name the
+    column seams, an engraved rule heads each of column 1's
+    sections, the COSTES CONSOLE signature rides the panel's own
+    middle at the left margin, and every reserved slot draws its own
+    empty frame with the section's name at its head - the frames the
+    Transient designer, Width, Mono Maker and Output builds will
+    fill.
+  - **DSP unchanged.** The layout moves; the audio chain keeps its
+    exact order (the TILT still runs post-compressor in the DSP) -
+    the knobs' new addresses on the panel are cosmetic until the
+    coming builds re-wire the chain for real.
+  - *Tests:* 923 checks - the grid's geometry pinned (column order,
+    stacking, the reserved frames' addresses) on top of the
+    v2.74 suite.
 
 - **2.74.0** — *Four more of Clément's remarks, all around the
   dynamics sections.*

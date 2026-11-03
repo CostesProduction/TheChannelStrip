@@ -5647,9 +5647,10 @@ void testCostesStripSectionIcons()
     CostesStripEditor editor (stripProc);
 
     // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // minimum window size - the footprint of the consoles it hosts
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 645,
-                "the strip panel opens at the shell's own minimum size (860 x 645)");
+    // minimum window size - v2.75.0: the three-column grid grows the
+    // strip to a full standing console
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 1144,
+                "the strip panel opens as the three-column console (860 x 1144)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5725,15 +5726,16 @@ void testCostesStripSectionIcons()
     }
 
     // the INPUT section's own written name (v2.70.0, Clement's remarks 5
-    // and 7): the front-end block finally speaks its name on the panel,
-    // centred in the top band over the left half - the signature moved
-    // to the left edge and left the band to it
+    // and 7; v2.75.0: the column grid's own header): the front end's
+    // first section speaks its name centred over column 1, clear of
+    // the engraved signature's margin at the panel's left edge
     auto* inputLabel = editor.getInputSectionLabel();
     expectTrue (inputLabel != nullptr && inputLabel->getText() == "INPUT"
                     && inputLabel->isVisible()
                     && editor.getLocalBounds().contains (inputLabel->getBounds())
-                    && inputLabel->getBounds().getCentreX() < 380,
-                "the INPUT block carries its name, centred over the left half of the panel");
+                    && inputLabel->getBounds().getX() >= 28
+                    && inputLabel->getBounds().getCentreX() < 242,
+                "the INPUT block carries its name, centred over column 1 of the grid");
 
     // the console front's grain (v2.70.0, Clement's remark 1): a
     // deterministic 96 x 96 speckle tile baked once at construction,
@@ -5891,14 +5893,55 @@ void testCostesStripSectionIcons()
                     "the three-tier GR geometry never folds back - every rung sits strictly below the one above it, across both tier boundaries");
     }
 
-    // v2.68.0 (Clement's remark): the two stages stand as two VERTICAL
-    // blocks side by side - the expander's whole trio at the LEFT of
-    // the band, the compressor's at the RIGHT, both the same height
+    // v2.75.0 (Clement's spec): the two dynamics stages stack INSIDE
+    // the console's middle column - the expander's whole trio at the
+    // TOP, the compressor's UNDER it, the two IN ladders plumb on one
+    // vertical line, both stages the same height
     expectTrue (meters[0] != nullptr && meters[3] != nullptr
-                    && meters[0]->getBounds().getX() < meters[3]->getBounds().getX()
+                    && meters[3]->getBounds().getY() > meters[2]->getBounds().getBottom()
+                    && meters[3]->getBounds().getX() == meters[0]->getBounds().getX()
                     && meters[0]->getHeight() == meters[3]->getHeight()
                     && meters[2]->getHeight() == meters[5]->getHeight(),
-                "the expander's block sits at the left of the dynamics band, the compressor's at the right, one row tall");
+                "the expander's stage sits at the top of the middle column, the compressor's under it - two stacked stages");
+
+    // v2.75.0 (Clement's spec): column 1 stacks the front end in the
+    // sound's own order - INPUT (0 = trim), TILT (3), FILTERS (1 =
+    // low cut), then the EQ's first band (7)
+    expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
+                    && sliders[1] != nullptr && sliders[7] != nullptr
+                    && sliders[0]->getBounds().getY() < sliders[3]->getBounds().getY()
+                    && sliders[3]->getBounds().getY() < sliders[1]->getBounds().getY()
+                    && sliders[1]->getBounds().getY() < sliders[7]->getBounds().getY(),
+                "column 1 stacks INPUT, TILT, FILTERS and the EQ in the sound's own order");
+
+    // and the three columns themselves: the trim knob inside the
+    // 214 px front end, the expander's THRESH (17) inside the middle
+    // column, DRIVE (4) inside the 142 px output chain at the right
+    expectTrue (sliders[0] != nullptr && sliders[17] != nullptr && sliders[4] != nullptr
+                    && sliders[0]->getBounds().getRight() <= 242
+                    && sliders[17]->getBounds().getX() >= 254
+                    && sliders[17]->getBounds().getRight() <= 694
+                    && sliders[4]->getBounds().getX() >= 706,
+                "the console reads as three columns - the front end, the dynamics, the output chain");
+
+    // the reserved frames (v2.75.0, Clement's spec): the TRANSIENT
+    // slot engraved between the two stages, PHASE INVERT, STEREO
+    // PAN, STEREO WIDTH and MONO MAKER stacked above DRIVE in column
+    // 3, OUTPUT TRIM under it - the empty frames the coming builds
+    // will fill
+    {
+        const auto& transient = editor.getTransientFrame();
+        const auto& reserved = editor.getReservedFrames();
+
+        expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
+                        && meters[3]->getBounds().getY() > transient.getBottom()
+                        && reserved[0].getY() < reserved[1].getY()
+                        && reserved[1].getY() < reserved[2].getY()
+                        && reserved[2].getY() < reserved[3].getY()
+                        && reserved[3].getBottom() <= sliders[4]->getBounds().getY()
+                        && sliders[4]->getBounds().getBottom() <= reserved[4].getY(),
+                    "the reserved frames sit engraved in the grid - TRANSIENT between the stages, the output chain around DRIVE");
+    }
 
     // v2.72.0 (Clement's request): each stage's GR ladder sits at the
     // LEFT of its own block now, between the OUT meter and the knobs -
@@ -5935,7 +5978,7 @@ void testCostesStripSectionIcons()
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 860, 645 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 1144 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -5971,7 +6014,7 @@ void testCostesStripSectionIcons()
     // (the GR ladders). The degenerate sizes above paint nothing
     // (the early return), so the first real paint here arms the hold
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 645, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 1144, true);
         juce::Graphics g (canvas);
 
         for (int i = 0; i < 6; ++i)
@@ -5987,7 +6030,7 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (860, 645);
+    editor.setSize (860, 1144);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions
@@ -6120,15 +6163,15 @@ void testCostesStripKnobDefaultsAndCaps()
                         == juce::Colour (knobCap[k]),
                     "each rotary knob wears its band's cap colour (high cut and HF saturated red, LO MID saturated blue, HI MID saturated ivory, saturated ivory expander, saturated blue compressor)");
 
-    // v2.69.0 (Clement's remark): the MVP and the EQ stand side by
-    // side in one band - the trim knob lives in the left half, the
-    // EQ's first band in the right one, and the two blocks share the
-    // same vertical span instead of stacking
+    // v2.75.0 (Clement's spec): the front end is the console's first
+    // column - the trim knob at its head, the EQ's first band under
+    // the filters, both inside the same 214 px column and stacked in
+    // the sound's own order
     expectTrue (sliders[0] != nullptr && sliders[7] != nullptr
-                    && sliders[0]->getBounds().getRight() <= 380
-                    && sliders[7]->getBounds().getX() >= 380
-                    && sliders[7]->getBounds().getY() < sliders[0]->getBounds().getBottom(),
-                "the MVP sits at the left of the band and the EQ beside it - the two blocks share one row");
+                    && sliders[0]->getBounds().getRight() <= 242
+                    && sliders[7]->getBounds().getRight() <= 242
+                    && sliders[7]->getBounds().getY() > sliders[0]->getBounds().getBottom(),
+                "the trim knob and the EQ's first band stack inside column 1, one under the other");
 }
 
 void testCostesStripEq()

@@ -2464,6 +2464,22 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     inputSectionLabel.setColour (juce::Label::textColourId, engravingDim);
     addAndMakeVisible (inputSectionLabel);
 
+    // v2.75.0 (Clement's request): the three-column grid names its
+    // sections - TILT and FILTERS headers read the same engraved way
+    // the INPUT one always has, so column 1 stacks as four named
+    // stages: INPUT, TILT, FILTERS, EQ
+    tiltSectionLabel.setText ("TILT", juce::dontSendNotification);
+    tiltSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    tiltSectionLabel.setJustificationType (juce::Justification::centred);
+    tiltSectionLabel.setColour (juce::Label::textColourId, engravingDim);
+    addAndMakeVisible (tiltSectionLabel);
+
+    filtersSectionLabel.setText ("FILTERS", juce::dontSendNotification);
+    filtersSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    filtersSectionLabel.setJustificationType (juce::Justification::centred);
+    filtersSectionLabel.setColour (juce::Label::textColourId, engravingDim);
+    addAndMakeVisible (filtersSectionLabel);
+
     // the four band captions (v2.61.0): LF, LO MID, HI MID, HF - the
     // SSL E-series naming, each above its band's column
     const auto setUpBandCaption = [this] (juce::Label& label, const juce::String& text)
@@ -2781,12 +2797,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         }
     }
 
-    // v2.68.0 (Clement's remark): the whole strip tightens - the row-1
-    // band and the EQ lose a slice of height, the two dynamics stages
-    // share ONE band as two vertical blocks side by side, and the
-    // panel drops from 860 x 911 to 860 x 645 while keeping the
-    // shell's own width
-    setSize (860, 645);
+    // v2.75.0 (Clement's request): the console re-organises as THREE
+    // vertical columns, the signal's own order read top to bottom and
+    // left to right - the front end (INPUT, TILT, FILTERS, EQ), the
+    // dynamics (EXPANDER, the TRANSIENT slot, COMPRESSOR), and the
+    // output chain (DRIVE today, its neighbours engraved and waiting).
+    // The panel grows tall enough for every section to breathe: the
+    // channel-strip module, like the real thing
+    setSize (860, 1144);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2941,9 +2959,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
             { 45.0f, 10.0f }, { 50.0f, 10.0f }
         };
 
+        // v2.75.0: the signature rides the taller panel's own middle
+        // (the three-column grid starts at x = 28, so the rotated
+        // drawing still owns the whole left margin)
         g.saveState();
         g.addTransform (juce::AffineTransform::rotation (
-            -juce::MathConstants<float>::halfPi, 17.0f, 384.0f));
+            -juce::MathConstants<float>::halfPi, 17.0f, 572.0f));
 
         // the seismic line at the signature's foot, the logo's own
         // 50 x 20 trace scaled to 24 px - a heartbeat running up the
@@ -2952,46 +2973,74 @@ void CostesStripEditor::paint (juce::Graphics& g)
 
         for (int i = 1; i < 14; ++i)
             g.drawLine (juce::Line<float> (17.0f + trace[i - 1][0] * 0.48f,
-                                           377.0f + trace[i - 1][1] * 0.48f,
+                                           565.0f + trace[i - 1][1] * 0.48f,
                                            17.0f + trace[i][0] * 0.48f,
-                                           377.0f + trace[i][1] * 0.48f), 1.8f);
+                                           565.0f + trace[i][1] * 0.48f), 1.8f);
 
         // the name itself: COSTES in engraving, a small tick, CONSOLE
         // in dim caps - the same stacked wording as the old top band
         g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText ("COSTES", juce::Rectangle<int> (45, 377, 66, 14),
+        g.drawText ("COSTES", juce::Rectangle<int> (45, 565, 66, 14),
                     juce::Justification::centredLeft);
         g.setColour (engravingDim.withAlpha (0.7f));
-        g.drawVerticalLine (115, 379.0f, 391.0f);
+        g.drawVerticalLine (115, 567.0f, 579.0f);
         g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 378, 66, 14),
+        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 566, 66, 14),
                     juce::Justification::centredLeft);
 
         g.restoreState();
     }
 
-    // v2.70.0 (Clement's remarks 5 and 7): the MVP and the EQ stand
-    // side by side as two vertical blocks and each carries its own
-    // written name - INPUT heads the left one (a label, laid out in
-    // resized), the EQ header names the right one. The engraved
-    // silkscreen follows the blocks: a divider between the two
-    // halves, a rule under the EQ's header, one between the MVP's
-    // two sub-rows
+    // v2.75.0 (Clement's request): the silkscreen follows the three
+    // columns - two long vertical dividers separate the front end
+    // from the dynamics and the dynamics from the output chain, a
+    // short engraved rule names each of column 1's four sections, and
+    // the reserved slots draw their own empty frames with the
+    // section's name at the frame's head
     g.setColour (engravingDim.withAlpha (0.5f));
 
-    g.drawVerticalLine (380, 32.0f, 388.0f);
-    g.drawLine (394.0f, 55.0f, (float) width - 14.0f, 55.0f, 1.0f);
-    g.drawLine (22.0f, 208.0f, 366.0f, 208.0f, 1.0f);
+    g.drawVerticalLine (248, 32.0f, (float) getHeight() - 12.0f);
+    g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
 
-    // the dynamics band's own divider (v2.64.0): the same engraved
-    // rule under the EQ block, so the third row reads as its own band
-    // too. v2.70.0 (Clement's remark 8): the old horizontal rule that
-    // crossed the row - a relic of the v2.65 stacked layout, cutting
-    // straight through the two LISTEN plates - is gone; in its place
-    // a VERTICAL rule separates the expander's block from the
-    // compressor's, the mirror of the x = 380 divider above
-    g.drawLine (14.0f, 394.0f, (float) width - 14.0f, 394.0f, 1.0f);
-    g.drawVerticalLine (430, 402.0f, 632.0f);
+    g.drawLine (30.0f, 49.0f, 240.0f, 49.0f, 1.0f);
+    g.drawLine (30.0f, 167.0f, 240.0f, 167.0f, 1.0f);
+    g.drawLine (30.0f, 285.0f, 240.0f, 285.0f, 1.0f);
+    g.drawLine (30.0f, 543.0f, 240.0f, 543.0f, 1.0f);
+
+    // v2.75.0: the reserved slots - engraved empty frames that name
+    // the sections the future builds will fill (a degenerate resize
+    // paints nothing rather than an inverted frame)
+    {
+        static const char* const reservedNames[5] =
+            { "PHASE INVERT", "STEREO PAN", "STEREO WIDTH", "MONO MAKER", "OUTPUT TRIM" };
+
+        g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
+
+        for (int i = 0; i < 5; ++i)
+        {
+            auto frame = reservedFrames[(size_t) i].reduced (4, 2);
+
+            if (frame.getWidth() < 12 || frame.getHeight() < 12)
+                continue;
+
+            g.drawRect (frame, 1);
+            g.drawText (reservedNames[i],
+                        juce::Rectangle<int> (frame.getX(), frame.getY(),
+                                              frame.getWidth(), 16),
+                        juce::Justification::centred);
+        }
+
+        auto transientSlot = transientFrame.reduced (4, 2);
+
+        if (transientSlot.getWidth() >= 12 && transientSlot.getHeight() >= 12)
+        {
+            g.drawRect (transientSlot, 1);
+            g.drawText ("TRANSIENT",
+                        juce::Rectangle<int> (transientSlot.getX(), transientSlot.getY(),
+                                              transientSlot.getWidth(), 16),
+                        juce::Justification::centred);
+        }
+    }
 
     // the four corner screws of the module front
     for (int i = 0; i < 4; ++i)
@@ -3023,79 +3072,78 @@ void CostesStripEditor::resized()
 {
     auto area = getLocalBounds();
 
-    area.removeFromTop (26);   // the engraved signature band (v2.69.0)
-    area.removeFromBottom (6);
+    area.removeFromTop (26);    // the engraved signature band (v2.69.0)
+    area.removeFromBottom (8); // v2.75.0: the taller panel's own margin
 
-    // v2.69.0 (Clement's remark): the MVP and the EQ share one band
-    // as two vertical halves - the MVP's five sections stack as two
-    // sub-rows in the left half, the EQ's four bands read as a 2 x 2
-    // grid in the right one - and the dynamics band keeps its own
-    // full row below, as in v2.68
-    auto mvpEqBand = area.removeFromTop (368);
-    auto dynArea   = area;
+    // v2.75.0 (Clement's spec): the console reads as THREE vertical
+    // columns and the sound flows through them - down column 1 (the
+    // front end: INPUT, TILT, FILTERS, EQ), down column 2 (the
+    // dynamics: EXPANDER, the reserved TRANSIENT slot, COMPRESSOR),
+    // down column 3 (the output chain: the reserved slots and
+    // DRIVE). The engraved signature keeps the left margin and the
+    // two painted dividers name the seams
+    area.removeFromLeft (28);   // the vertical signature's own margin
 
-    // v2.70.0 (Clement's remarks 5 and 7): the top band belongs to the
-    // two section names - INPUT centred over the left block, the EQ
-    // header naming the right one below (its own 20 px row, as ever).
-    // The engraved COSTES CONSOLE signature reads vertically along
-    // the panel's left edge, so the MVP's own columns start clear of
-    // it
-    inputSectionLabel.setBounds (0, 0, 380, 26);
+    auto column1 = area.removeFromLeft (214);
+    area.removeFromLeft (12);   // the first divider's seam
+    auto column2 = area.removeFromLeft (440);
+    area.removeFromLeft (12);   // the second divider's seam
+    auto column3 = area;        // 142 wide, 12 of margin at the right
 
-    auto mvpArea = mvpEqBand.removeFromLeft (380);
-    mvpArea.removeFromLeft (28);   // the vertical signature's own margin
-    auto eqArea  = mvpEqBand;
+    // ---- column 1: the front end ----
+    // INPUT: the trim knob's own named section - the knob above its
+    // caption, the section glyph hugging the text's left edge, the
+    // same per-column pattern the MVP's cells have always carried
+    auto inputSection = column1.removeFromTop (112);
+    inputSectionLabel.setBounds (inputSection.removeFromTop (20));
 
-    // the MVP's top sub-row: TRIM, TONE and DRIVE, the same column
-    // pattern as ever - knob above, caption below, the section glyph
-    // hugging the caption's left edge - and the drive column keeps
-    // its OS toggle under the caption
-    auto mvpTop = mvpArea.removeFromTop (180);
-    mvpArea.removeFromTop (4);          // the engraved rule's breath
-    auto mvpBottom = mvpArea;
+    auto inputCell = inputSection.reduced (8, 2);
 
-    const int mvpTopW = mvpTop.getWidth() / 3;
+    auto inputCaption = inputCell.removeFromBottom (18);
+    trimInLabel.setBounds (inputCaption);
 
-    for (int i = 0; i < 3; ++i)
-    {
-        auto column = mvpTop.removeFromLeft (mvpTopW).reduced (8, 2);
+    const int inputTextWidth = trimInLabel.getFont()
+                                  .getStringWidth (trimInLabel.getText());
+    trimIcon.setBounds (inputCaption.getCentreX() - inputTextWidth / 2 - 21,
+                        inputCaption.getY() + 1, 16, 16);
 
-        auto* knob = &trimInKnob;
-        auto* caption = &trimInLabel;
-        SectionIcon* icon = &trimIcon;
+    trimInKnob.setBounds (inputCell);
 
-        if (i == 1)      { knob = &tiltKnob;  caption = &tiltLabel;  icon = &tiltIcon; }
-        else if (i == 2) { knob = &driveKnob; caption = &driveLabel; icon = &driveIcon; }
+    column1.removeFromTop (6);  // a breath between the sections
 
-        // the drive column hosts the switch below its caption
-        if (i == 2)
-        {
-            auto toggleBounds = column.removeFromBottom (26);
-            toggleBounds = toggleBounds.withSizeKeepingCentre (juce::jmin (toggleBounds.getWidth(), 110), 26);
-            oversampleButton.setBounds (toggleBounds);
-        }
+    // TILT: the tone shifter's own named section under the input -
+    // the single-knob pattern again, so the column reads as one
+    // engraved stack. v2.75.0: only the LAYOUT moves here; the tilt
+    // still runs post-compressor in the chain until Clement moves
+    // the DSP itself
+    auto tiltSection = column1.removeFromTop (112);
+    tiltSectionLabel.setBounds (tiltSection.removeFromTop (20));
 
-        auto captionBounds = column.removeFromBottom (18);
-        caption->setBounds (captionBounds);
+    auto tiltCell = tiltSection.reduced (8, 2);
 
-        // the section glyph (v2.60.0): a 16 px icon hugging the caption's
-        // left edge - the caption stays centred in its column, the icon
-        // sits exactly where the text begins
-        const int textWidth = caption->getFont().getStringWidth (caption->getText());
-        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
-                         captionBounds.getY() + 1, 16, 16);
+    auto tiltCaption = tiltCell.removeFromBottom (18);
+    tiltLabel.setBounds (tiltCaption);
 
-        knob->setBounds (column.removeFromTop (column.getHeight() - 20));
-    }
+    const int tiltTextWidth = tiltLabel.getFont().getStringWidth (tiltLabel.getText());
+    tiltIcon.setBounds (tiltCaption.getCentreX() - tiltTextWidth / 2 - 21,
+                        tiltCaption.getY() + 1, 16, 16);
 
-    // the MVP's bottom sub-row: the two cuts side by side, each with
-    // its slope selector and its on/off plate - the same per-column
-    // geometry the cuts have carried since v2.59, one column wider
-    const int mvpCutW = mvpBottom.getWidth() / 2;
+    tiltKnob.setBounds (tiltCell);
+
+    column1.removeFromTop (6);  // a breath between the sections
+
+    // FILTERS: the two cuts stack as two rows - LOW CUT at the top,
+    // HIGH CUT under it, the sound's own order - each row carrying
+    // the per-column geometry the cuts have kept since v2.59: the
+    // on/off plate at the knob's top-left corner, the slope selector
+    // under it, the caption and its glyph at the bottom
+    auto filtersSection = column1.removeFromTop (252);
+    filtersSectionLabel.setBounds (filtersSection.removeFromTop (20));
 
     for (int i = 0; i < 2; ++i)
     {
-        auto column = mvpBottom.removeFromLeft (mvpCutW).reduced (8, 2);
+        auto column = filtersSection.removeFromTop (114).reduced (8, 2);
+        filtersSection.removeFromTop (4);   // a breath between the rows
 
         auto* knob = &lowCutKnob;
         auto* caption = &lowCutLabel;
@@ -3131,13 +3179,16 @@ void CostesStripEditor::resized()
         knob->setBounds (column.removeFromTop (knobHeight));
     }
 
-    // ---- the EQ section (v2.61.0, Clement's spec; v2.69.0: the
-    // section stands beside the MVP as the right half of the band, and
-    // its four bands read as a 2 x 2 grid - LF and LO MID across the
-    // top, HI MID and HF across the bottom) ----
+    column1.removeFromTop (6);  // a breath between the sections
+
+    // ---- the EQ section (v2.61.0, Clement's spec; stacked in
+    // v2.75.0): the section closes column 1 and its four bands read
+    // as four stacked rows - LF, LO MID, HI MID, HF down the column,
+    // the sound's own order ----
     // the header: the global on/off plate at the left and the section
     // caption centred, its bell glyph hugging the text's left edge
     // with the same geometry the knob captions use for their icons
+    auto eqArea = column1;
     eqArea.removeFromTop (6);
     auto eqHeader = eqArea.removeFromTop (20);
 
@@ -3155,116 +3206,116 @@ void CostesStripEditor::resized()
     // BELL/SHELF plate for the outer bands - and (v2.62.0, Clement's
     // remark 5) a 16 px glyph in a final row: the LF band's low-shelf
     // response, the two mid bells' bump and the HF band's high shelf
-    const int eqBandH = eqArea.getHeight() / 2;
+    const int eqBandH = eqArea.getHeight() / 4;
 
-    for (int row = 0; row < 2; ++row)
+    for (int band = 0; band < 4; ++band)
     {
-        auto eqRow = eqArea.removeFromTop (eqBandH);
-        const int eqColumnWidth = eqRow.getWidth() / 2;
+        auto column = eqArea.removeFromTop (eqBandH).reduced (4, 2);
 
-        for (int i = 0; i < 2; ++i)
+        auto* bandLabel = &eqBand1Label;
+        auto* freqKnob  = &eq1HzKnob;
+        auto* freqLabel = &eq1HzLabel;
+        auto* gainKnob  = &eq1GainKnob;
+        auto* gainLabel = &eq1GainLabel;
+        juce::Slider* octSlider   = nullptr;
+        ShelfModeToggle* modeButton = &eq1ModeButton;
+
+        // v2.70.0 (Clement's remark 9): the outer bands' glyphs live
+        // inside their BELL/SHELF plates now, so the band icon is a
+        // mid-band-only concern - it is only ever read where the
+        // octSlider branch below runs
+        SectionIcon* bandIcon = nullptr;
+
+        if (band == 1)
         {
-            const int band = row * 2 + i;
-            auto column = eqRow.removeFromLeft (eqColumnWidth).reduced (4, 2);
+            bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
+            gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
+            octSlider = &eq2OctSlider; modeButton = nullptr;
+            bandIcon  = &eqBand2Icon;
+        }
+        else if (band == 2)
+        {
+            bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
+            gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
+            octSlider = &eq3OctSlider; modeButton = nullptr;
+            bandIcon  = &eqBand3Icon;
+        }
+        else if (band == 3)
+        {
+            bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
+            gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
+            modeButton = &eq4ModeButton;
+        }
 
-            auto* bandLabel = &eqBand1Label;
-            auto* freqKnob  = &eq1HzKnob;
-            auto* freqLabel = &eq1HzLabel;
-            auto* gainKnob  = &eq1GainKnob;
-            auto* gainLabel = &eq1GainLabel;
-            juce::Slider* octSlider   = nullptr;
-            ShelfModeToggle* modeButton = &eq1ModeButton;
+        bandLabel->setBounds (column.removeFromTop (16));
+        column.removeFromTop (4);   // a breath under the band caption
 
-            // v2.70.0 (Clement's remark 9): the outer bands' glyphs live
-            // inside their BELL/SHELF plates now, so the band icon is a
-            // mid-band-only concern - it is only ever read where the
-            // octSlider branch below runs
-            SectionIcon* bandIcon = nullptr;
+        // v2.72.0 (Clement's remark 1): the mid bells' width sweep
+        // grew a full-sentence readout ("Width : 1.0 octave") - it
+        // owns the whole 44 px band now, the 18 px text box at its
+        // bottom with air above, so the words never clip the way
+        // the old 76 px box did. The outer bands' shapes still live
+        // in their BELL/SHELF plates; every knob above stays put
+        auto bottom = column.removeFromBottom (44);
 
-            if (band == 1)
-            {
-                bandLabel = &eqBand2Label; freqKnob = &eq2HzKnob;  freqLabel = &eq2HzLabel;
-                gainKnob  = &eq2GainKnob;  gainLabel = &eq2GainLabel;
-                octSlider = &eq2OctSlider; modeButton = nullptr;
-                bandIcon  = &eqBand2Icon;
-            }
-            else if (band == 2)
-            {
-                bandLabel = &eqBand3Label; freqKnob = &eq3HzKnob;  freqLabel = &eq3HzLabel;
-                gainKnob  = &eq3GainKnob;  gainLabel = &eq3GainLabel;
-                octSlider = &eq3OctSlider; modeButton = nullptr;
-                bandIcon  = &eqBand3Icon;
-            }
-            else if (band == 3)
-            {
-                bandLabel = &eqBand4Label; freqKnob = &eq4HzKnob;  freqLabel = &eq4HzLabel;
-                gainKnob  = &eq4GainKnob;  gainLabel = &eq4GainLabel;
-                modeButton = &eq4ModeButton;
-            }
+        auto knobRow = column;
 
-            bandLabel->setBounds (column.removeFromTop (16));
-            column.removeFromTop (4);   // a breath under the band caption
+        const int half = knobRow.getWidth() / 2;
+        auto freqCol = knobRow.removeFromLeft (half);
+        auto gainCol = knobRow;
 
-            // v2.72.0 (Clement's remark 1): the mid bells' width sweep
-            // grew a full-sentence readout ("Width : 1.0 octave") - it
-            // owns the whole 44 px band now, the 18 px text box at its
-            // bottom with air above, so the words never clip the way
-            // the old 76 px box did. The outer bands' shapes still live
-            // in their BELL/SHELF plates; every knob above stays put
-            auto bottom = column.removeFromBottom (44);
+        freqLabel->setBounds (freqCol.removeFromBottom (14));
+        freqKnob->setBounds (freqCol);
+        gainLabel->setBounds (gainCol.removeFromBottom (14));
+        gainKnob->setBounds (gainCol);
 
-            auto knobRow = column;
+        if (octSlider != nullptr)
+        {
+            // the mid bells' bandwidth sweep - the cuts' own selector
+            // geometry, one band width wide, riding the full band
+            octSlider->setBounds (bottom.reduced (1, 1));
 
-            const int half = knobRow.getWidth() / 2;
-            auto freqCol = knobRow.removeFromLeft (half);
-            auto gainCol = knobRow;
-
-            freqLabel->setBounds (freqCol.removeFromBottom (14));
-            freqKnob->setBounds (freqCol);
-            gainLabel->setBounds (gainCol.removeFromBottom (14));
-            gainKnob->setBounds (gainCol);
-
-            if (octSlider != nullptr)
-            {
-                // the mid bells' bandwidth sweep - the cuts' own selector
-                // geometry, one band width wide, riding the full band
-                octSlider->setBounds (bottom.reduced (1, 1));
-
-                // and the bell glyph BEFORE the words (v2.72.0,
-                // Clement's remark 1): the text box is 150 px centred in
-                // the selector, so the glyph hugs its left edge and
-                // rides the same 18 px line the text sits in
-                bandIcon->setBounds (bottom.getCentreX() - 75 - 18,
-                                     bottom.getY() + 24, 16, 16);
-            }
-            else if (modeButton != nullptr)
-            {
-                // the outer bands' BELL/SHELF plate, centred under its
-                // band - the top 26 px of the band, as ever
-                auto control = bottom.removeFromTop (26);
-                modeButton->setBounds (control.withSizeKeepingCentre (
-                    juce::jmin (control.getWidth(), 76), 20));
-            }
+            // and the bell glyph BEFORE the words (v2.72.0,
+            // Clement's remark 1): the text box is 150 px centred in
+            // the selector, so the glyph hugs its left edge and
+            // rides the same 18 px line the text sits in
+            bandIcon->setBounds (bottom.getCentreX() - 75 - 18,
+                                 bottom.getY() + 24, 16, 16);
+        }
+        else if (modeButton != nullptr)
+        {
+            // the outer bands' BELL/SHELF plate, centred under its
+            // band - the top 26 px of the band, as ever
+            auto control = bottom.removeFromTop (26);
+            modeButton->setBounds (control.withSizeKeepingCentre (
+                juce::jmin (control.getWidth(), 76), 20));
         }
     }
 
-    // ---- the dynamics (v2.68.0, Clement's remark; re-cut in
-    // v2.70.0, Clement's remark 2): the two stages stand side by side
-    // as two VERTICAL blocks - the expander owns the LEFT half of the
-    // band, the compressor the RIGHT one. Each block is one column:
-    // the IN, OUT and GR ladders together at its left edge
-    // (v2.72.0, Clement's request), and a three-by-three control grid
-    // beside them - MIX,
-    // THRESH and RELEASE across the top, RANGE (GAIN on the
-    // compressor) and RATIO across the middle with the FAST ATK
-    // plate beside them, the SC HPF and SC LPF selectors and the
-    // LISTEN push across the bottom. The knobs sit smaller than the
-    // row-1 and EQ columns - the SSL 500-series density - and the
-    // whole band is one row tall. v2.70.0 (remark 6): the ATTACK and
-    // LISTEN captions are gone - the plates say FAST ATK / SLOW ATK
-    // and LISTEN on their own, so their cells stand full height
-    auto expBlock  = dynArea.removeFromLeft (dynArea.getWidth() / 2);
-    auto compBlock = dynArea;
+    // ---- the dynamics (v2.68.0, re-cut in v2.70.0, stacked in
+    // v2.75.0): the two stages read as two stacked stages down the
+    // console's middle column - the EXPANDER at the top, the
+    // COMPRESSOR under it, the reserved TRANSIENT frame between them
+    // exactly where the sound will one day flow. Each stage is one
+    // horizontal block: the IN, OUT and GR ladders together at its
+    // left edge (v2.72.0, Clement's request), and a three-by-three
+    // control grid beside them - MIX, THRESH and RELEASE across the
+    // top, RANGE (GAIN on the compressor) and RATIO across the middle
+    // with the FAST ATK plate beside them, the SC HPF and SC LPF
+    // selectors and the LISTEN push across the bottom. The knobs sit
+    // smaller than the row-1 and EQ columns - the SSL 500-series
+    // density. v2.70.0 (remark 6): the ATTACK and LISTEN captions are
+    // gone - the plates say FAST ATK / SLOW ATK and LISTEN on their
+    // own, so their cells stand full height
+    auto expBlock = column2.removeFromTop (366);
+    column2.removeFromTop (6);   // a breath between the stages
+
+    // v2.75.0: the TRANSIENT designer's own reserved slot - the
+    // painted frame names the section the coming builds will fill
+    transientFrame = column2.removeFromTop (366);
+    column2.removeFromTop (6);   // a breath between the stages
+
+    auto compBlock = column2;
 
     // one layout for both stages: the same control set in the same
     // order, the same ladders, so the two halves read as one design.
@@ -3332,8 +3383,13 @@ void CostesStripEditor::resized()
         {
             auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
                                      *captions[(size_t) i]);
+            // v2.75.0: the stage grew to a 112 px cell, so the knobs
+            // CLAMP their height at 64 - without the clamp the disc
+            // would top the row-1 trim knob's own 70 px and break the
+            // engraved density the 500-series look carries
             knobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 72), cell.getHeight()));
+                juce::jmin (cell.getWidth(), 72),
+                juce::jmin (cell.getHeight(), 64)));
         }
 
         // the middle row: RANGE (GAIN on the compressor) and RATIO,
@@ -3348,8 +3404,10 @@ void CostesStripEditor::resized()
         {
             auto cell = captionCell (midRow.removeFromLeft (midW).reduced (2, 0),
                                      *captions[(size_t) (3 + i)]);
+            // v2.75.0: the same 64 px clamp as the top row
             knobs[(size_t) (3 + i)]->setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 72), cell.getHeight()));
+                juce::jmin (cell.getWidth(), 72),
+                juce::jmin (cell.getHeight(), 64)));
         }
 
         // v2.70.0 (Clement's remark 6): no caption under the plate any
@@ -3433,6 +3491,50 @@ void CostesStripEditor::resized()
                         compListenButton,
                         compLinkLabel,
                         compLinkSlider);
+    }
+
+    // ---- column 3: the output chain ----
+    // six 180 px slots: five of them stay RESERVED - engraved empty
+    // frames that name the sections the coming builds will fill
+    // (PHASE INVERT, STEREO PAN, STEREO WIDTH, MONO MAKER, OUTPUT
+    // TRIM) - and the fifth slot is DRIVE, the column's one live
+    // control today: the knob, its caption and glyph, the OS plate
+    // under it all, the same per-column pattern it has always carried
+    for (int i = 0; i < 6; ++i)
+    {
+        auto slot = column3.removeFromTop (180);
+
+        if (i < 5)
+            column3.removeFromTop (6);   // a breath between the slots
+
+        if (i == 4)
+        {
+            auto cell = slot.reduced (8, 2);
+
+            // the OS plate rides the cell's bottom, as ever
+            auto toggleBounds = cell.removeFromBottom (26);
+            toggleBounds = toggleBounds.withSizeKeepingCentre (
+                juce::jmin (toggleBounds.getWidth(), 110), 26);
+            oversampleButton.setBounds (toggleBounds);
+
+            auto driveCaption = cell.removeFromBottom (18);
+            driveLabel.setBounds (driveCaption);
+
+            const int driveTextWidth = driveLabel.getFont()
+                                          .getStringWidth (driveLabel.getText());
+            driveIcon.setBounds (driveCaption.getCentreX() - driveTextWidth / 2 - 21,
+                                driveCaption.getY() + 1, 16, 16);
+
+            driveKnob.setBounds (cell.withSizeKeepingCentre (
+                juce::jmin (cell.getWidth(), 96),
+                juce::jmin (cell.getHeight(), 96)));
+        }
+        else
+        {
+            // the reserved frames store the slot's own bounds - the
+            // silkscreen paints each one's name at its head
+            reservedFrames[(size_t) (i < 4 ? i : 4)] = slot;
+        }
     }
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
