@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.80.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.81.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,34 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.81.0** — *Four remarks, four fixes - the curve finally rides the
+  sidechain readouts, the filters grow, and the EQ's glyphs follow
+  their plates.*
+  - **The SC readouts' glyphs are really there.** The v2.80.0 build
+    never drew them: a slider that is not yet attached to the editor
+    answers JUCE's own default look-and-feel when its readout box is
+    born, so the glyph-aware label never got created. The four SC
+    selectors carry the strip's look-and-feel themselves now, and
+    their readouts read [curve] "off" / [curve] "90 Hz" as intended.
+  - **The hold bars read fatter.** The GR ladders' peak-hold bars and
+    the IN ladders' threshold bars grew from 3.4 to 4.6 px, and the
+    IN and OUT ladders' peak-hold markers from 2.4 to 3.6 - the
+    whole meter language reads at a glance.
+  - **The filters section is rebuilt.** The HPF / LPF button stands in
+    its cell's horizontal middle with its curve glyph directly under
+    it, the knobs grow into one shared 107 x 72 square (the discs 54
+    px, up from 44), and the slope selector shrinks to the EQ width
+    sweeps' own 52 x 38 geometry, centred, its "12 dB/oct" reading
+    smaller inside the box. The two front-end lines grow 30 px each
+    and the panel takes them back: 860 x 824.
+  - **The EQ's outer band glyphs follow their plates.** The LF and HF
+    shapes were picked at paint time but nothing repainted them, so a
+    BELL/SHELF toggle left a stale shape on screen. The 30 Hz meter
+    pass refreshes both icons now - the bell while the plate reads
+    BELL, the band's own shelf while it reads SHELF.
+  - **DSP unchanged.** Readouts, meters and layout only - the audio
+    chain keeps its exact order, and the full harness now runs 958
+    checks.
 - **2.80.0** — *Eight remarks, one console: the front end reads the SSL
   way, the threshold speaks in red, and the grain deepens.*
   - **The cut ON plate and the caption are one button.** A merged

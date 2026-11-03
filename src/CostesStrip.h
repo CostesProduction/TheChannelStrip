@@ -534,6 +534,13 @@ public:
         SectionIcon::Icon readoutGlyph = SectionIcon::Icon::lowCut;
         bool hasReadoutGlyph = false;
 
+        // v2.81.0 (Clement's remark 3): a slider may also speak its
+        // readout SMALLER than JUCE's own - the cut slopes' own
+        // "12 dB/oct" rides at 10 px inside the EQ selectors' own
+        // 52 px box now. The look-and-feel's factory applies it every
+        // time the box is (re)created; 0 keeps the default size
+        float readoutFontHeight = 0.0f;
+
         // with the command key down the click jumps straight to the
         // default and the drag never starts; without it the normal JUCE
         // drag runs untouched
@@ -586,9 +593,10 @@ public:
 
     // v2.78.0 (Clement's remarks 4 and 6): every band's glyph stands
     // under its band's name now, in the row's margin column - the two
-    // mid bells, and (out of the getter's reach) the two outer bands'
-    // dynamic shapes, which follow their BELL/SHELF plates. In band
-    // order (LMF then HMF) for the offline test harness
+    // mid bells; the two outer bands' dynamic shapes, which follow
+    // their BELL/SHELF plates, live in their own getter below
+    // (v2.81.0). In band order (LMF then HMF) for the offline test
+    // harness
     std::array<SectionIcon*, 2> getEqBandIcons()
     {
         return { &eqBand2Icon, &eqBand3Icon };
@@ -605,6 +613,63 @@ public:
     {
         return { &eq1ModeButton, &eq4ModeButton };
     }
+
+    // v2.81.0 (Clement's remark 4): the outer bands' OWN glyphs - the
+    // two SectionIcons that follow their BELL/SHELF plates (the
+    // follows member). Public so the offline harness can paint them
+    // and prove the shape tracks the plate, bell for bell, shelf for
+    // shelf
+    std::array<SectionIcon*, 2> getEqOuterBandIcons()
+    {
+        return { &eqBand1Icon, &eqBand4Icon };
+    }
+
+    // v2.81.0: the four SC selectors' readout labels. JUCE parents
+    // each slider's value box to the slider itself (its one child
+    // component), so the harness can reach the label and cast it to
+    // the glyph-aware type - proving the look-and-feel's factory
+    // really built it, the proof the v2.80.0 build could not give
+    // (the DEFAULT look-and-feel had been building a plain label)
+    std::array<juce::Label*, 4> getScReadoutLabels()
+    {
+        return { dynamic_cast<juce::Label*> (compHpfSlider.getChildComponent (0)),
+                 dynamic_cast<juce::Label*> (compScLpfSlider.getChildComponent (0)),
+                 dynamic_cast<juce::Label*> (expScHpfSlider.getChildComponent (0)),
+                 dynamic_cast<juce::Label*> (expScLpfSlider.getChildComponent (0)) };
+    }
+
+    // v2.80.0 (Clement's remark 6): the SC selectors' readout label -
+    // the slider's own curve glyph drawn at the left of the value, so
+    // the readout reads [curve] "off" / [curve] "90 Hz" and the words
+    // "SC HPF" are gone. v2.81.0: the struct stands in the PUBLIC
+    // section now so the harness can name the type and prove the
+    // look-and-feel's factory really built the box - the v2.80.0
+    // build never showed the glyph, because a parentless slider still
+    // answers JUCE's own DEFAULT factory at setTextBoxStyle time; the
+    // SC sliders carry `look` themselves now (see the constructor)
+    struct GlyphReadoutLabel : public juce::Label
+    {
+        explicit GlyphReadoutLabel (SectionIcon::Icon glyphType) : glyph (glyphType) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds();
+
+            // the curve at the readout's left, 12 px in an 18 px strip -
+            // the same engraved silkscreen colour the value speaks
+            auto glyphArea = bounds.removeFromLeft (16);
+            SectionIcon::drawGlyph (g, glyphArea.toFloat().reduced (2.0f),
+                                    glyph, findColour (juce::Label::textColourId));
+
+            // then the value, centred in the room that is left - the
+            // readout never grows: the glyph rides INSIDE the old box
+            g.setFont (getFont());
+            g.setColour (findColour (juce::Label::textColourId));
+            g.drawText (getText(), bounds, juce::Justification::centred);
+        }
+
+        SectionIcon::Icon glyph;
+    };
 
     // v2.77.0 (Clement's remark): the four band names stand in a slim
     // margin column at their rows' left now, level with their knobs,
@@ -1024,35 +1089,9 @@ private:
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
     //
-    // v2.80.0 (Clement's remark 6): the SC selectors' readout label -
-    // the slider's own curve glyph drawn at the left of the value, so
-    // the readout reads [curve] "off" / [curve] "90 Hz" and the words
-    // "SC HPF" are gone. Private to the editor; only the
-    // look-and-feel's factory below creates it
-    struct GlyphReadoutLabel : public juce::Label
-    {
-        explicit GlyphReadoutLabel (SectionIcon::Icon glyphType) : glyph (glyphType) {}
-
-        void paint (juce::Graphics& g) override
-        {
-            auto bounds = getLocalBounds();
-
-            // the curve at the readout's left, 12 px in an 18 px strip -
-            // the same engraved silkscreen colour the value speaks
-            auto glyphArea = bounds.removeFromLeft (16);
-            SectionIcon::drawGlyph (g, glyphArea.toFloat().reduced (2.0f),
-                                    glyph, findColour (juce::Label::textColourId));
-
-            // then the value, centred in the room that is left - the
-            // readout never grows: the glyph rides INSIDE the old box
-            g.setFont (getFont());
-            g.setColour (findColour (juce::Label::textColourId));
-            g.drawText (getText(), bounds, juce::Justification::centred);
-        }
-
-        SectionIcon::Icon glyph;
-    };
-
+    // The glyph-aware readout label itself stands in the PUBLIC
+    // section above (v2.81.0) - only this look-and-feel's factory
+    // creates it
     struct StripLookAndFeel : public juce::LookAndFeel_V4
     {
         void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h,
@@ -1061,13 +1100,25 @@ private:
 
         // v2.80.0 (Clement's remark 6): a CostesSlider that carries a
         // readout glyph gets the glyph-aware label; every other slider
-        // keeps JUCE's own
+        // keeps JUCE's own. v2.81.0 (Clement's remark 3): a slider that
+        // speaks a smaller readout gets its font applied HERE - the
+        // factory is the one place every (re)creation of the box
+        // passes through, so the size can never drift back
         juce::Label* createSliderTextBox (juce::Slider& slider) override
         {
             auto* asCostes = dynamic_cast<CostesSlider*> (&slider);
 
-            if (asCostes != nullptr && asCostes->hasReadoutGlyph)
-                return new GlyphReadoutLabel (asCostes->readoutGlyph);
+            if (asCostes != nullptr)
+            {
+                juce::Label* box = asCostes->hasReadoutGlyph
+                    ? static_cast<juce::Label*> (new GlyphReadoutLabel (asCostes->readoutGlyph))
+                    : juce::LookAndFeel_V4::createSliderTextBox (slider);
+
+                if (asCostes->readoutFontHeight > 0.0f)
+                    box->setFont (juce::Font (juce::FontOptions (asCostes->readoutFontHeight)));
+
+                return box;
+            }
 
             return juce::LookAndFeel_V4::createSliderTextBox (slider);
         }

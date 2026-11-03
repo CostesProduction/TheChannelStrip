@@ -2525,8 +2525,21 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         addAndMakeVisible (slope);
     };
 
-    setUpSlope (lowCutSlope, 2.0f);
-    setUpSlope (highCutSlope, 2.0f);
+    // v2.81.0 (Clement's remark 3): the cut slopes shrink to the EQ
+    // selectors' own 52 px geometry and speak their "12 dB/oct"
+    // SMALLER - readoutFontHeight hands the font to the
+    // look-and-feel's factory, so the box is born with it; and the
+    // sliders carry `look` themselves, the same root-cause fix the SC
+    // selectors' glyph got (a parentless slider answers the DEFAULT
+    // look-and-feel at setTextBoxStyle time, and the factory is where
+    // the font lands)
+    lowCutSlope.readoutFontHeight = 10.0f;
+    highCutSlope.readoutFontHeight = 10.0f;
+    lowCutSlope.setLookAndFeel (&look);
+    highCutSlope.setLookAndFeel (&look);
+
+    setUpSlope (lowCutSlope, 2.0f, 52);
+    setUpSlope (highCutSlope, 2.0f, 52);
 
     // the bandwidth sweeps of EQ bands 2/3 (v2.61.0): the same horizontal
     // selector the cuts use for their slopes, reading the bell's width
@@ -2572,7 +2585,19 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // [curve] "off" at rest and [curve] "90 Hz" once moved, and the
     // words "SC HPF" are gone. The flags ride BEFORE setUpSlope: the
     // readout label is created once, inside setTextBoxStyle, and the
-    // look-and-feel's factory reads the flag right there
+    // look-and-feel's factory reads the flag right there.
+    // v2.81.0 - THE FIX THE v2.80.0 BUILD NEEDED: the factory never
+    // ran, because at setTextBoxStyle time the slider is not attached
+    // to the editor yet, and JUCE hands the readout box to the
+    // DEFAULT look-and-feel, whose plain label has no glyph. The four
+    // SC selectors carry `look` THEMSELVES now, so their readout is
+    // born from our factory with the flags already set - the curve
+    // really stands at the value's left, on screen this time
+    compHpfSlider.setLookAndFeel (&look);
+    compScLpfSlider.setLookAndFeel (&look);
+    expScHpfSlider.setLookAndFeel (&look);
+    expScLpfSlider.setLookAndFeel (&look);
+
     compHpfSlider.readoutGlyph     = SectionIcon::Icon::lowCut;
     compHpfSlider.hasReadoutGlyph  = true;
     compScLpfSlider.readoutGlyph   = SectionIcon::Icon::highCut;
@@ -2828,8 +2853,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.78.0 (Clement's remarks): the console TIGHTENS AGAIN - the
     // signature moves from the left edge to the merged front-end
     // block's own header, the EQ caption words and band intertitles
-    // are gone, and the panel drops from 860 x 814 to 860 x 764
-    setSize (860, 764);
+    // are gone, and the panel drops from 860 x 814 to 860 x 764.
+    // v2.81.0 (Clement's remark 3): the two front-end lines grow 30 px
+    // each for the fatter filter knobs (the 107 x 72 squares, 54 px
+    // discs) and their centred slope selectors - the panel takes the
+    // 60 px back, 860 x 824, and the EQ keeps its own whole room
+    setSize (860, 824);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3094,6 +3123,16 @@ void CostesStripEditor::timerCallback()
     compInMeter.repaint();
     compOutMeter.repaint();
     compGrMeter.repaint();
+
+    // v2.81.0 (Clement's remark 4): the outer bands' glyphs repaint
+    // here too - they FOLLOW their BELL/SHELF plates (the shape is
+    // picked at paint time), but nothing ever told them the plate
+    // had moved, so a toggle left the v2.78.0 shape stale on screen.
+    // The 30 Hz pass hands the two of them their fresh shape within
+    // a frame of ANY change - a plate click, a session restore,
+    // anything
+    eqBand1Icon.repaint();
+    eqBand4Icon.repaint();
 }
 
 void CostesStripEditor::resized()
@@ -3128,14 +3167,22 @@ void CostesStripEditor::resized()
     // and the EQ closes the column as ever
     column1.removeFromTop (24);   // the signature's own band
 
-    // the front end's two lines (v2.80.0, Clement's remarks 1, 2 and
-    // 3): the GAINS at the left of their lines and the high
-    // frequencies at the top - TRIM with LPF on the first line, TILT
-    // with HPF under it - so the column reads the signal's own
-    // geography. Every cell the same shape, every one of the four
-    // knobs the SAME 107 x 62 square: 20 px of air, the knob, the
-    // caption strip, and (on the cuts) the slope selector under the
-    // knob at the EQ sliders' own 38 px geometry
+    // the front end's two lines (v2.81.0, Clement's remark 3, grown
+    // out of v2.80.0's remarks 1, 2 and 3): the GAINS at the left of
+    // their lines and the high frequencies at the top - TRIM with LPF
+    // on the first line, TILT with HPF under it - so the column reads
+    // the signal's own geography. Every cell the same shape, and the
+    // four knobs share ONE 107 x 72 square now - the 44 px discs the
+    // 62 px squares clipped them to were too small, so the lines
+    // grow 30 px each and the knobs' discs grow with them, 54 px.
+    // The cut cell reads centred: the merged HPF / LPF button in the
+    // cell's own horizontal middle, the curve glyph under it, then
+    // the knob square - the SAME y its line's gain knob owns, so the
+    // two discs of a line sit level - and the slope selector under
+    // the knob, the EQ selectors' own 52 x 38 geometry, centred too.
+    // Horizontally the line's lower band reads Clement's own words:
+    // the gain's own value ("0.5 dB"), then the little slope slider,
+    // then the cut's own ("24 kHz")
     const auto frontEndLine = [] (juce::Rectangle<int> row,
                                   CostesSlider& gainKnob, juce::Label& gainCaption,
                                   SectionIcon& gainIcon,
@@ -3146,10 +3193,11 @@ void CostesStripEditor::resized()
         auto gainCell = row.removeFromLeft (cellW).reduced (4, 2);
         auto cutCell  = row.reduced (4, 2);
 
-        // the gain cell: air, the knob, then the caption with its
-        // glyph hugging the text's left edge
-        gainCell.removeFromTop (20);
-        gainKnob.setBounds (gainCell.removeFromTop (62));
+        // the gain cell: the air sits ABOVE so both knobs of the line
+        // share one square - the same 107 x 72, the same y - then the
+        // caption with its glyph hugging the text's left edge
+        gainCell.removeFromTop (38);
+        gainKnob.setBounds (gainCell.removeFromTop (72));
         auto gainCaptionBounds = gainCell.removeFromTop (18);
         gainCaption.setBounds (gainCaptionBounds);
 
@@ -3157,37 +3205,40 @@ void CostesStripEditor::resized()
         gainIcon.setBounds (gainCaptionBounds.getCentreX() - textWidth / 2 - 21,
                             gainCaptionBounds.getY() + 1, 16, 16);
 
-        // the cut cell (v2.80.0, Clement's remark 1): the merged
+        // the cut cell (v2.81.0, Clement's remark 3): the merged
         // button IS the caption - "HPF" / "LPF" written on the plate
         // itself, lit amber when the filter processes, black when it
-        // is bypassed - and it takes the old caption word's own
-        // top-left corner, above the glyph
-        auto topStrip = cutCell.removeFromTop (20);
+        // is bypassed - and it stands in the cell's own horizontal
+        // MIDDLE now
+        auto topStrip = cutCell.removeFromTop (18);
         // the plate owns the 56 px its horizontal reading needs: the
-        // LED's 20 plus the word's own room
-        cutButton.setBounds (topStrip.removeFromLeft (56));
+        // LED's 20 plus the word's own room - centred in the cell
+        cutButton.setBounds (topStrip.withSizeKeepingCentre (56, 18));
 
-        // the knob under the strip, then the slope selector under the
-        // knob - centred, the EQ sliders' own 38 px tall geometry
-        cutKnob.setBounds (cutCell.removeFromTop (62));
+        // the filter's own glyph rides DIRECTLY UNDER the merged
+        // button, in the cell's own middle too - the identity strip
+        // reads plate, curve, knob, one centred column
+        auto glyphStrip = cutCell.removeFromTop (16);
+        cutIcon.setBounds (glyphStrip.withSizeKeepingCentre (16, 16));
 
-        // the filter's own glyph rides UNDER the merged button, at
-        // the knob square's own top-left corner - the corner the
-        // rotary disc never reaches, exactly where the caption word
-        // once carried it
-        cutIcon.setBounds (cutKnob.getX() + 2,
-                           cutKnob.getY() + 2, 16, 16);
+        // the knob square - level with its line's gain knob, both
+        // 107 x 72, so the two 54 px discs of a line sit as one
+        cutCell.removeFromTop (4);
+        cutKnob.setBounds (cutCell.removeFromTop (72));
 
-        cutSlope.setBounds (cutCell.withSizeKeepingCentre (76, 38));
+        // then the slope selector under the knob - the EQ selectors'
+        // own 52 x 38 geometry, centred, its "12 dB/oct" reading
+        // smaller inside the 52 px box
+        cutSlope.setBounds (cutCell.withSizeKeepingCentre (52, 38));
     };
 
-    auto lineOne = column1.removeFromTop (124);
+    auto lineOne = column1.removeFromTop (154);
     frontEndLine (lineOne, trimInKnob, trimInLabel, trimIcon,
                   highCutKnob, highCutSlope, highCutIcon, highCutOnButton);
 
     column1.removeFromTop (4);   // a breath between the lines
 
-    auto lineTwo = column1.removeFromTop (124);
+    auto lineTwo = column1.removeFromTop (154);
     frontEndLine (lineTwo, tiltKnob, tiltLabel, tiltIcon,
                   lowCutKnob, lowCutSlope, lowCutIcon, lowCutOnButton);
 
@@ -3725,11 +3776,12 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar on an IN
     // ladder - the stage's own threshold corner drawn as a red bar,
-    // the same 3.4 px weight and style the GR ladder's peak-hold bar
+    // the same weight and style the GR ladder's peak-hold bar
     // carries, the HF band's own saturated red. It reads the
     // parameter the THRESH knob drives, so the bar and the knob can
     // never disagree; a degenerate resize returned above and never
-    // reaches this bar
+    // reaches this bar. v2.81.0 (Clement's remark 2): the bar grew a
+    // touch fatter, 3.4 to 4.6 px, to read at a glance
     if (mode == Mode::input && thresholdDb != nullptr)
     {
         const float v = juce::jlimit (lowDb, highDb, thresholdDb());
@@ -3737,7 +3789,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         y = juce::jlimit (top, bottom - 1.0f, y);
 
         g.setColour (eqHfDisc);
-        g.drawLine (lx, y, lx + lw, y, 3.4f);
+        g.drawLine (lx, y, lx + lw, y, 4.6f);
     }
 
     // the peak-hold marker (v2.67.0): a cream hairline across the
@@ -3763,16 +3815,19 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         // the panel's own pastel blue - the LO MID cap's colour - as a
         // thick bar that reads across the orange LEDs; v2.69.0
         // (Clement's remark): BOTH holds grew thicker - the GR bar and
-        // the IN and OUT ladders' cream marker
+        // the IN and OUT ladders' cream marker; v2.81.0 (Clement's
+        // remark 2): both grew a touch fatter again - the GR bar 3.4
+        // to 4.6 px, level with the IN ladder's threshold bar, the
+        // IN and OUT markers 2.4 to 3.6
         if (mode == Mode::gainReduction)
         {
             g.setColour (compKnobDisc);
-            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 3.4f);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 4.6f);
         }
         else
         {
             g.setColour (knobPointer);
-            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 2.4f);
+            g.drawLine (juce::Line<float> (lx, markerY, lx + lw, markerY), 3.6f);
         }
     }
 
