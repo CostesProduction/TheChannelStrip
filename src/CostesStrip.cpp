@@ -2464,16 +2464,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     inputSectionLabel.setColour (juce::Label::textColourId, engravingDim);
     addAndMakeVisible (inputSectionLabel);
 
-    // v2.75.0 (Clement's request): the three-column grid names its
-    // sections - TILT and FILTERS headers read the same engraved way
-    // the INPUT one always has, so column 1 stacks as four named
-    // stages: INPUT, TILT, FILTERS, EQ
-    tiltSectionLabel.setText ("TILT", juce::dontSendNotification);
-    tiltSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-    tiltSectionLabel.setJustificationType (juce::Justification::centred);
-    tiltSectionLabel.setColour (juce::Label::textColourId, engravingDim);
-    addAndMakeVisible (tiltSectionLabel);
-
+    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
+    // ROW - the FILTERS band names the cuts' line between them, the
+    // same engraved style the INPUT header carries (the TILT knob
+    // speaks its own name through its caption, so it keeps no band
+    // of its own)
     filtersSectionLabel.setText ("FILTERS", juce::dontSendNotification);
     filtersSectionLabel.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     filtersSectionLabel.setJustificationType (juce::Justification::centred);
@@ -2797,14 +2792,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         }
     }
 
-    // v2.75.0 (Clement's request): the console re-organises as THREE
-    // vertical columns, the signal's own order read top to bottom and
-    // left to right - the front end (INPUT, TILT, FILTERS, EQ), the
-    // dynamics (EXPANDER, the TRANSIENT slot, COMPRESSOR), and the
-    // output chain (DRIVE today, its neighbours engraved and waiting).
-    // The panel grows tall enough for every section to breathe: the
-    // channel-strip module, like the real thing
-    setSize (860, 1144);
+    // v2.76.0 (Clement's remarks): the three-column console
+    // TIGHTENS - the front end reads two knobs a row, the dynamics
+    // stages return to their v2.74 height, the column-3 slots slim
+    // to 150 px - so the panel drops from 860 x 1144 to 860 x 964
+    // while keeping the shell's own width and the signal's own
+    // reading order
+    setSize (860, 964);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -2959,12 +2953,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
             { 45.0f, 10.0f }, { 50.0f, 10.0f }
         };
 
-        // v2.75.0: the signature rides the taller panel's own middle
+        // v2.76.0: the signature rides the shorter panel's own middle
         // (the three-column grid starts at x = 28, so the rotated
         // drawing still owns the whole left margin)
         g.saveState();
         g.addTransform (juce::AffineTransform::rotation (
-            -juce::MathConstants<float>::halfPi, 17.0f, 572.0f));
+            -juce::MathConstants<float>::halfPi, 17.0f, 482.0f));
 
         // the seismic line at the signature's foot, the logo's own
         // 50 x 20 trace scaled to 24 px - a heartbeat running up the
@@ -2973,19 +2967,19 @@ void CostesStripEditor::paint (juce::Graphics& g)
 
         for (int i = 1; i < 14; ++i)
             g.drawLine (juce::Line<float> (17.0f + trace[i - 1][0] * 0.48f,
-                                           565.0f + trace[i - 1][1] * 0.48f,
+                                           475.0f + trace[i - 1][1] * 0.48f,
                                            17.0f + trace[i][0] * 0.48f,
-                                           565.0f + trace[i][1] * 0.48f), 1.8f);
+                                           475.0f + trace[i][1] * 0.48f), 1.8f);
 
         // the name itself: COSTES in engraving, a small tick, CONSOLE
         // in dim caps - the same stacked wording as the old top band
         g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-        g.drawText ("COSTES", juce::Rectangle<int> (45, 565, 66, 14),
+        g.drawText ("COSTES", juce::Rectangle<int> (45, 475, 66, 14),
                     juce::Justification::centredLeft);
         g.setColour (engravingDim.withAlpha (0.7f));
-        g.drawVerticalLine (115, 567.0f, 579.0f);
+        g.drawVerticalLine (115, 477.0f, 489.0f);
         g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 566, 66, 14),
+        g.drawText ("CONSOLE", juce::Rectangle<int> (119, 476, 66, 14),
                     juce::Justification::centredLeft);
 
         g.restoreState();
@@ -2994,18 +2988,18 @@ void CostesStripEditor::paint (juce::Graphics& g)
     // v2.75.0 (Clement's request): the silkscreen follows the three
     // columns - two long vertical dividers separate the front end
     // from the dynamics and the dynamics from the output chain, a
-    // short engraved rule names each of column 1's four sections, and
-    // the reserved slots draw their own empty frames with the
-    // section's name at the frame's head
+    // short engraved rule names each of column 1's three bands
+    // (v2.76.0: INPUT, FILTERS, EQ), and the reserved slots draw
+    // their own empty frames with the section's name at the frame's
+    // head
     g.setColour (engravingDim.withAlpha (0.5f));
 
     g.drawVerticalLine (248, 32.0f, (float) getHeight() - 12.0f);
     g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
 
     g.drawLine (30.0f, 49.0f, 240.0f, 49.0f, 1.0f);
-    g.drawLine (30.0f, 167.0f, 240.0f, 167.0f, 1.0f);
-    g.drawLine (30.0f, 285.0f, 240.0f, 285.0f, 1.0f);
-    g.drawLine (30.0f, 543.0f, 240.0f, 543.0f, 1.0f);
+    g.drawLine (30.0f, 187.0f, 240.0f, 187.0f, 1.0f);
+    g.drawLine (30.0f, 345.0f, 240.0f, 345.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3091,59 +3085,55 @@ void CostesStripEditor::resized()
     auto column3 = area;        // 142 wide, 12 of margin at the right
 
     // ---- column 1: the front end ----
-    // INPUT: the trim knob's own named section - the knob above its
-    // caption, the section glyph hugging the text's left edge, the
-    // same per-column pattern the MVP's cells have always carried
-    auto inputSection = column1.removeFromTop (112);
+    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
+    // ROW - the INPUT band heads the column, TRIM and TILT share the
+    // first line, the FILTERS band names the cuts' line under it,
+    // and the EQ closes the column as ever
+    auto inputSection = column1.removeFromTop (26);
     inputSectionLabel.setBounds (inputSection.removeFromTop (20));
 
-    auto inputCell = inputSection.reduced (8, 2);
-
-    auto inputCaption = inputCell.removeFromBottom (18);
-    trimInLabel.setBounds (inputCaption);
-
-    const int inputTextWidth = trimInLabel.getFont()
-                                  .getStringWidth (trimInLabel.getText());
-    trimIcon.setBounds (inputCaption.getCentreX() - inputTextWidth / 2 - 21,
-                        inputCaption.getY() + 1, 16, 16);
-
-    trimInKnob.setBounds (inputCell);
-
-    column1.removeFromTop (6);  // a breath between the sections
-
-    // TILT: the tone shifter's own named section under the input -
-    // the single-knob pattern again, so the column reads as one
-    // engraved stack. v2.75.0: only the LAYOUT moves here; the tilt
-    // still runs post-compressor in the chain until Clement moves
-    // the DSP itself
-    auto tiltSection = column1.removeFromTop (112);
-    tiltSectionLabel.setBounds (tiltSection.removeFromTop (20));
-
-    auto tiltCell = tiltSection.reduced (8, 2);
-
-    auto tiltCaption = tiltCell.removeFromBottom (18);
-    tiltLabel.setBounds (tiltCaption);
-
-    const int tiltTextWidth = tiltLabel.getFont().getStringWidth (tiltLabel.getText());
-    tiltIcon.setBounds (tiltCaption.getCentreX() - tiltTextWidth / 2 - 21,
-                        tiltCaption.getY() + 1, 16, 16);
-
-    tiltKnob.setBounds (tiltCell);
-
-    column1.removeFromTop (6);  // a breath between the sections
-
-    // FILTERS: the two cuts stack as two rows - LOW CUT at the top,
-    // HIGH CUT under it, the sound's own order - each row carrying
-    // the per-column geometry the cuts have kept since v2.59: the
-    // on/off plate at the knob's top-left corner, the slope selector
-    // under it, the caption and its glyph at the bottom
-    auto filtersSection = column1.removeFromTop (252);
-    filtersSectionLabel.setBounds (filtersSection.removeFromTop (20));
+    // the TRIM and TILT line: two cells of the same pattern - knob
+    // above, caption below, the section glyph hugging the text's
+    // left edge
+    auto inputRow = column1.removeFromTop (106);
+    const int inputCellW = inputRow.getWidth() / 2;
 
     for (int i = 0; i < 2; ++i)
     {
-        auto column = filtersSection.removeFromTop (114).reduced (8, 2);
-        filtersSection.removeFromTop (4);   // a breath between the rows
+        auto column = inputRow.removeFromLeft (inputCellW).reduced (4, 2);
+
+        auto* knob = &trimInKnob;
+        auto* caption = &trimInLabel;
+        SectionIcon* icon = &trimIcon;
+
+        if (i == 1) { knob = &tiltKnob; caption = &tiltLabel; icon = &tiltIcon; }
+
+        auto captionBounds = column.removeFromBottom (18);
+        caption->setBounds (captionBounds);
+
+        const int textWidth = caption->getFont().getStringWidth (caption->getText());
+        icon->setBounds (captionBounds.getCentreX() - textWidth / 2 - 21,
+                         captionBounds.getY() + 1, 16, 16);
+
+        knob->setBounds (column);
+    }
+
+    column1.removeFromTop (6);   // a breath before the FILTERS band
+
+    // FILTERS: the engraved band that names the cuts' line - LOW CUT
+    // and HIGH CUT share one row, each column carrying the per-knob
+    // geometry the cuts have kept since v2.59: the on/off plate at
+    // the knob's top-left corner, the slope selector under it, the
+    // caption and its glyph at the bottom
+    auto filtersSection = column1.removeFromTop (26);
+    filtersSectionLabel.setBounds (filtersSection.removeFromTop (20));
+
+    auto filtersRow = column1.removeFromTop (120);
+    const int filtersCellW = filtersRow.getWidth() / 2;
+
+    for (int i = 0; i < 2; ++i)
+    {
+        auto column = filtersRow.removeFromLeft (filtersCellW).reduced (4, 2);
 
         auto* knob = &lowCutKnob;
         auto* caption = &lowCutLabel;
@@ -3307,15 +3297,14 @@ void CostesStripEditor::resized()
     // density. v2.70.0 (remark 6): the ATTACK and LISTEN captions are
     // gone - the plates say FAST ATK / SLOW ATK and LISTEN on their
     // own, so their cells stand full height
-    auto expBlock = column2.removeFromTop (366);
-    column2.removeFromTop (6);   // a breath between the stages
+    auto expBlock = column2.removeFromTop (245);
+    auto compBlock = column2.removeFromBottom (245);
 
-    // v2.75.0: the TRANSIENT designer's own reserved slot - the
-    // painted frame names the section the coming builds will fill
-    transientFrame = column2.removeFromTop (366);
-    column2.removeFromTop (6);   // a breath between the stages
-
-    auto compBlock = column2;
+    // v2.76.0 (Clement's remarks): the stages returned to their
+    // v2.74 height, and the TRANSIENT slot keeps its own engraved
+    // 220 px - centred between the two stages, the free air split
+    // evenly above and below it
+    transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 220);
 
     // one layout for both stages: the same control set in the same
     // order, the same ladders, so the two halves read as one design.
@@ -3383,10 +3372,10 @@ void CostesStripEditor::resized()
         {
             auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
                                      *captions[(size_t) i]);
-            // v2.75.0: the stage grew to a 112 px cell, so the knobs
-            // CLAMP their height at 64 - without the clamp the disc
-            // would top the row-1 trim knob's own 70 px and break the
-            // engraved density the 500-series look carries
+            // v2.75.0: the knobs CLAMP their height at 64 - a safety
+            // clamp for the taller cells of future stages (v2.76.0:
+            // the cell is 71 px again, so the clamp idles - the knob
+            // sits at 57, under the trim line's own 84)
             knobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
                 juce::jmin (cell.getWidth(), 72),
                 juce::jmin (cell.getHeight(), 64)));
@@ -3494,15 +3483,16 @@ void CostesStripEditor::resized()
     }
 
     // ---- column 3: the output chain ----
-    // six 180 px slots: five of them stay RESERVED - engraved empty
-    // frames that name the sections the coming builds will fill
-    // (PHASE INVERT, STEREO PAN, STEREO WIDTH, MONO MAKER, OUTPUT
-    // TRIM) - and the fifth slot is DRIVE, the column's one live
-    // control today: the knob, its caption and glyph, the OS plate
-    // under it all, the same per-column pattern it has always carried
+    // six 150 px slots (v2.76.0: the shorter panel's own slot): five
+    // of them stay RESERVED - engraved empty frames that name the
+    // sections the coming builds will fill (PHASE INVERT, STEREO
+    // PAN, STEREO WIDTH, MONO MAKER, OUTPUT TRIM) - and the fifth
+    // slot is DRIVE, the column's one live control today: the knob,
+    // its caption and glyph, the OS plate under it all, the same
+    // per-column pattern it has always carried
     for (int i = 0; i < 6; ++i)
     {
-        auto slot = column3.removeFromTop (180);
+        auto slot = column3.removeFromTop (150);
 
         if (i < 5)
             column3.removeFromTop (6);   // a breath between the slots

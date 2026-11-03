@@ -5647,10 +5647,10 @@ void testCostesStripSectionIcons()
     CostesStripEditor editor (stripProc);
 
     // v2.67.0 (Clement's remark): the panel adopts the shell's own
-    // minimum window size - v2.75.0: the three-column grid grows the
-    // strip to a full standing console
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 1144,
-                "the strip panel opens as the three-column console (860 x 1144)");
+    // width - v2.76.0: the two-knob rows and the v2.74-height
+    // dynamics tighten the three-column console to 860 x 964
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 964,
+                "the strip panel opens as the tightened three-column console (860 x 964)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5904,15 +5904,39 @@ void testCostesStripSectionIcons()
                     && meters[2]->getHeight() == meters[5]->getHeight(),
                 "the expander's stage sits at the top of the middle column, the compressor's under it - two stacked stages");
 
-    // v2.75.0 (Clement's spec): column 1 stacks the front end in the
-    // sound's own order - INPUT (0 = trim), TILT (3), FILTERS (1 =
-    // low cut), then the EQ's first band (7)
+    // v2.76.0 (Clement's remark): the dynamics stages returned to
+    // their v2.74 height - the ladders stand 211 px tall again, the
+    // 500-series density of the one-row band
+    expectTrue (meters[0] != nullptr && meters[3] != nullptr
+                    && meters[0]->getHeight() == 211
+                    && meters[3]->getHeight() == 211,
+                "the dynamics stages stand at their v2.74 height again - the ladders 211 px tall");
+
+    // v2.76.0 (Clement's remark): the front end reads TWO KNOBS A
+    // ROW - TRIM and TILT (0 and 3) share the first line, LOW CUT and
+    // HIGH CUT (1 and 2) the FILTERS line under it, then the EQ's
+    // first band (7) closes the column
     expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
-                    && sliders[1] != nullptr && sliders[7] != nullptr
-                    && sliders[0]->getBounds().getY() < sliders[3]->getBounds().getY()
-                    && sliders[3]->getBounds().getY() < sliders[1]->getBounds().getY()
-                    && sliders[1]->getBounds().getY() < sliders[7]->getBounds().getY(),
-                "column 1 stacks INPUT, TILT, FILTERS and the EQ in the sound's own order");
+                    && sliders[1] != nullptr && sliders[2] != nullptr
+                    && sliders[7] != nullptr
+                    && sliders[0]->getBounds().getY() == sliders[3]->getBounds().getY()
+                    && sliders[1]->getBounds().getY() == sliders[2]->getBounds().getY()
+                    && sliders[1]->getBounds().getY() > sliders[0]->getBounds().getY()
+                    && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
+                "column 1 reads two knobs a row - TRIM and TILT on one line, the two cuts on the FILTERS line, the EQ under it");
+
+    // and the FILTERS band (v2.76.0): the engraved intertitle that
+    // names the cuts' line - it sits BETWEEN the TRIM/TILT row and
+    // the cuts' row, exactly where the two lines meet
+    {
+        auto* filtersLabel = editor.getFiltersSectionLabel();
+        expectTrue (filtersLabel != nullptr && filtersLabel->getText() == "FILTERS"
+                        && filtersLabel->isVisible()
+                        && editor.getLocalBounds().contains (filtersLabel->getBounds())
+                        && filtersLabel->getBounds().getY() > sliders[0]->getBounds().getBottom()
+                        && filtersLabel->getBounds().getBottom() < sliders[1]->getBounds().getY(),
+                    "the FILTERS band names the cuts' line - engraved between the TRIM/TILT row and the cuts");
+    }
 
     // and the three columns themselves: the trim knob inside the
     // 214 px front end, the expander's THRESH (17) inside the middle
@@ -5935,12 +5959,13 @@ void testCostesStripSectionIcons()
 
         expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
                         && meters[3]->getBounds().getY() > transient.getBottom()
+                        && transient.getHeight() == 220
                         && reserved[0].getY() < reserved[1].getY()
                         && reserved[1].getY() < reserved[2].getY()
                         && reserved[2].getY() < reserved[3].getY()
                         && reserved[3].getBottom() <= sliders[4]->getBounds().getY()
                         && sliders[4]->getBounds().getBottom() <= reserved[4].getY(),
-                    "the reserved frames sit engraved in the grid - TRANSIENT between the stages, the output chain around DRIVE");
+                    "the reserved frames sit engraved in the grid - TRANSIENT at its own 220 px between the stages, the output chain around DRIVE");
     }
 
     // v2.72.0 (Clement's request): each stage's GR ladder sits at the
@@ -5978,7 +6003,7 @@ void testCostesStripSectionIcons()
     // the paint itself must survive degenerate sizes: the glyphs draw
     // against whatever bounds the layout hands them
     {
-        const int testSizes[][2] = { { 860, 1144 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
+        const int testSizes[][2] = { { 860, 964 }, { 400, 120 }, { 3, 3 }, { 2000, 800 } };
 
         for (const auto& size : testSizes)
         {
@@ -6014,7 +6039,7 @@ void testCostesStripSectionIcons()
     // (the GR ladders). The degenerate sizes above paint nothing
     // (the early return), so the first real paint here arms the hold
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 1144, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 964, true);
         juce::Graphics g (canvas);
 
         for (int i = 0; i < 6; ++i)
@@ -6030,7 +6055,7 @@ void testCostesStripSectionIcons()
         }
     }
 
-    editor.setSize (860, 1144);
+    editor.setSize (860, 964);
 
     // ---- the equally spaced slope knob (Clement's remark 1) ----
     // the seven legal orders map to the seven equal knob positions

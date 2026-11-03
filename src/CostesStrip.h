@@ -591,6 +591,11 @@ public:
     // header names the right one
     juce::Label* getInputSectionLabel() { return &inputSectionLabel; }
 
+    // v2.76.0 (Clement's remark): the FILTERS band names the cuts'
+    // line between the front end's two-knob rows - public so the
+    // harness can pin its engraved address
+    juce::Label* getFiltersSectionLabel() { return &filtersSectionLabel; }
+
     // v2.75.0 (Clement's request): the reserved slots, public so the
     // offline harness can pin the three-column grid - the TRANSIENT
     // slot waits between the two dynamics stages, and the five
@@ -811,10 +816,10 @@ private:
     // same way their SC LPF neighbours do
     juce::Label expKneeLabel, compLinkLabel;
     juce::Label expSectionLabel, compSectionLabel;
-    // v2.75.0 (Clement's request): the three-column grid names its
-    // own sections - TILT and FILTERS carry their headers the same
-    // engraved way INPUT always has
-    juce::Label tiltSectionLabel, filtersSectionLabel;
+    // v2.76.0 (Clement's remark): the front end reads two knobs a
+    // row - the FILTERS band names the cuts' line, engraved the same
+    // way the INPUT header always has
+    juce::Label filtersSectionLabel;
 
     // v2.75.0 (Clement's request): the reserved slots the future
     // builds will fill - the TRANSIENT stage's slot between the two

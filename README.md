@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.75.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.76.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,28 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.76.0** — *Two knobs a row on the front end, the dynamics back
+  at their natural height - the console tightens.*
+  - **The front end reads two knobs a row.** TRIM and TILT share the
+    first line under the INPUT band, LOW CUT and HIGH CUT share the
+    line the engraved FILTERS band names - each cut keeping its
+    top-left ON/OFF plate, its slope selector and its glyph. The EQ
+    closes the column as four rows of FREQ/GAIN pairs, as ever.
+  - **The dynamics return to their v2.74 height.** The expander and
+    the compressor stand 245 px tall again - the ladders 211 px, the
+    knobs back at their SSL 500-series size - and the reserved
+    TRANSIENT slot holds its own engraved 220 px, centred between
+    the two stages with the free air split evenly.
+  - **A shorter console.** The panel drops from 860 x 1144 to
+    860 x 964: the six column-3 slots slim to 150 px (DRIVE keeps
+    its full 96 px knob), and the COSTES CONSOLE signature rides the
+    new middle of the spine.
+  - **DSP unchanged.** Layout only - the audio chain keeps its exact
+    order until the coming builds re-wire it for real.
+  - *Tests:* 925 checks - the two-knob rows, the restored stage
+    height (211 px ladders), the FILTERS band's address and the
+    220 px TRANSIENT slot all pinned, on top of the v2.75 suite.
 
 - **2.75.0** — *The three-column console - the ground floor for the
   coming features.*
