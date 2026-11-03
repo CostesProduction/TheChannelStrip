@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.73.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.74.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,22 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.74.0** — *Four more of Clément's remarks, all around the
+  dynamics sections.*
+  - **FAST ATK and LISTEN moved up.** Both plates now stack as one
+    centred column in the middle row's third cell, and the room this
+    frees lets the KNEE (expander) / LINK (compressor) selector sit
+    in the SC row's third cell - horizontally aligned with the SC LPF
+    slider at its left, wearing the very same caption geometry.
+  - **An even meter seam.** The IN ladder's numbers column narrowed
+    to the width of air the OUT ladder gives the GR - the
+    frame-to-frame distance reads the same IN-to-OUT as OUT-to-GR.
+  - **Every ten engraved.** The shared IN/OUT scale now marks 0
+    through -70 in tens of dB (was every 20).
+  - **The GR milestones.** The expander's ladder engraves
+    0, 3, 6, 12, 18, 27, 36 and the compressor's 0, 3, 6, 9, 12, 18 -
+    each ladder's tier boundaries and midpoints.
 
 - **2.73.1** — *A harness repair, nothing more: the strip itself is
   untouched.*

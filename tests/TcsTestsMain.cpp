@@ -5824,24 +5824,24 @@ void testCostesStripSectionIcons()
                 "the GR ladders give one LED per dB - 36 over the expander's 0 to 36, 18 over the compressor's 0 to 18");
 
     // and their engraved scales carry their full value lists (v2.70.0,
-    // Clement's remark 3) - more numbers than the old three anchors,
-    // drawn positive beside each ladder
-    const int expectedExpGrMarks[10] = { 0, 2, 4, 6, 8, 10, 14, 20, 30, 36 };
-    const int expectedCompGrMarks[8] = { 0, 2, 4, 6, 8, 10, 14, 18 };
+    // Clement's remark 3; recut in v2.74.0, Clement's request) - the
+    // tiers and their midpoints, drawn positive beside each ladder
+    const int expectedExpGrMarks[7] = { 0, 3, 6, 12, 18, 27, 36 };
+    const int expectedCompGrMarks[6] = { 0, 3, 6, 9, 12, 18 };
     bool expMarksMatch = true, compMarksMatch = true;
 
-    for (int i = 0; i < 10; ++i)
+    for (int i = 0; i < 7; ++i)
         expMarksMatch = expMarksMatch
             && CostesStripEditor::DynamicsMeter::expGrMarks[i] == expectedExpGrMarks[i];
 
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 6; ++i)
         compMarksMatch = compMarksMatch
             && CostesStripEditor::DynamicsMeter::compGrMarks[i] == expectedCompGrMarks[i];
 
     expectTrue (expMarksMatch,
-                "the expander's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 20, 30, 36");
+                "the expander's GR scale engraves 0, 3, 6, 12, 18, 27, 36 - its tiers and their midpoints");
     expectTrue (compMarksMatch,
-                "the compressor's GR scale engraves 0, 2, 4, 6, 8, 10, 14, 18");
+                "the compressor's GR scale engraves 0, 3, 6, 9, 12, 18 - its tiers and their midpoints");
 
     // v2.72.0 (Clement's request): the GR ladders' THREE-TIER geometry -
     // each tier owns exactly a third of the bar. The expander reads
@@ -7252,7 +7252,7 @@ void testCostesStripCompLinkAndGrTiers()
 
 void testCostesStripKneeAndLayoutTightening()
 {
-    beginTest ("v2.73.0: the expander's KNEE plate, the compressor's 18 dB ceiling, the tightened dynamics layout");
+    beginTest ("v2.73/v2.74: the expander's KNEE plate, the compressor's 18 dB ceiling, the tightened dynamics layout");
 
     juce::MidiBuffer noMidi;
 
@@ -7424,15 +7424,16 @@ void testCostesStripKneeAndLayoutTightening()
     const auto cutPlates = editor.getCutPlateButtons();
     const auto sliders  = editor.getStripSliders();
 
-    // remark 1: the meters tightened - the IN ladder keeps the ONE
-    // engraved scale its OUT neighbour shares, so IN stays its own
-    // width and OUT reads from beside it, one even seam apart
-    expectTrue (meters[0] != nullptr && meters[0]->getWidth() == 52
+    // v2.73.0 tightened the trio; v2.74.0 (Clement's remark 2) took
+    // the IN ladder's numbers column down to the OUT ladder's own
+    // width - the pair reads as one meter, its ONE engraved scale
+    // reading between the two frames
+    expectTrue (meters[0] != nullptr && meters[0]->getWidth() == 40
                     && meters[1] != nullptr && meters[1]->getWidth() == 40
                     && meters[2] != nullptr && meters[2]->getWidth() == 52,
-                "the expander's meters tightened - IN and GR at 52 px, the OUT at 40 between them");
+                "the expander's meters tightened - IN and OUT both at 40 px, the GR at 52");
 
-    expectTrue (meters[3] != nullptr && meters[3]->getWidth() == 52
+    expectTrue (meters[3] != nullptr && meters[3]->getWidth() == 40
                     && meters[4] != nullptr && meters[4]->getWidth() == 40
                     && meters[5] != nullptr && meters[5]->getWidth() == 52,
                 "the compressor's meters tightened the same way");
@@ -7445,7 +7446,29 @@ void testCostesStripKneeAndLayoutTightening()
                     && meters[5]->getBounds().getX() - meters[4]->getBounds().getRight() == 4,
                 "the three ladders of each stage sit one even 4 px seam apart - close enough to read as one meter");
 
-    // remark 2: FAST ATK and LISTEN stacked as one column
+    // v2.74.0 (Clement's remark 2): the frame-to-frame air reads EVEN
+    // now - each engraved frame sits 3 px inside its meter and spans
+    // 20 px, so the air between two frames is the component seam plus
+    // six: the IN-to-OUT air equals the OUT-to-GR air, 24 px each
+    expectTrue (meters[0] != nullptr && meters[1] != nullptr && meters[2] != nullptr
+                    && meters[3] != nullptr && meters[4] != nullptr && meters[5] != nullptr
+                    && meters[1]->getBounds().getX() - meters[0]->getBounds().getX() - 20
+                        == meters[2]->getBounds().getX() - meters[1]->getBounds().getX() - 20
+                    && meters[4]->getBounds().getX() - meters[3]->getBounds().getX() - 20
+                        == meters[5]->getBounds().getX() - meters[4]->getBounds().getX() - 20
+                    && meters[1]->getBounds().getX() - meters[0]->getBounds().getX() - 20 == 24,
+                "the ladders' frames sit one even distance apart - the IN-to-OUT air equals the OUT-to-GR air, 24 px");
+
+    // v2.74.0 (Clement's remark 3): the shared IN/OUT scale engraves
+    // every TEN dB now, 0 down to the -70 floor (was every 20)
+    expectTrue (meters[0] != nullptr && meters[3] != nullptr
+                    && meters[0]->markStep == 10.0f
+                    && meters[3]->markStep == 10.0f,
+                "the IN ladders engrave every ten dB - 0 down to the -70 floor");
+
+    // v2.73.0 (Clement's remark 2): FAST ATK and LISTEN stack as one
+    // column - v2.74.0 (Clement's remark 1) moved the pair UP a row,
+    // into the middle row's third cell, centred as one plate unit
     expectTrue (plates[0] != nullptr && plates[1] != nullptr
                     && plates[1]->getBounds().getY() - plates[0]->getBounds().getBottom() >= 0
                     && plates[1]->getBounds().getY() - plates[0]->getBounds().getBottom() <= 2,
@@ -7456,20 +7479,25 @@ void testCostesStripKneeAndLayoutTightening()
                     && plates[3]->getBounds().getY() - plates[2]->getBounds().getBottom() <= 2,
                 "the compressor's FAST ATK and LISTEN plates stack the same way");
 
-    // remarks 2 and 5: the LINK and KNEE selectors live under their
-    // stage's LISTEN push - the same 76 px selector geometry the SC
-    // pair wears, its value box reading under it the same way
+    // v2.74.0 (Clement's remark 1): with FAST ATK and LISTEN moved up
+    // into the middle row, the LINK and KNEE selectors took the SC
+    // row's third cell - sitting EXACTLY level with the SC LPF slider
+    // at their left, wearing the very same 76 x 36 selector geometry
     expectTrue (sliders[31] != nullptr && sliders[28] != nullptr && plates[3] != nullptr
-                    && sliders[31]->getBounds().getX() == plates[3]->getBounds().getX()
-                    && sliders[31]->getBounds().getY() > plates[3]->getBounds().getBottom()
-                    && sliders[31]->getWidth() == sliders[28]->getWidth(),
-                "the compressor's LINK slider sits straight under LISTEN, wearing the SC selectors' own geometry");
+                    && sliders[31]->getBounds().getY() == sliders[28]->getBounds().getY()
+                    && sliders[31]->getBounds().getX() > sliders[28]->getBounds().getX()
+                    && sliders[31]->getWidth() == sliders[28]->getWidth()
+                    && sliders[31]->getHeight() == sliders[28]->getHeight()
+                    && plates[3]->getBounds().getBottom() <= sliders[31]->getBounds().getY(),
+                "the compressor's LINK slider sits exactly level with its SC LPF, LISTEN clear above it");
 
     expectTrue (sliders[32] != nullptr && sliders[30] != nullptr && plates[1] != nullptr
-                    && sliders[32]->getBounds().getX() == plates[1]->getBounds().getX()
-                    && sliders[32]->getBounds().getY() > plates[1]->getBounds().getBottom()
-                    && sliders[32]->getWidth() == sliders[30]->getWidth(),
-                "the expander's KNEE slider sits straight under LISTEN, wearing the SC selectors' own geometry");
+                    && sliders[32]->getBounds().getY() == sliders[30]->getBounds().getY()
+                    && sliders[32]->getBounds().getX() > sliders[30]->getBounds().getX()
+                    && sliders[32]->getWidth() == sliders[30]->getWidth()
+                    && sliders[32]->getHeight() == sliders[30]->getHeight()
+                    && plates[1]->getBounds().getBottom() <= sliders[32]->getBounds().getY(),
+                "the expander's KNEE slider sits exactly level with its SC LPF, LISTEN clear above it");
 
     // and both take their own clicks on their track - the v2.72 LINK
     // bug was a section label covering the slider and swallowing the

@@ -635,8 +635,12 @@ public:
         // v2.70.0 (Clement's remark 3): the GR scales' engraved values -
         // more numbers than the old three anchors, drawn positive
         // beside the ladder. One list per stage, public for the harness
-        static constexpr int expGrMarks[10]  { 0, 2, 4, 6, 8, 10, 14, 20, 30, 36 };
-        static constexpr int compGrMarks[8]  { 0, 2, 4, 6, 8, 10, 14, 18 };
+        // v2.74.0 (Clement's request): the value lists read at the
+        // ladders' own milestones now - the expander's tiers and their
+        // midpoints (0, 3, 6, 12, 18, 27, 36), the compressor's the
+        // same idea (0, 3, 6, 9, 12, 18)
+        static constexpr int expGrMarks[7]  { 0, 3, 6, 12, 18, 27, 36 };
+        static constexpr int compGrMarks[6] { 0, 3, 6, 9, 12, 18 };
 
         // v2.72.0 (Clement's request): the GR ladders' THREE-TIER
         // geometry - each tier owns exactly a THIRD of the ladder. The
@@ -770,16 +774,19 @@ private:
     // blends the two channels' detectors towards the stereo-linked
     // one. v2.73.0 (Clement's remark 2): it moved out of the block's
     // header (the section label swallowed its clicks there) into the
-    // bottom row's third cell, right under the LISTEN push, reading
-    // its mode under the slider like the SC selectors
+    // bottom row's third cell. v2.74.0 (Clement's remark 1): with
+    // FAST ATK and LISTEN moved up a row, the selector sits level
+    // with the SC selectors - horizontally aligned with the SC LPF
+    // at its left, its LINK caption under it the same way
     CostesSlider compLinkSlider;
 
     // v2.73.0 (Clement's choice, option B): the expander's KNEE
     // selector - six plates (hard / 4 / 8 / 12 / 16 / 20 dB) that
     // soften the static curve's corner at the threshold, parked at
     // "hard" so every session born before v2.73 keeps its classic
-    // corner untouched. It sits under the expander's LISTEN push,
-    // the expander's own third-cell selector
+    // corner untouched. v2.74.0 (Clement's remark 1): it sits level
+    // with the SC selectors now, horizontally aligned with the
+    // expander's SC LPF at its left
     CostesSlider expKneeSlider;
 
     juce::Label expThresholdLabel, expRangeLabel;
@@ -788,6 +795,11 @@ private:
     juce::Label compGainLabel, compMixLabel;
     juce::Label compHpfLabel, compScLpfLabel;
     juce::Label expScHpfLabel, expScLpfLabel;
+    // v2.74.0 (Clement's remark 1): the KNEE / LINK selectors moved to
+    // the dynamics stages' third bottom cell, horizontally aligned
+    // with the SC selectors - and they carry their own captions the
+    // same way their SC LPF neighbours do
+    juce::Label expKneeLabel, compLinkLabel;
     juce::Label expSectionLabel, compSectionLabel;
 
     // v2.68.0 (Clement's remark): every glyph of the dynamics sections
@@ -879,17 +891,19 @@ private:
     // the full value lists engraved at the ladder's right
     // (expGrMarks / compGrMarks). v2.73.0 (Clement's remark 1): only
     // the IN ladder engraves the shared scale now - the OUT meter's
-    // own copy is gone, the one series serves the tightened pair
+    // own copy is gone, the one series serves the tightened pair.
+    // v2.74.0 (Clement's remark 3): the shared scale engraves EVERY
+    // ten dB (step 10, was 20) - 0 down to the -70 floor
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
-                                true, -70.0f, 0.0f, 14, 20.0f, "IN" };
+                                true, -70.0f, 0.0f, 14, 10.0f, "IN" };
     DynamicsMeter expOutMeter { owner, DynamicsMeter::Mode::output,
-                                true, -70.0f, 0.0f, 14, 20.0f, "OUT" };
+                                true, -70.0f, 0.0f, 14, 10.0f, "OUT" };
     DynamicsMeter expGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
                                 true, -36.0f, 0.0f, 36, 1.0f, "GR" };
     DynamicsMeter compInMeter { owner, DynamicsMeter::Mode::input,
-                                false, -70.0f, 0.0f, 14, 20.0f, "IN" };
+                                false, -70.0f, 0.0f, 14, 10.0f, "IN" };
     DynamicsMeter compOutMeter { owner, DynamicsMeter::Mode::output,
-                                false, -70.0f, 0.0f, 14, 20.0f, "OUT" };
+                                false, -70.0f, 0.0f, 14, 10.0f, "OUT" };
     DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
                                 false, -18.0f, 0.0f, 18, 1.0f, "GR" };
 

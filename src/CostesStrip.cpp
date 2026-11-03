@@ -2569,6 +2569,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpBandCaption (expScHpfLabel, "SC HPF");
     setUpBandCaption (expScLpfLabel, "SC LPF");
 
+    // v2.74.0 (Clement's remark 1): the KNEE / LINK selectors sit in
+    // the SC row's third cell now - their captions read under them
+    // the same way the SC selectors' do
+    setUpBandCaption (expKneeLabel, "KNEE");
+    setUpBandCaption (compLinkLabel, "LINK");
+
     // v2.68.0 (Clement's remark): the dynamics sections carry no
     // glyphs any more - the stages read through their captions, their
     // knob colours and their ladders alone
@@ -3262,9 +3268,10 @@ void CostesStripEditor::resized()
 
     // one layout for both stages: the same control set in the same
     // order, the same ladders, so the two halves read as one design.
-    // v2.73.0 (Clement's remark 2): the lambda grew the third cell's
-    // own selector - the expander's KNEE, the compressor's LINK -
-    // stacked under the LISTEN push
+    // v2.74.0 (Clement's remark 1): FAST ATK and LISTEN moved up into
+    // the middle row's third cell, and the lambda's SC row grew its
+    // own third caption cell - the expander's KNEE, the compressor's
+    // LINK, sitting level with the SC selectors
     auto layoutDynStage = [] (juce::Rectangle<int> block,
                                  PlateToggle& onButton,
                                  juce::Label& sectionLabel,
@@ -3279,6 +3286,7 @@ void CostesStripEditor::resized()
                                  CostesSlider& lpfSlider,
                                  juce::Label& lpfLabel,
                                  ListenToggle& listenButton,
+                                 juce::Label& selectorLabel,
                                  CostesSlider& plateSelector)
     {
         block = block.reduced (4, 2);
@@ -3294,8 +3302,12 @@ void CostesStripEditor::resized()
         // height of the stage. v2.73.0 (Clement's remark 1): the trio
         // tightened - the IN ladder keeps the ONE engraved scale the
         // OUT ladder beside it shares (its own copy is gone), so the
-        // pair reads as one meter with one series of numbers
-        auto meterIn  = block.removeFromLeft (56);
+        // pair reads as one meter with one series of numbers.
+        // v2.74.0 (Clement's remark 2): the IN ladder gave its numbers
+        // column the same width the OUT ladder gives its air - the
+        // frame-to-frame distance reads EVEN now, IN to OUT exactly
+        // the OUT-to-GR seam
+        auto meterIn  = block.removeFromLeft (44);
         auto meterOut = block.removeFromLeft (44);
         auto meterGr  = block.removeFromLeft (56);
         inMeter.setBounds (meterIn.reduced (2, 2));
@@ -3342,18 +3354,24 @@ void CostesStripEditor::resized()
 
         // v2.70.0 (Clement's remark 6): no caption under the plate any
         // more - the button owns its whole cell, wide enough for the
-        // FAST ATK wording. v2.73.0 (Clement's remark 2): the plate
-        // sits at the BOTTOM of its cell now, flush above the LISTEN
-        // push below it - the two stack as one column
+        // FAST ATK wording. v2.74.0 (Clement's remark 1): the FAST ATK
+        // and LISTEN plates moved UP into this cell, stacked as one
+        // centred column - the room below frees the SC row's third
+        // cell for the stage's own selector
         auto plateCell = midRow.reduced (2, 0);
-        attackButton.setBounds (plateCell.removeFromBottom (26).withSizeKeepingCentre (
+        plateCell = plateCell.withSizeKeepingCentre (plateCell.getWidth(),
+                                                     juce::jmin (plateCell.getHeight(), 56));
+
+        attackButton.setBounds (plateCell.removeFromTop (28).withSizeKeepingCentre (
+            juce::jmin (plateCell.getWidth(), 76), 26));
+        listenButton.setBounds (plateCell.removeFromTop (28).withSizeKeepingCentre (
             juce::jmin (plateCell.getWidth(), 76), 26));
 
-        // the bottom row: the SC HPF and SC LPF selectors and the
-        // LISTEN push - and (v2.73.0, Clement's remarks 2 and 5) the
-        // stage's own selector under the LISTEN push, aligned with
-        // the SC selectors' own column, its value read under the
-        // slider the same way
+        // the bottom row: the SC HPF, SC LPF and the stage's own
+        // selector - three caption cells of the same geometry, so
+        // (v2.74.0, Clement's remark 1) the KNEE / LINK selector sits
+        // EXACTLY level with the SC selectors at its left, its value
+        // reading under the slider the same way
         const int scW = block.getWidth() / 3;
 
         auto hpfCell = captionCell (block.removeFromLeft (scW).reduced (2, 0), hpfLabel);
@@ -3362,11 +3380,8 @@ void CostesStripEditor::resized()
         auto lpfCell = captionCell (block.removeFromLeft (scW).reduced (2, 0), lpfLabel);
         lpfSlider.setBounds (lpfCell.withSizeKeepingCentre (76, 36));
 
-        auto listenCell = block.reduced (2, 0);
-        listenButton.setBounds (listenCell.removeFromTop (28).withSizeKeepingCentre (
-            juce::jmin (listenCell.getWidth(), 76), 26));
-        plateSelector.setBounds (listenCell.removeFromTop (36).withSizeKeepingCentre (
-            juce::jmin (listenCell.getWidth(), 76), 36));
+        auto selectorCell = captionCell (block.reduced (2, 0), selectorLabel);
+        plateSelector.setBounds (selectorCell.withSizeKeepingCentre (76, 36));
     };
 
     {
@@ -3391,6 +3406,7 @@ void CostesStripEditor::resized()
                         expScHpfSlider, expScHpfLabel,
                         expScLpfSlider, expScLpfLabel,
                         expListenButton,
+                        expKneeLabel,
                         expKneeSlider);
     }
 
@@ -3415,6 +3431,7 @@ void CostesStripEditor::resized()
                         compHpfSlider, compHpfLabel,
                         compScLpfSlider, compScLpfLabel,
                         compListenButton,
+                        compLinkLabel,
                         compLinkSlider);
     }
 }
@@ -3633,12 +3650,13 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         }
     }
 
-    // the dB scale, engraved beside the ladder: one mark every 20 dB
-    // on an IN or OUT ladder. v2.70.0 (Clement's remark 3): the GR
-    // ladder carries its full value list instead of the old three
-    // anchors - 0, 2, 4, 6, 8, 10, 14, 20 on the compressor, the same
-    // run plus 30 and 36 on the expander (v2.72.0: the range tops at
-    // 36 dB) - drawn POSITIVE beside the ladder at their tier rungs
+    // the dB scale, engraved beside the ladder: one mark every TEN dB
+    // on an IN ladder now (v2.74.0, Clement's remark 3 - was 20).
+    // v2.70.0 (Clement's remark 3): the GR ladder carries its full
+    // value list instead of the old three anchors - the tiers and
+    // their midpoints on each ladder (v2.74.0, Clement's request):
+    // 0, 3, 6, 9, 12, 18 on the compressor, 0, 3, 6, 12, 18, 27, 36
+    // on the expander - drawn POSITIVE at their tier rungs
     g.setColour (engravingDim);
     g.setFont (juce::Font (juce::FontOptions (8.0f)));
 
@@ -3647,7 +3665,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     if (mode == Mode::gainReduction)
     {
         const int* marks = expander ? expGrMarks : compGrMarks;
-        const int numMarks = expander ? 10 : 8;
+        const int numMarks = expander ? 7 : 6;
 
         for (int m = 0; m < numMarks; ++m)
         {
@@ -3679,9 +3697,13 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
             const float y = top + (float) m * markStep / span * height;
 
             g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
+
+            // v2.74.0: the IN ladder's numbers column narrowed with the
+            // tightened seam - the full remaining width keeps every
+            // TEN readable right after its tick
             g.drawText (juce::String (juce::roundToInt (value)),
-                        juce::Rectangle<int> ((int) scaleRight, (int) (y - 5.0f),
-                                              juce::jmax (1, body.getWidth() - 2), 10),
+                        juce::Rectangle<int> ((int) ((float) body.getX()), (int) (y - 5.0f),
+                                              juce::jmax (1, body.getWidth()), 10),
                         juce::Justification::centredLeft);
         }
     }
