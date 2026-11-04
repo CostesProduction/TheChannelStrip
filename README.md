@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.82.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.83.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,27 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.83.0** — *Four remarks: the front-end lines read knobs-first at
+  the EQ's own size, the cut glyphs come home to their values, and the
+  engraved rule returns to the EQ ON plate.*
+  - **The lines read knobs-first.** TRIM and LPF (then TILT and HPF)
+    sit level at the TOP of their lines, both wearing the EQ's own
+    83 x 101 square - every knob of the front end and of the EQ truly
+    one size now - and the merged button + slope selector stack in the
+    56 px the two knobs leave between them: the button riding the
+    knobs' lower half, the slope directly under it, the stack ending
+    level with the knobs' feet.
+  - **The HPF and LPF glyphs are back** - inside their knobs' own value
+    strips, hugging the Hz values' left edge, so the plate's word rides
+    above and the value and its curve read as one. The gain captions
+    hang their glyph and words as one centred unit inside the knob's
+    own column.
+  - **The engraved rule rides just above the EQ ON plate** - the taller
+    front-end rows had carried it down to y = 339, straight through the
+    HPF knob.
+  - 969 checks (965 + 4 new: the one knob size for both sections, the
+    rule's own row, the buttons' band, the caption unit).
 
 - **2.82.0** — *Three remarks: the sidechain values speak black, the
   cut cells read NORTH-WEST, and the HPF / LPF glyphs step aside.*
