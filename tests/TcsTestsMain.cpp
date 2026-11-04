@@ -4567,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 45,
-                "the strip's forty-five parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 49,
+                "the strip's forty-nine parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 45,
-                "the strip exposes exactly forty-five parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 49,
+                "the strip exposes exactly forty-nine parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5109,8 +5109,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 45,
-                "the restored strip's forty-five parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 49,
+                "the restored strip's forty-nine parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5248,8 +5248,8 @@ void testCostesStripSessionDeep()
                         "the expander range restores (the reported knob)");
         }
 
-        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 45,
-                    "the restored strip's forty-five parameters are relayed");
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 49,
+                    "the restored strip's forty-nine parameters are relayed");
 
         // a host can restore twice (Studio One's launch sequence does):
         // the second pass re-hosts a fresh strip and re-applies the
@@ -5466,7 +5466,7 @@ void testCostesStripSessionDeep()
                         "the expander range is intact after 50 cycles");
         }
 
-        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 45,
+        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 49,
                     "the cycled strip's parameters stay relayed");
     }
 }
@@ -5996,20 +5996,21 @@ void testCostesStripSectionIcons()
     // v2.81.0 (Clement's remark 3) grew the slopes to the EQ width
     // sweeps' OWN 52 x 38 geometry. v2.83.0 (Clement's remark 1):
     // the selectors ride BETWEEN the two knobs of their line now -
-    // centred under the merged button - and the stack ends level
-    // with the knobs' feet, its "12 dB/oct" reading in the knobs'
-    // own value band
+    // centred under the merged button. v2.84.0 (Clement's remark 2):
+    // the whole stack DESCENDED - the button level with the knobs'
+    // value strips, the slope DIRECTLY under it, starting 2 px below
+    // the knobs' feet, level with the caption words
     expectTrue (sliders[5] != nullptr && sliders[1] != nullptr
                     && sliders[6] != nullptr && sliders[2] != nullptr
                     && sliders[5]->getWidth() == 52 && sliders[5]->getHeight() == 38
                     && sliders[5]->getBounds().getX() == sliders[0]->getBounds().getRight() + 2
                     && sliders[5]->getBounds().getRight() == sliders[1]->getBounds().getX() - 2
-                    && sliders[5]->getBounds().getBottom() == sliders[1]->getBounds().getBottom()
+                    && sliders[5]->getBounds().getY() == sliders[1]->getBounds().getBottom() + 2
                     && sliders[6]->getWidth() == 52 && sliders[6]->getHeight() == 38
                     && sliders[6]->getBounds().getX() == sliders[3]->getBounds().getRight() + 2
                     && sliders[6]->getBounds().getRight() == sliders[2]->getBounds().getX() - 2
-                    && sliders[6]->getBounds().getBottom() == sliders[2]->getBounds().getBottom(),
-                "the HPF and LPF slope selectors ride between their lines' knobs, under the button, ending level with the knobs' feet (52 x 38)");
+                    && sliders[6]->getBounds().getY() == sliders[2]->getBounds().getBottom() + 2,
+                "the HPF and LPF slope selectors ride between their lines' knobs, DIRECTLY under the descended button - starting at the knobs' feet, level with the captions (52 x 38)");
 
     // and the band names themselves: each name stands in a slim
     // margin column at its row's left, LEVEL WITH ITS KNOBS (LMF's
@@ -8046,25 +8047,25 @@ void testV282ThreeRemarks()
     // ---- and the cut stack rides BETWEEN the knobs, v2.83.0's own
     // reading ---- the button in the 56 px column the two knobs
     // leave, the slope selector directly under it - a 2 px seam -
-    // and the stack ending level with the knobs' feet, the knobs
-    // themselves the EQ's own 83 x 101
+    // and v2.84.0 (Clement's remark 2) DESCENDED the stack: the
+    // button ends flush with the knobs's feet, the slope hanging under
     expectTrue (cutPlates82[0] != nullptr && sliders82[1] != nullptr
                     && sliders82[5] != nullptr && sliders82[0] != nullptr
                     && cutPlates82[0]->getBounds().getX() == sliders82[0]->getBounds().getRight()
                     && cutPlates82[0]->getBounds().getRight() == sliders82[1]->getBounds().getX()
                     && sliders82[5]->getBounds().getY() == cutPlates82[0]->getBounds().getBottom() + 2
-                    && sliders82[5]->getBounds().getBottom() == sliders82[1]->getBounds().getBottom()
+                    && sliders82[5]->getBounds().getBottom() == sliders82[1]->getBounds().getBottom() + 40
                     && sliders82[1]->getWidth() == 83 && sliders82[1]->getHeight() == 101,
-                "the HPF stack rides between the line's knobs - button, slope, and the EQ's own 83 x 101 knobs at the top");
+                "the HPF stack rides between the line's knobs - button ending flush with the knobs' feet, the slope hanging under it, the EQ's own 83 x 101 knobs at the top");
 
     expectTrue (cutPlates82[1] != nullptr && sliders82[2] != nullptr
                     && sliders82[6] != nullptr && sliders82[3] != nullptr
                     && cutPlates82[1]->getBounds().getX() == sliders82[3]->getBounds().getRight()
                     && cutPlates82[1]->getBounds().getRight() == sliders82[2]->getBounds().getX()
                     && sliders82[6]->getBounds().getY() == cutPlates82[1]->getBounds().getBottom() + 2
-                    && sliders82[6]->getBounds().getBottom() == sliders82[2]->getBounds().getBottom()
+                    && sliders82[6]->getBounds().getBottom() == sliders82[2]->getBounds().getBottom() + 40
                     && sliders82[2]->getWidth() == 83 && sliders82[2]->getHeight() == 101,
-                "the LPF stack rides between its line's knobs too - button, seam, slope, the EQ's own knobs");
+                "the LPF stack rides between its line's knobs too - button, seam, slope under the knobs' feet");
 }
 
 void testV283FourRemarks()
@@ -8125,19 +8126,21 @@ void testV283FourRemarks()
     }
 
     // ---- Clement's remark 1: the button + slope stack rides the knobs' lower half ----
-    // the two knobs sit at the top of their line, and the merged
-    // button starts 43 px down - a bit under the knobs' middle, the
-    // whole stack ending level with the knobs' feet. The harness's
-    // own getter hands the plates over LOW cut first: cutPlates[0]
-    // is the HPF's plate - the TILT line's own - and cutPlates[1]
-    // the LPF's, the TRIM line's, so each plate is pinned against
-    // ITS line's knobs (the two lines share one x structure, but
-    // never one y)
+    // the two knobs sit at the top of their line, and v2.84.0
+    // (Clement's remark 2) sat the merged button 83 px down - level
+    // with the knobs' own value strips, its bottom ending flush with
+    // the knobs' feet. The harness's own getter hands the plates over
+    // LOW cut first: cutPlates[0] is the HPF's plate - the TILT
+    // line's own - and cutPlates[1] the LPF's, the TRIM line's, so
+    // each plate is pinned against ITS line's knobs (the two lines
+    // share one x structure, but never one y)
     expectTrue (cutPlates83[0] != nullptr && cutPlates83[1] != nullptr
                     && sliders83[0] != nullptr && sliders83[3] != nullptr
-                    && cutPlates83[0]->getBounds().getY() == sliders83[3]->getBounds().getY() + 43
-                    && cutPlates83[1]->getBounds().getY() == sliders83[0]->getBounds().getY() + 43,
-                "the merged buttons ride the knobs' lower half - under their middle, the stack ending at their feet");
+                    && cutPlates83[0]->getBounds().getY() == sliders83[3]->getBounds().getY() + 83
+                    && cutPlates83[0]->getBounds().getBottom() == sliders83[3]->getBounds().getBottom()
+                    && cutPlates83[1]->getBounds().getY() == sliders83[0]->getBounds().getY() + 83
+                    && cutPlates83[1]->getBounds().getBottom() == sliders83[0]->getBounds().getBottom(),
+                "the merged buttons sit level with the knobs' value strips - the gain reading at their left, the Hz at their right, their feet flush with the knobs'");
 
     // ---- and the gain captions keep their glyphs inside the knobs' own column ----
     // the fader glyph and its words hang as ONE centred unit under
@@ -8150,6 +8153,316 @@ void testV283FourRemarks()
                     && icons83[0]->getBounds().getX() >= sliders83[0]->getBounds().getX()
                     && icons83[0]->getBounds().getRight() <= sliders83[0]->getBounds().getRight(),
                 "the trim caption's fader glyph rides under its knob, inside the knob's own 83 px column - one centred unit with its words");
+}
+
+void testV284ImageSection()
+{
+    beginTest ("v2.84.0: the IMAGE section - TILT written again, the cut stack descended, phase invert / stereo balance / stereo width / mono maker alive");
+
+    // ---- the UI half ----
+    CostesStrip stripForV284;
+    stripForV284.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editorForV284 (stripForV284);
+    editorForV284.setVisible (true);
+
+    const auto sliders   = editorForV284.getStripSliders();
+    const auto cutPlates = editorForV284.getCutPlateButtons();
+    const auto captions  = editorForV284.getGainCaptions();
+
+    // ---- Clement's remark 1: TILT is written again ----
+    // JUCE's fitted-text label draws NOTHING when its box is tighter
+    // than the string's own sub-pixel advance - the v2.83 tight box
+    // kept "TRIM IN" on rounding luck and lost "TILT". Both captions
+    // keep their FULL 83 px cells now, the width of the knob above
+    expectTrue (captions[0] != nullptr && captions[1] != nullptr
+                    && sliders[0] != nullptr && sliders[3] != nullptr
+                    && captions[0]->getText() == "TRIM IN"
+                    && captions[1]->getText() == "TILT"
+                    && captions[0]->isVisible() && captions[1]->isVisible()
+                    && captions[0]->getWidth() == 83 && captions[1]->getWidth() == 83
+                    && captions[0]->getBounds().getY() == sliders[0]->getBounds().getBottom() + 2
+                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 2,
+                "TILT is written again - both gain captions keep their FULL 83 px cells, level under their knobs (the drawFittedText fix)");
+
+    // ---- Clement's remark 2: the cut stack DESCENDED ----
+    // the merged button sits level with the knobs' own value strips -
+    // the gain reading at its left, the Hz at its right - its feet
+    // flush with the knobs' feet, and the slope selector hangs
+    // DIRECTLY under it, level with the caption words
+    expectTrue (cutPlates[0] != nullptr && cutPlates[1] != nullptr
+                    && sliders[0] != nullptr && sliders[1] != nullptr
+                    && cutPlates[0]->getBounds().getY() == sliders[1]->getBounds().getY() + 83
+                    && cutPlates[0]->getBounds().getBottom() == sliders[1]->getBounds().getBottom()
+                    && cutPlates[1]->getBounds().getY() == sliders[0]->getBounds().getY() + 83
+                    && cutPlates[1]->getBounds().getBottom() == sliders[0]->getBounds().getBottom(),
+                "the HPF and LPF buttons sit level with the knobs' value strips - the gain reading at their left, the Hz at their right, their feet flush with the knobs'");
+
+    expectTrue (sliders[5] != nullptr && sliders[6] != nullptr
+                    && cutPlates[0] != nullptr && cutPlates[1] != nullptr
+                    && sliders[5]->getBounds().getY() == cutPlates[0]->getBounds().getBottom() + 2
+                    && sliders[6]->getBounds().getY() == cutPlates[1]->getBounds().getBottom() + 2,
+                "the slope selectors hang DIRECTLY under their buttons - level with the caption words");
+
+    // ---- Clement's remarks 3 to 6: the IMAGE section fills four
+    // reserved frames ---- the phase plate in the first, the balance,
+    // width and mono maker knobs in the next three, each riding under
+    // its engraved name inside its own frame
+    {
+        const auto phaseBtn   = editorForV284.getPhaseButton();
+        const auto imageKnobs = editorForV284.getImageKnobs();
+        const auto& reserved  = editorForV284.getReservedFrames();
+
+        expectTrue (phaseBtn != nullptr
+                        && phaseBtn->getBounds().getWidth() == 56
+                        && phaseBtn->getBounds().getHeight() == 24
+                        && phaseBtn->getBounds().getX() >= reserved[0].getX() + 4
+                        && phaseBtn->getBounds().getRight() <= reserved[0].getRight() - 4
+                        && phaseBtn->getBounds().getY() >= reserved[0].getY() + 16
+                        && phaseBtn->getBounds().getBottom() < reserved[0].getBottom(),
+                    "the phase plate rides under its engraved name, inside the PHASE INVERT frame");
+
+        expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
+                        && imageKnobs[2] != nullptr
+                        && imageKnobs[0]->getWidth() == 83
+                        && imageKnobs[1]->getWidth() == 83
+                        && imageKnobs[2]->getWidth() == 83
+                        && imageKnobs[0]->getBounds().getX() >= reserved[1].getX() + 4
+                        && imageKnobs[0]->getBounds().getRight() <= reserved[1].getRight() - 4
+                        && imageKnobs[0]->getBounds().getY() >= reserved[1].getY() + 16
+                        && imageKnobs[0]->getBounds().getBottom() <= reserved[1].getBottom()
+                        && imageKnobs[1]->getBounds().getX() >= reserved[2].getX() + 4
+                        && imageKnobs[1]->getBounds().getRight() <= reserved[2].getRight() - 4
+                        && imageKnobs[1]->getBounds().getY() >= reserved[2].getY() + 16
+                        && imageKnobs[1]->getBounds().getBottom() <= reserved[2].getBottom()
+                        && imageKnobs[2]->getBounds().getX() >= reserved[3].getX() + 4
+                        && imageKnobs[2]->getBounds().getRight() <= reserved[3].getRight() - 4
+                        && imageKnobs[2]->getBounds().getY() >= reserved[3].getY() + 16
+                        && imageKnobs[2]->getBounds().getBottom() <= reserved[3].getBottom(),
+                    "the balance, width and mono maker knobs ride under their engraved names, 83 wide inside their own frames");
+
+        // and the controls ride their parameters, like every other
+        // control on the panel
+        stripForV284.getApvts().getParameterAsValue ("phaseInvert").setValue (true);
+        expectTrue (phaseBtn->getToggleState(),
+                    "the phase plate follows its parameter - lit while the programme is inverted");
+        stripForV284.getApvts().getParameterAsValue ("phaseInvert").setValue (false);
+        expectTrue (! phaseBtn->getToggleState(),
+                    "and dark again when the parameter comes home");
+
+        stripForV284.getApvts().getParameterAsValue ("stereoBalance").setValue (40.0f);
+        expectNear (imageKnobs[0]->getValue(), 40.0, 0.5,
+                    "the balance knob rides its parameter - R 40 turns the knob");
+
+        stripForV284.getApvts().getParameterAsValue ("stereoWidth").setValue (60.0f);
+        expectNear (imageKnobs[1]->getValue(), 60.0, 0.5,
+                    "the width knob rides its parameter too");
+
+        stripForV284.getApvts().getParameterAsValue ("monoMakerHz").setValue (400.0f);
+        expectNear (imageKnobs[2]->getValue(), 400.0, 0.5,
+                    "the mono maker knob rides its parameter too");
+    }
+
+    // ---- the audio half: exact arithmetic against the parked strip ----
+    // every scenario runs on a FRESH strip - no shell, no crossfade -
+    // the same deterministic fill, and the parked defaults are unity,
+    // so the parked run IS the reference, sample for sample
+    juce::MidiBuffer noMidi;
+
+    // a 100 Hz tone with two channels that differ in amplitude AND
+    // phase - the image stages need two channels that disagree
+    const auto fillImage = [] (juce::AudioBuffer<float>& block, int blockIndex)
+    {
+        const double omega  = juce::MathConstants<double>::twoPi * 100.0 / 48000.0;
+        const double phase0 = omega * 512.0 * (double) blockIndex;
+
+        for (int i = 0; i < block.getNumSamples(); ++i)
+        {
+            block.setSample (0, i, 0.9f * (float) std::sin (phase0 + omega * (double) i));
+            block.setSample (1, i, 0.45f * (float) std::sin (phase0 + omega * (double) i + 0.9));
+        }
+    };
+
+    // 24 blocks of settling (~256 ms - the 20 ms smoothers, the
+    // biquad rings), then the measured block
+    const auto runScenario = [&fillImage, &noMidi] (auto&& setParams)
+    {
+        CostesStrip strip;
+        strip.prepareToPlay (48000.0, 512);
+
+        setParams (strip);
+
+        juce::AudioBuffer<float> block (2, 512);
+
+        for (int n = 0; n < 24; ++n)
+        {
+            fillImage (block, n);
+            strip.processBlock (block, noMidi);
+        }
+
+        fillImage (block, 24);
+        strip.processBlock (block, noMidi);
+
+        return block;
+    };
+
+    const auto parked = runScenario ([] (CostesStrip&) {});
+
+    // the worst per-channel drift between a scenario and the parked
+    // reference (the exactness instrument of every check below)
+    const auto worstDrift = [] (const juce::AudioBuffer<float>& a,
+                                const juce::AudioBuffer<float>& b,
+                                int channel, bool negate) -> double
+    {
+        double worst = 0.0;
+
+        for (int i = 0; i < a.getNumSamples(); ++i)
+        {
+            const double x = (double) a.getSample (channel, i);
+            const double y = (double) b.getSample (channel, i) * (negate ? -1.0 : 1.0);
+            worst = juce::jmax (worst, std::abs (x - y));
+        }
+
+        return worst;
+    };
+
+    const auto peakOf = [] (const juce::AudioBuffer<float>& block, int channel) -> double
+    {
+        double peak = 0.0;
+
+        for (int i = 0; i < block.getNumSamples(); ++i)
+            peak = juce::jmax (peak, (double) std::abs (block.getSample (channel, i)));
+
+        return peak;
+    };
+
+    // ---- Clement's remark 3: the phase plate is an exact negation ----
+    {
+        const auto inverted = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("phaseInvert").setValue (true);
+        });
+
+        expectNear (juce::jmax (worstDrift (inverted, parked, 0, true),
+                                worstDrift (inverted, parked, 1, true)),
+                    0.0, 1.0e-9,
+                    "the phase plate inverts the whole programme - an exact negation, sample for sample");
+    }
+
+    // ---- Clement's remark 4: a TRUE balance ---- the channel turned
+    // toward keeps its exact unity, the opposite channel rides the
+    // quarter-cosine taper - EXACT silence at the stops, the
+    // constant-power -3 dB at half travel
+    {
+        const auto hardRight = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("stereoBalance").setValue (100.0f);
+        });
+
+        expectNear (peakOf (hardRight, 0), 0.0, 1.0e-12,
+                    "balance hard right: the LEFT channel is EXACTLY silent at the stop");
+        expectNear (worstDrift (hardRight, parked, 1, false), 0.0, 1.0e-9,
+                    "balance hard right: the RIGHT channel keeps its exact unity");
+
+        const auto halfRight = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("stereoBalance").setValue (50.0f);
+        });
+
+        expectNear (peakOf (halfRight, 0) / peakOf (parked, 0), 0.7071, 0.02,
+                    "balance at R 50: the left channel sits at the constant-power -3 dB (the quarter-cosine taper)");
+        expectNear (worstDrift (halfRight, parked, 1, false), 0.0, 1.0e-9,
+                    "balance at R 50: the right channel still keeps its exact unity");
+    }
+
+    // ---- Clement's remark 5: M/S width ---- 0 % pins both channels
+    // to the mid, 200 % doubles the difference, and the mid itself
+    // never moves
+    {
+        const auto collapsed = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("stereoWidth").setValue (0.0f);
+        });
+
+        double worst = 0.0;
+
+        for (int i = 0; i < collapsed.getNumSamples(); ++i)
+            worst = juce::jmax (worst,
+                                std::abs ((double) collapsed.getSample (0, i)
+                                          - (double) collapsed.getSample (1, i)));
+
+        expectNear (worst, 0.0, 1.0e-9,
+                    "width at 0 %: both channels read the EXACT mid - the strip collapses to mono");
+
+        const auto widened = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("stereoWidth").setValue (200.0f);
+        });
+
+        worst = 0.0;
+
+        for (int i = 0; i < widened.getNumSamples(); ++i)
+            worst = juce::jmax (worst,
+                                std::abs (((double) widened.getSample (0, i)
+                                           - (double) widened.getSample (1, i))
+                                          - 2.0 * ((double) parked.getSample (0, i)
+                                                   - (double) parked.getSample (1, i))));
+
+        expectNear (worst, 0.0, 1.0e-6,
+                    "width at 200 %: the difference is EXACTLY doubled - the mid never moves");
+    }
+
+    // ---- Clement's remark 6: the mono maker ---- the sum is preserved
+    // exactly (the mid never moves), and the difference folds through
+    // the second-order Butterworth: at 100 Hz under a 300 Hz corner the
+    // channels' difference reads |1 - H| of the parked one - about 0.48,
+    // the phase-quadrature remainder the lowpass cannot claim
+    {
+        const auto folded = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("monoMakerHz").setValue (300.0f);
+        });
+
+        double worstSum = 0.0;
+
+        for (int i = 0; i < folded.getNumSamples(); ++i)
+            worstSum = juce::jmax (worstSum,
+                                   std::abs (((double) folded.getSample (0, i)
+                                              + (double) folded.getSample (1, i))
+                                             - ((double) parked.getSample (0, i)
+                                                + (double) parked.getSample (1, i))));
+
+        expectNear (worstSum, 0.0, 1.0e-4,
+                    "mono maker on: the channels' SUM is preserved - the mid never moves");
+
+        double peakDiffFolded = 0.0;
+        double peakDiffParked = 0.0;
+
+        for (int i = 0; i < folded.getNumSamples(); ++i)
+        {
+            peakDiffFolded = juce::jmax (peakDiffFolded,
+                                         std::abs ((double) folded.getSample (0, i)
+                                                   - (double) folded.getSample (1, i)));
+            peakDiffParked = juce::jmax (peakDiffParked,
+                                         std::abs ((double) parked.getSample (0, i)
+                                                   - (double) parked.getSample (1, i)));
+        }
+
+        expectNear (peakDiffFolded / peakDiffParked, 0.4814, 0.05,
+                    "mono maker at 300 Hz: the bass difference folds to the centre line - the low band rides the mono average");
+
+        // and OFF is the honest bypass: the rest position processes
+        // sample-for-sample the parked strip
+        const auto monoOff = runScenario ([] (CostesStrip& s)
+        {
+            s.getApvts().getParameterAsValue ("monoMakerHz").setValue (0.0f);
+        });
+
+        expectNear (juce::jmax (worstDrift (monoOff, parked, 0, false),
+                                worstDrift (monoOff, parked, 1, false)),
+                    0.0, 1.0e-9,
+                    "mono maker off: the rest position is the honest bypass - sample for sample the parked strip");
+    }
 }
 
 void testIntegrationRealConsole()
@@ -8306,6 +8619,7 @@ int main (int argc, char* argv[])
     testV281FourRemarks();
     testV282ThreeRemarks();
     testV283FourRemarks();
+    testV284ImageSection();
 
     if (integration)
         testIntegrationRealConsole();

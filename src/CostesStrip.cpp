@@ -338,6 +338,12 @@ CostesStrip::CostesStrip()
     driveDb          = apvts.getRawParameterValue ("driveDb");
     driveOversampled = apvts.getRawParameterValue ("driveOversampled");
 
+    // the IMAGE section (v2.84.0)
+    phaseInvert   = apvts.getRawParameterValue ("phaseInvert");
+    stereoBalance = apvts.getRawParameterValue ("stereoBalance");
+    stereoWidth   = apvts.getRawParameterValue ("stereoWidth");
+    monoMakerHz   = apvts.getRawParameterValue ("monoMakerHz");
+
     eqOn    = apvts.getRawParameterValue ("eqOn");
     eq1Hz   = apvts.getRawParameterValue ("eq1Hz");
     eq1Gain = apvts.getRawParameterValue ("eq1Gain");
@@ -379,6 +385,8 @@ CostesStrip::CostesStrip()
              && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
              && highCutOn != nullptr && tiltDb != nullptr && driveDb != nullptr
              && driveOversampled != nullptr
+             && phaseInvert != nullptr && stereoBalance != nullptr
+             && stereoWidth != nullptr && monoMakerHz != nullptr
              && eqOn != nullptr && eq1Hz != nullptr && eq1Gain != nullptr
              && eq1Bell != nullptr && eq2Hz != nullptr && eq2Gain != nullptr
              && eq2Oct != nullptr && eq3Hz != nullptr && eq3Gain != nullptr
@@ -1342,6 +1350,112 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "driveOversampled", 1 }, "Oversample 2x", false));
 
+    // ------------------------------------------------------------------
+    // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): four
+    // controls over the stereo image itself, filling four of the five
+    // engraved reserved frames of the output chain (OUTPUT TRIM
+    // stays the last empty one). Every one parks at a fully neutral
+    // default - a fresh strip is sample-for-sample the strip of
+    // v2.83 - and the stages hard-bypass at their rest positions
+    // ------------------------------------------------------------------
+
+    // the phase invert plate: the empty-set symbol flips the POLARITY
+    // of the whole programme - both channels, an exact 180 degrees -
+    // the standard polarity check on a console's bus
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "phaseInvert", 1 }, "Phase Invert", false,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool value, int)
+            {
+                return value ? juce::String ("inverted") : juce::String ("normal");
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                return ! (t.equalsIgnoreCase ("normal")
+                            || t.equalsIgnoreCase ("off") || t == "0");
+            })));
+
+    // the stereo balance: -100 (full left) to +100 (full right), 0
+    // the centre. A TRUE balance, never a pan: the channel you turn
+    // TOWARD keeps its exact unity gain and only the OPPOSITE
+    // channel is attenuated, on a quarter-cosine taper - half
+    // travel sits at the constant-power -3 dB, and the far channel
+    // is EXACTLY silent at the stops - so a stereo source is never
+    // narrowed the way a pan-pot law would narrow it
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "stereoBalance", 1 }, "Stereo Balance",
+        makeSteppedRange (-100.0f, 100.0f, 1.0f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                if (std::abs (value) < 0.5f)
+                    return juce::String ("CENTER");
+
+                return value < 0.0f
+                    ? juce::String ("L ") + juce::String (-juce::roundToInt (value))
+                    : juce::String ("R ") + juce::String (juce::roundToInt (value));
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                if (t.startsWithIgnoreCase ("c"))
+                    return 0.0f;
+
+                const bool left = t.startsWithIgnoreCase ("l");
+                const float magnitude = std::abs (t.getFloatValue());
+
+                return juce::jlimit (-100.0f, 100.0f, left ? -magnitude : magnitude);
+            })));
+
+    // the stereo width: 0 % (mono) to 200 %, 100 % the honest middle.
+    // M/S arithmetic - the side signal scales by width / 100 - so
+    // 0 % pins both channels to the mid, 200 % doubles the
+    // difference, and 100 % is hard-bypassed in the audio
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "stereoWidth", 1 }, "Stereo Width",
+        makeSteppedRange (0.0f, 200.0f, 1.0f), 100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                return juce::String (juce::roundToInt (value)) + " %";
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                const auto t = text.trim();
+                const float parsed = (t.endsWithChar ('%')
+                                        ? t.dropLastCharacters (1) : t).trim()
+                                            .getFloatValue();
+
+                return juce::jlimit (0.0f, 200.0f, parsed);
+            })));
+
+    // the mono maker: everything below the corner folds to the
+    // centre line - a 2nd-order Butterworth lowpass per channel, the
+    // two halves of the band averaged into one mono voice, re-joined
+    // with the untouched top (the sample minus its own lowpass - a
+    // perfectly complementary split, no phasey crossover seam). 0 is
+    // OFF, the whole stage bypassed
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "monoMakerHz", 1 }, "Mono Maker",
+        makeSteppedRange (0.0f, 2000.0f, 10.0f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([hzText] (float value, int)
+            {
+                return value < 5.0f ? juce::String ("off") : hzText (value, 0);
+            })
+            .withValueFromStringFunction ([hzParse] (const juce::String& text)
+            {
+                const auto t = text.trim();
+
+                if (t.isEmpty() || t.startsWithIgnoreCase ("off"))
+                    return 0.0f;
+
+                return juce::jlimit (0.0f, 2000.0f, hzParse (t));
+            })));
+
     return layout;
 }
 
@@ -1366,6 +1480,22 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     trimInGain.reset (currentSampleRate, 0.02);
     trimInGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (trimInDb->load()));
+
+    // the IMAGE section's own states (v2.84.0): the balance and
+    // width gains ride the trim's own 20 ms ramp, the mono maker's
+    // Butterworth pair starts from silence with its corner cache
+    // forced to rebuild
+    balanceGainL.reset (currentSampleRate, 0.02);
+    balanceGainR.reset (currentSampleRate, 0.02);
+    widthAmount.reset (currentSampleRate, 0.02);
+    balanceGainL.setCurrentAndTargetValue (1.0f);
+    balanceGainR.setCurrentAndTargetValue (1.0f);
+    widthAmount.setCurrentAndTargetValue (1.0f);
+
+    for (auto& section : monoMakerLp)
+        section.reset();
+
+    lastMonoMakerHz = -1.0f;
 
     lastLowCutHz    = -1.0f;
     lastHighCutHz   = -1.0f;
@@ -1945,6 +2075,73 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const bool useOS = drive > 0.0f && driveOversampled->load() > 0.5f
                         && numSamples <= preparedMaxSamples;
 
+    // ------------------------------------------------------------------
+    // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): four
+    // controls over the stereo image itself, evaluated once per
+    // block like every other knob. Each stage is hard-bypassed at
+    // its rest position - a parked strip is sample-for-sample the
+    // strip of v2.83. The phase plate folds into the input gain's
+    // own sign (stage 1), and the balance, width and mono maker run
+    // as stage 4, after the tilt, in the panel's own order - the
+    // balance rides FIRST so the mono maker can pin the bass back
+    // to the centre line whatever the balance says, and the width's
+    // side-scaling keeps the balance's intent above the mono band
+    // ------------------------------------------------------------------
+    const bool phaseFlip = phaseInvert->load() > 0.5f;
+
+    const float balanceRaw = stereoBalance->load();
+    const bool  balanceOn  = std::abs (balanceRaw) > 0.5f;
+    const float balanceAmount = juce::jlimit (0.0f, 1.0f,
+                                                std::abs (balanceRaw) * 0.01f);
+
+    // the quarter-cosine taper: the channel you turn TOWARD keeps
+    // its exact unity, the opposite channel eases down to an
+    // EXACT silence at the stops (half travel = -3 dB, the
+    // constant-power point)
+    const float balanceAtt = (balanceAmount >= 1.0f)
+        ? 0.0f
+        : std::cos (balanceAmount * juce::MathConstants<float>::halfPi);
+
+    balanceGainL.setTargetValue (balanceRaw > 0.5f ? balanceAtt : 1.0f);
+    balanceGainR.setTargetValue (balanceRaw < -0.5f ? balanceAtt : 1.0f);
+
+    const float widthRaw = stereoWidth->load();
+    const bool  widthOn  = std::abs (widthRaw - 100.0f) > 0.5f;
+    widthAmount.setTargetValue (widthOn ? widthRaw * 0.01f : 1.0f);
+
+    // the mono maker's corner rides the same cache discipline as the
+    // sidechains; OFF rests the pair and forces the rebuild
+    const float monoHz = juce::jlimit (0.0f, 2000.0f, monoMakerHz->load());
+    const bool  monoOn = monoHz > 5.0f
+                          && monoHz < 0.45f * (float) currentSampleRate;
+
+    if (monoOn && std::abs (monoHz - lastMonoMakerHz) > 1.0e-4f)
+    {
+        lastMonoMakerHz = monoHz;
+
+        const double w0 = juce::MathConstants<double>::twoPi
+                              * (double) monoHz / currentSampleRate;
+        const double cs = std::cos (w0);
+        const double alpha = std::sin (w0) * juce::MathConstants<double>::sqrt2
+                                 * 0.5;   // sin (w0) / (2 * 0.7071)
+        const double a0 = 1.0 + alpha;
+
+        const float b0 = (float) ((1.0 - cs) * 0.5 / a0);
+        const float b1 = (float) ((1.0 - cs) / a0);
+        const float a1 = (float) (-2.0 * cs / a0);
+        const float a2 = (float) ((1.0 - alpha) / a0);
+
+        for (auto& section : monoMakerLp)
+            section.setCoefficients (b0, b1, b0, a1, a2);
+    }
+    else if (! monoOn)
+    {
+        for (auto& section : monoMakerLp)
+            section.reset();
+
+        lastMonoMakerHz = -1.0f;
+    }
+
     float* channels[2] = { nullptr, nullptr };
 
     for (int ch = 0; ch < numChannels; ++ch)
@@ -1958,8 +2155,12 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // when the dynamics are parked, sample for sample
     for (int i = 0; i < numSamples; ++i)
     {
-        // one smoothed gain per sample, shared by every channel
-        const float gainIn = trimInGain.getNextValue();
+        // one smoothed gain per sample, shared by every channel - and
+        // v2.84.0: the phase plate rides the input gain's own SIGN,
+        // an exact negation when lit, the untouched multiply when
+        // parked (Clement's remark 3)
+        const float gainIn = phaseFlip ? -trimInGain.getNextValue()
+                                       : trimInGain.getNextValue();
 
         // v2.66.0: the LISTEN monitor's per-sample carry - whichever
         // sidechain plate is lit writes its filtered signal here, and
@@ -2236,6 +2437,55 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             channels[ch][i] = sample;
         }
+
+        // stage 4 (v2.84.0): the IMAGE section - balance, width, mono
+        // maker, in the panel's own order. Every stage is bypassed at
+        // its rest position (a parked strip is bit-for-bit the v2.83
+        // strip), and a mono stream skips the whole stage - an image
+        // control needs two channels to say anything
+        if (numChannels > 1)
+        {
+            float left = channels[0][i];
+            float right = channels[1][i];
+
+            // the stereo balance: only the channel turned AWAY from
+            // is attenuated, on the eased taper, both gains riding
+            // the 20 ms one-pole - a ridden knob is a slow ramp
+            if (balanceOn)
+            {
+                left  *= balanceGainL.getNextValue();
+                right *= balanceGainR.getNextValue();
+            }
+
+            // the stereo width: M/S arithmetic, the side scaled by
+            // width / 100 - 0 % pins both channels to the mid, 200 %
+            // doubles the difference, 100 % is the honest middle
+            if (widthOn)
+            {
+                const float widthNorm = widthAmount.getNextValue();
+                const float mid  = 0.5f * (left + right);
+                const float side = widthNorm * 0.5f * (left - right);
+                left  = mid + side;
+                right = mid - side;
+            }
+
+            // the mono maker: the band below the corner folds to the
+            // centre line - each channel's lowpassed half is replaced
+            // by the two halves' mono average, the complement
+            // (the sample minus its own lowpass) riding through
+            // untouched, so the split is perfectly complementary
+            if (monoOn)
+            {
+                const float lowL = monoMakerLp[0].processSample (left);
+                const float lowR = monoMakerLp[1].processSample (right);
+                const float lowMono = 0.5f * (lowL + lowR);
+                left  = (left  - lowL) + lowMono;
+                right = (right - lowR) + lowMono;
+            }
+
+            channels[0][i] = left;
+            channels[1][i] = right;
+        }
     }
 
     // v2.65.0: the meters' per-block snapshot, stored after the loop so
@@ -2436,6 +2686,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (highCutKnob,  nullptr, "", 24000.0f, eqHfDisc);
     setUpKnob (tiltKnob, &tiltLabel,    "TILT",     0.0f,    knobDisc);
     setUpKnob (driveKnob, &driveLabel,   "DRIVE",    0.0f,    knobDisc);
+
+    // the IMAGE section's knobs (v2.84.0, Clement's remarks 4 to 6):
+    // the stereo balance parks at CENTER, the stereo width at 100 %,
+    // and the mono maker at 0 = off - double-click parks each one
+    // back to its honest, bit-exact neutral
+    setUpKnob (balanceKnob,    nullptr, "",   0.0f,  knobDisc);
+    setUpKnob (widthKnob,      nullptr, "", 100.0f,  knobDisc);
+    setUpKnob (monoMakerKnob,  nullptr, "",   0.0f,  knobDisc);
 
     // the EQ knobs (v2.61.0): the same ergonomics, one FREQ and one GAIN
     // per band - double-click parks each band on its SSL-style starting
@@ -2679,6 +2937,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     highCutOnButton.cutWord = "LPF";
     addAndMakeVisible (highCutOnButton);
 
+    // the IMAGE section's phase plate (v2.84.0, Clement's remark 3):
+    // the empty-set symbol itself, the polarity sign - the plate
+    // needs no caption word, the circle-and-slash reads on its own
+    addAndMakeVisible (phaseButton);
+
     // the dynamics' on/off plates (v2.64.0): "EXP ON" / "EXP OFF" and
     // "COMP ON" / "COMP OFF", the same plates as the EQ's global switch,
     // one per half - and each stage's FAST/SLOW attack plate (the
@@ -2732,6 +2995,19 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "driveDb", driveKnob);
     oversampleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "driveOversampled", oversampleButton);
+
+    // the IMAGE section's own attachments (v2.84.0): the phase plate
+    // and the three knobs ride their parameters like every other
+    // control on the panel
+    phaseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "phaseInvert", phaseButton);
+    balanceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "stereoBalance", balanceKnob);
+    widthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "stereoWidth", widthKnob);
+    monoMakerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "monoMakerHz", monoMakerKnob);
+
     lowCutOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "lowCutOn", lowCutOnButton);
     highCutOnAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
@@ -2880,6 +3156,10 @@ CostesStripEditor::~CostesStripEditor()
     tiltAttachment.reset();
     driveAttachment.reset();
     oversampleAttachment.reset();
+    phaseAttachment.reset();
+    balanceAttachment.reset();
+    widthAttachment.reset();
+    monoMakerAttachment.reset();
     lowCutOnAttachment.reset();
     highCutOnAttachment.reset();
 
@@ -3172,21 +3452,20 @@ void CostesStripEditor::resized()
     // and the EQ closes the column as ever
     column1.removeFromTop (24);   // the signature's own band
 
-    // the front end's two lines (v2.83.0, Clement's remarks 1, 2 and
-    // 4, rebuilt out of the whole v2.75-v2.82 series): the GAINS at
-    // the left of their lines and the high frequencies at the top -
-    // TRIM with LPF on the first line, TILT with HPF under it. The
-    // line reads knobs-first now: the gain knob at the line's own
-    // top-left corner, the cut knob at its top-right, BOTH the EQ's
-    // own square (remark 4: every knob of the front end and of the
-    // EQ truly one size, the 83 x 101 half-row the EQ knobs own), and
-    // the merged button + slope selector stacked BETWEEN the two, in
-    // the 56 px they leave - the button riding the knobs' lower half,
-    // the slope directly under it, the stack ending level with the
-    // knobs' feet. The curve glyphs come BACK (remark 2): inside the
-    // knob's own value strip, hugging the Hz value's left edge, so
-    // the plate's word rides above and the value and its curve read
-    // as one - and never a px of room lost
+    // the front end's two lines (v2.84.0, Clement's remarks 1 and 2,
+    // rebuilt on the v2.83 knobs-first lines): the GAINS at the left
+    // of their lines and the high frequencies at the top - TRIM with
+    // LPF on the first line, TILT with HPF under it. Both knobs wear
+    // the EQ's own 83 x 101 square, and the merged button + slope
+    // selector stack sits BETWEEN them, DESCENDED into the knobs'
+    // own value and caption bands: the button level with the knobs'
+    // value strips (the gain reading at its left, the Hz at its
+    // right, ending flush with the knobs' feet), the slope directly
+    // under it, level with the caption words. The curve glyphs stay
+    // inside the knobs' own value strips, hugging the Hz values' left
+    // edges (the v2.83 fix), and the captions keep their FULL 83 px
+    // cells - JUCE's drawFittedText refuses a box tighter than the
+    // string's own advance (the v2.83 tight box lost TILT)
     const auto frontEndLine = [] (juce::Rectangle<int> row,
                                   CostesSlider& gainKnob, juce::Label& gainCaption,
                                   SectionIcon& gainIcon,
@@ -3201,27 +3480,33 @@ void CostesStripEditor::resized()
         gainKnob.setBounds (knobStrip.removeFromLeft (83));
         cutKnob.setBounds (knobStrip.removeFromRight (83));
 
-        // the middle column the two knobs leave - 56 px - carries
-        // the merged button and, directly under it, the slope
-        // selector: the button starts a bit under the knobs' middle,
-        // and the stack ends level with the knobs' feet
-        knobStrip.removeFromTop (43);
+        // v2.84.0 (Clement's remark 2): the merged button DESCENDED -
+        // it sits level with the knobs' own value band now, the gain's
+        // reading at its left and the Hz at its right, its own bottom
+        // ending flush with the knobs' feet
+        knobStrip.removeFromTop (83);
         cutButton.setBounds (knobStrip.removeFromTop (18));
-        knobStrip.removeFromTop (2);
-        cutSlope.setBounds (knobStrip.withSizeKeepingCentre (52, 38));
 
-        // the caption under the gain knob - the glyph and its words
-        // ONE CENTRED UNIT now (the old text-relative offset fell off
-        // the knob's own 83 px for TRIM IN), so the fader never
-        // leaves its knob's column
+        // the caption band under the knobs: the slope selector rides
+        // DIRECTLY under the button, level with the caption that rides
+        // under the gain knob - the whole stack one band lower than
+        // the knobs
         line.removeFromTop (2);
         auto gainCaptionBounds = line.removeFromLeft (83).removeFromTop (18);
+        auto slopeBounds = line.removeFromLeft (56).removeFromTop (38);
+        cutSlope.setBounds (slopeBounds.reduced (2, 0));
+
+        // the caption under the gain knob: the glyph hugs the WORD's
+        // left edge, and the label keeps the FULL 83 px cell - JUCE's
+        // drawFittedText draws NOTHING when the box is tighter than
+        // the string's own sub-pixel advance (the v2.83 tight
+        // getStringWidth box lost TILT and kept TRIM IN on rounding
+        // luck alone - v2.84.0, Clement's remark 1)
         const int textWidth = gainCaption.getFont().getStringWidth (gainCaption.getText());
         const int unitW = 18 + textWidth;
         const int unitX = gainCaptionBounds.getCentreX() - unitW / 2;
         gainIcon.setBounds (unitX, gainCaptionBounds.getY() + 1, 16, 16);
-        gainCaption.setBounds (juce::Rectangle<int> (unitX + 18, gainCaptionBounds.getY(),
-                                                    textWidth, 18));
+        gainCaption.setBounds (gainCaptionBounds);
 
         // and the cut glyph, back on screen: inside the knob's own
         // value strip (the 76 x 18 readout box every knob carries),
@@ -3558,13 +3843,14 @@ void CostesStripEditor::resized()
 
     // ---- column 3: the output chain ----
     // six slots down the shorter panel (v2.78.0: the reserved slots
-    // slim to 110 px, DRIVE keeps its own 150): five of them stay
-    // RESERVED - engraved empty frames that name the sections the
-    // coming builds will fill (PHASE INVERT, STEREO PAN, STEREO
-    // WIDTH, MONO MAKER, OUTPUT TRIM) - and the fifth slot is DRIVE,
-    // the column's one live control today: the knob, its caption and
-    // glyph, the OS plate under it all, the same per-column pattern
-    // it has always carried
+    // slim to 110 px, DRIVE keeps its own 150). v2.84.0 (Clement's
+    // remarks 3 to 6): the first four reserved frames come ALIVE -
+    // the IMAGE section, in the signal's own order: the phase-invert
+    // plate, then the stereo balance, stereo width and mono maker
+    // knobs, each riding under its engraved name inside its own
+    // frame. The sixth slot (OUTPUT TRIM) stays reserved, and the
+    // fifth is DRIVE - the knob, its caption and glyph, the OS plate
+    // under it all, the same per-column pattern as ever
     for (int i = 0; i < 6; ++i)
     {
         auto slot = column3.removeFromTop (i == 4 ? 150 : 110);
@@ -3599,6 +3885,31 @@ void CostesStripEditor::resized()
             // the reserved frames store the slot's own bounds - the
             // silkscreen paints each one's name at its head
             reservedFrames[(size_t) (i < 4 ? i : 4)] = slot;
+
+            // v2.84.0: the first four frames fill with their own
+            // controls - the body sits under the painted name band,
+            // and the phase plate (a wide 56 x 24 plate, like every
+            // switch on the panel) and the three knobs (83 wide, the
+            // EQ knobs' own girth) ride centred in what is left
+            auto body = slot.reduced (10, 4);
+            body.removeFromTop (16);   // the engraved name's own band
+
+            if (i == 0)
+            {
+                phaseButton.setBounds (body.withSizeKeepingCentre (56, 24));
+            }
+            else if (i == 1)
+            {
+                balanceKnob.setBounds (body.withSizeKeepingCentre (83, 86));
+            }
+            else if (i == 2)
+            {
+                widthKnob.setBounds (body.withSizeKeepingCentre (83, 86));
+            }
+            else if (i == 3)
+            {
+                monoMakerKnob.setBounds (body.withSizeKeepingCentre (83, 86));
+            }
         }
     }
 }
@@ -3996,6 +4307,58 @@ void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,
     g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
     g.drawText (word, bounds,
                 juce::Justification::centred);
+}
+
+void CostesStripEditor::PhaseToggle::paintButton (juce::Graphics& g,
+                                                   bool highlighted,
+                                                   bool /*down*/)
+{
+    // the IMAGE section's phase plate (v2.84.0, Clement's remark 3):
+    // the same SSL plate language as every other switch on the panel
+    // - lit amber with a live LED while the programme is inverted,
+    // black with a dead LED while it plays normal - but the plate
+    // carries no word: it carries the polarity sign itself, the
+    // empty-set symbol, drawn as the vector circle-and-slash so the
+    // panel never leaves its hundred-percent ASCII rule
+    const bool on = getToggleState();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
+                    : plateFill);
+    g.fillRoundedRectangle (bounds, 5.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+    const auto ledArea = bounds.removeFromLeft (20.0f);
+    const auto led = ledArea.withSizeKeepingCentre (8.0f, 8.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    // the empty-set symbol: a 16 px circle with the slash riding its
+    // diagonal, from the top-right rim down to the bottom-left - the
+    // same two-tone engraving as the words on the lit plates
+    const auto symbol = bounds.withSizeKeepingCentre (16.0f, 16.0f);
+
+    g.setColour (on ? engraving : plateText);
+    g.drawEllipse (symbol, 1.6f);
+    g.drawLine (symbol.getX() + symbol.getWidth(),
+                symbol.getY(),
+                symbol.getX(),
+                symbol.getY() + symbol.getHeight(),
+                1.6f);
 }
 
 void CostesStripEditor::FastAtkToggle::paintButton (juce::Graphics& g,

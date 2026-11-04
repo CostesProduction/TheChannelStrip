@@ -267,6 +267,25 @@ private:
     std::atomic<float>* driveDb           = nullptr;
     std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
 
+    // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): the
+    // phase plate, the stereo balance, the stereo width and the mono
+    // maker - four controls over the stereo image itself, each parked
+    // at a fully neutral default
+    std::atomic<float>* phaseInvert   = nullptr; // 0.0 / 1.0
+    std::atomic<float>* stereoBalance = nullptr; // -100 .. +100, 0 = centre
+    std::atomic<float>* stereoWidth   = nullptr; // 0 .. 200 (percent), 100 = honest
+    std::atomic<float>* monoMakerHz   = nullptr; // 0 = off, else the corner
+
+    // the image stages' own state: the balance and width gains ride
+    // the trim's own 20 ms one-pole (a ridden knob is a slow ramp),
+    // and the mono maker keeps a 2nd-order Butterworth lowpass pair,
+    // one per channel, with the same corner-cache discipline as the
+    // sidechains
+    juce::SmoothedValue<float> balanceGainL, balanceGainR;
+    juce::SmoothedValue<float> widthAmount;
+    Biquad monoMakerLp[2] {};
+    float lastMonoMakerHz = -1.0f;
+
     // the EQ section (v2.61.0): thirteen parameters - the global plate,
     // then per band a corner, a gain and (band 1/4) a bell/shelf mode or
     // (band 2/3) a bandwidth in octaves
@@ -827,6 +846,27 @@ public:
         return { &expOnButton, &compOnButton };
     }
 
+    // v2.84.0 (Clement's remark 3): the phase-invert button, for the
+    // harness (a juce::Button* - PhaseToggle is defined below)
+    juce::Button* getPhaseButton()
+    {
+        return &phaseButton;
+    }
+
+    // v2.84.0 (Clement's remarks 4-6): the three image-section knobs,
+    // in panel order - balance, width, mono maker
+    std::array<CostesSlider*, 3> getImageKnobs()
+    {
+        return { &balanceKnob, &widthKnob, &monoMakerKnob };
+    }
+
+    // v2.84.0 (Clement's remark 1): the front-end captions, for the
+    // harness' "TILT must be written" pin
+    std::array<juce::Label*, 2> getGainCaptions()
+    {
+        return { &trimInLabel, &tiltLabel };
+    }
+
 private:
     CostesStrip& owner;
 
@@ -1005,6 +1045,24 @@ private:
     // corner where the caption word used to stand
     ShelfModeToggle lowCutOnButton, highCutOnButton;
 
+    // the IMAGE section's own plate (v2.84.0, Clement's remark 3):
+    // the phase button carries the empty-set symbol - the polarity
+    // sign, drawn as the vector circle-and-slash itself - lit amber
+    // with a live LED while the programme is inverted, black with a
+    // dead LED while it plays normal, the same plate language as
+    // every other switch on the panel
+    struct PhaseToggle : public juce::ToggleButton
+    {
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    PhaseToggle phaseButton;
+
+    // the IMAGE section's knobs (v2.84.0, Clement's remarks 4 to 6):
+    // the stereo balance, the stereo width and the mono maker, each
+    // riding under its engraved name inside its own reserved frame
+    CostesSlider balanceKnob, widthKnob, monoMakerKnob;
+
     // the dynamics' own on/off plates (v2.64.0): the same "NAME ON" /
     // "NAME OFF" plates as the EQ's global switch, one per half
     PlateToggle expOnButton, compOnButton;
@@ -1036,6 +1094,10 @@ private:
                                 false, -18.0f, 0.0f, 18, 1.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> balanceAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> widthAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> monoMakerAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutSlopeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> highCutAttachment;

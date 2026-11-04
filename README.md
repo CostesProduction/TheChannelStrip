@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.83.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.84.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,36 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.84.0** — *Six remarks: the TILT caption returns, the cut-button
+  stack descends level with the knobs, and the IMAGE section comes
+  alive - phase invert, stereo balance, stereo width and mono maker.*
+  - **TILT is written again.** JUCE's fitted-text label draws nothing
+    when its box is tighter than the string's own sub-pixel advance -
+    the v2.83 tight box kept "TRIM IN" on rounding luck and lost
+    "TILT". Both captions keep their FULL 83 px cells now.
+  - **The merged HPF / LPF button + slope stack descended** - the
+    button sits level with the knobs' own value strips (the gain
+    reading at its left, the Hz at its right), the slope selector
+    directly under it, the stack ending flush with the knobs' feet.
+  - **Phase invert.** A plate carrying the empty-set symbol - the
+    polarity sign drawn as the vector circle-and-slash - flips the
+    whole programme by an exact 180 degrees, folded into the input
+    gain's own sign so it costs nothing.
+  - **Stereo balance.** A TRUE balance, never a pan: the channel you
+    turn toward keeps exact unity, only the opposite channel rides
+    a quarter-cosine taper - the constant-power -3 dB at half
+    travel, the far channel exactly silent at the stops.
+  - **Stereo width.** M/S arithmetic, 0 to 200 %: 0 % pins both
+    channels to the mid, 200 % doubles the difference, 100 % is
+    hard-bypassed and bit-exact.
+  - **Mono maker.** 0 = off, or a corner frequency: the band below
+    the corner folds to the centre line through a second-order
+    Butterworth per channel - the lows averaged in mono, the
+    complement riding through untouched - a perfectly
+    complementary split.
+  - Every stage parks neutral: a fresh strip is sample-for-sample
+    the v2.83 strip.
 
 - **2.83.0** — *Four remarks: the front-end lines read knobs-first at
   the EQ's own size, the cut glyphs come home to their values, and the
