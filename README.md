@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.84.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.85.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,37 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.85.0** — *The interlocked front end: TRIM at the top middle
+  with the phase plate under it, LPF bottom left / HPF bottom right
+  with their stacks under their knobs, the TILT moved to the output
+  column - and the console 24 px shorter.*
+  - **The front end interlocks.** The tilt left for the output
+    column, so the two 154 px lines became ONE 288 px block: the
+    input trim rides the TOP MIDDLE, centred on the column's own
+    axis; the LPF sits at the bottom left and the HPF at the bottom
+    right, each with its own merged button centred on its knob's
+    axis and its slope selector under the plate - the whole stack
+    ending flush with the front end's own floor. The panel drops
+    from 860 x 824 to 860 x 800, the EQ keeping its whole room (its
+    105 px pitch untouched).
+  - **The phase plate moved under the TRIM IN caption.** The free
+    middle street the two cuts leave is exactly the plate's own
+    56 px, centred on the trim's own axis, starting 2 px under the
+    caption, level with the cuts' band. The process order never
+    moved - the phase stays folded into the input gain's own sign.
+  - **The TILT lives in the output column now** - logical, it works
+    on the signal as it leaves. Its knob (83 x 86, the image knobs'
+    own square) rides under the engraved TILT at the head of the
+    first frame, exactly where the phase plate used to sit; its old
+    caption word and glyph go dark, the column's own language.
+  - The audio path is untouched: layout alone, sample-for-sample the
+    v2.84 strip.
+  - 999 checks (989 + 10 new: the interlocked front end's own pins -
+    the 800 px panel, the trim top middle, the phase plate under the
+    caption, one stack per cut, the tilt in its engraved frame, the
+    dark tilt caption and glyph, the tilt's parameter - and the tilt
+    frame pin of the IMAGE section).
 
 - **2.84.0** — *Six remarks: the TILT caption returns, the cut-button
   stack descends level with the knobs, and the IMAGE section comes

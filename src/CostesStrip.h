@@ -702,8 +702,9 @@ public:
     // v2.75.0 (Clement's request): the reserved slots, public so the
     // offline harness can pin the three-column grid - the TRANSIENT
     // slot waits between the two dynamics stages, and the five
-    // named-but-empty frames stack down column 3 in the signal's
-    // own order: PHASE INVERT, STEREO PAN, STEREO WIDTH, MONO MAKER,
+    // named frames stack down column 3 in the signal's own order:
+    // TILT (v2.85.0: the tilt moved here from the front end, its
+    // title the engraved name), STEREO PAN, STEREO WIDTH, MONO MAKER,
     // OUTPUT TRIM (DRIVE already lives in its own slot between the
     // last two)
     const juce::Rectangle<int>& getTransientFrame() const { return transientFrame; }
@@ -861,7 +862,10 @@ public:
     }
 
     // v2.84.0 (Clement's remark 1): the front-end captions, for the
-    // harness' "TILT must be written" pin
+    // harness' "TILT must be written" pin. v2.85.0: the TRIM IN
+    // caption alone is laid out - the tilt's own title is the
+    // engraved TILT at the head of the output column's first slot
+    // now, so the tilt caption stays dark
     std::array<juce::Label*, 2> getGainCaptions()
     {
         return { &trimInLabel, &tiltLabel };

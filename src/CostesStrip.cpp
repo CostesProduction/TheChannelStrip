@@ -2684,7 +2684,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.63.0 (Clement's remark 4): the LPF knob wears the same
     // pastel red cap as the EQ's HF band
     setUpKnob (highCutKnob,  nullptr, "", 24000.0f, eqHfDisc);
-    setUpKnob (tiltKnob, &tiltLabel,    "TILT",     0.0f,    knobDisc);
+    // v2.85.0 (Clement's request): the tilt moved to the output
+    // column, where the slot's engraved name IS its title - no
+    // caption word rides under the knob any more
+    setUpKnob (tiltKnob,   nullptr,     "",         0.0f,    knobDisc);
     setUpKnob (driveKnob, &driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
     // the IMAGE section's knobs (v2.84.0, Clement's remarks 4 to 6):
@@ -2717,7 +2720,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (trimIcon);
     addAndMakeVisible (lowCutIcon);
     addAndMakeVisible (highCutIcon);
-    addAndMakeVisible (tiltIcon);
+    // v2.85.0: the tilt's own glyph stays dark - its title is the
+    // engraved TILT at the head of the output column's first slot now
     addAndMakeVisible (driveIcon);
 
     // the band glyphs (v2.62.0; re-cut in v2.78.0, Clement's remarks 4
@@ -3133,8 +3137,14 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.81.0 (Clement's remark 3): the two front-end lines grow 30 px
     // each for the fatter filter knobs (the 107 x 72 squares, 54 px
     // discs) and their centred slope selectors - the panel takes the
-    // 60 px back, 860 x 824, and the EQ keeps its own whole room
-    setSize (860, 824);
+    // 60 px back, 860 x 824, and the EQ keeps its own whole room.
+    // v2.85.0 (Clement's request): the front end INTERLOCKS - the
+    // tilt leaves for the output column, the trim rides the top
+    // middle with the phase plate under it, and the cuts' own
+    // button + slope stacks ride under their knobs - the two 154 px
+    // lines become ONE 288 px block and the panel drops another
+    // 24 px, 860 x 800, the EQ keeping its own 105 px pitch
+    setSize (860, 800);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3343,18 +3353,21 @@ void CostesStripEditor::paint (juce::Graphics& g)
     // v2.80.0: the rule rides under the EQ's header band.
     // v2.83.0 (Clement's remark 3): the taller front-end rows had
     // carried it down to y = 339 - straight through the HPF knob -
-    // so it returns to its own place: JUST above the EQ ON plate,
-    // whose header band starts at y = 378 (the signature 26 + the
-    // two 154 px lines and their breaths + the 12 px breath + the
-    // EQ area's own 4 px)
-    g.drawLine (14.0f, 376.0f, 240.0f, 376.0f, 1.0f);
+    // so it returns to its own place: JUST above the EQ ON plate.
+    // v2.85.0: the interlocked front end carries the header up with
+    // it - the plate's band starts at y = 354 (the signature 26 +
+    // the 288 px block + the 12 px breath + the EQ area's own 4 px),
+    // and the rule rides 2 px above, at 352
+    g.drawLine (14.0f, 352.0f, 240.0f, 352.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
-    // paints nothing rather than an inverted frame)
+    // paints nothing rather than an inverted frame). v2.85.0: the
+    // FIRST frame's name is TILT - the tilt moved here from the
+    // front end, and the phase plate left for the trim's own column
     {
         static const char* const reservedNames[5] =
-            { "PHASE INVERT", "STEREO PAN", "STEREO WIDTH", "MONO MAKER", "OUTPUT TRIM" };
+            { "TILT", "STEREO PAN", "STEREO WIDTH", "MONO MAKER", "OUTPUT TRIM" };
 
         g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
 
@@ -3447,72 +3460,83 @@ void CostesStripEditor::resized()
     // ---- column 1: the front end ----
     // v2.78.0 (Clement's remark 1): ONE block now - the COSTES
     // CONSOLE signature names it from the top band (painted in
-    // paint(), where INPUT once read), TRIM and TILT share the first
-    // line, the HPF and LPF line rides under it with no intertitle,
-    // and the EQ closes the column as ever
+    // paint(), where INPUT once read). v2.85.0 (Clement's request):
+    // the block INTERLOCKS - the tilt left for the output column,
+    // so the trim rides the TOP MIDDLE with the phase plate right
+    // under its caption, and the two cuts share the BOTTOM band, the
+    // LPF at the left edge and the HPF at the right, each with its
+    // own button + slope stack riding UNDER its knob. The two old
+    // 154 px lines become ONE 288 px block - the console loses 24 px
+    // of height, and the EQ keeps its own whole room
     column1.removeFromTop (24);   // the signature's own band
 
-    // the front end's two lines (v2.84.0, Clement's remarks 1 and 2,
-    // rebuilt on the v2.83 knobs-first lines): the GAINS at the left
-    // of their lines and the high frequencies at the top - TRIM with
-    // LPF on the first line, TILT with HPF under it. Both knobs wear
-    // the EQ's own 83 x 101 square, and the merged button + slope
-    // selector stack sits BETWEEN them, DESCENDED into the knobs'
-    // own value and caption bands: the button level with the knobs'
-    // value strips (the gain reading at its left, the Hz at its
-    // right, ending flush with the knobs' feet), the slope directly
-    // under it, level with the caption words. The curve glyphs stay
-    // inside the knobs' own value strips, hugging the Hz values' left
-    // edges (the v2.83 fix), and the captions keep their FULL 83 px
-    // cells - JUCE's drawFittedText refuses a box tighter than the
-    // string's own advance (the v2.83 tight box lost TILT)
-    const auto frontEndLine = [] (juce::Rectangle<int> row,
-                                  CostesSlider& gainKnob, juce::Label& gainCaption,
-                                  SectionIcon& gainIcon,
-                                  CostesSlider& cutKnob, CostesSlider& cutSlope,
-                                  SectionIcon& cutIcon, juce::Button& cutButton)
+    auto frontEnd = column1.removeFromTop (288);
+    auto line = frontEnd.reduced (4, 2);   // 222 x 284
+
+    // the input trim, TOP MIDDLE - the EQ's own 83 x 101 square,
+    // centred on the cuts' own middle axis: the free 56 px street
+    // the two cuts leave below carries the phase plate ON THAT SAME
+    // axis (withSizeKeepingCentre would round 139 px of slack to the
+    // left and put the knob 1 px off the street's own centre - the
+    // knob is placed from the strip's centre itself, so the trim,
+    // its caption, the phase plate and the street all read as one
+    // column)
+    auto trimStrip = line.removeFromTop (101);
+    trimInKnob.setBounds (juce::Rectangle<int> (trimStrip.getCentreX() - 83 / 2,
+                                                trimStrip.getY(), 83, 101));
+
+    // the trim's caption, under the knob: glyph and word ONE centred
+    // unit, the label keeping its FULL 83 px cell - JUCE's
+    // drawFittedText draws NOTHING from a box tighter than the
+    // string's own sub-pixel advance (the v2.83 tight box lost TILT,
+    // the v2.84 lesson)
+    line.removeFromTop (2);
+    const auto trimCaptionBounds = juce::Rectangle<int> (trimInKnob.getX(),
+                                                        line.getY(), 83, 18);
+    line.removeFromTop (18);
+
+    const int trimTextWidth = trimInLabel.getFont()
+                                  .getStringWidth (trimInLabel.getText());
+    const int trimUnitW = 18 + trimTextWidth;
+    trimIcon.setBounds (trimCaptionBounds.getCentreX() - trimUnitW / 2,
+                        trimCaptionBounds.getY() + 1, 16, 16);
+    trimInLabel.setBounds (trimCaptionBounds);
+
+    // the cuts' own band, under the trim stack: the LPF at the LEFT
+    // edge, the HPF at the RIGHT, both wearing the 83 x 101 square -
+    // and the phase plate in the FREE middle column between them,
+    // right under the TRIM IN caption (v2.85.0, Clement's request:
+    // the phase plate moved here from the output column's first
+    // slot; the process order itself never moves - the phase stays
+    // folded into the input gain's own sign)
+    line.removeFromTop (2);
+    auto cutKnobStrip = line.removeFromTop (101);
+    highCutKnob.setBounds (cutKnobStrip.removeFromLeft (83));    // the LPF, bottom left
+    lowCutKnob.setBounds (cutKnobStrip.removeFromRight (83));    // the HPF, bottom right
+    phaseButton.setBounds (cutKnobStrip.removeFromTop (24));
+
+    // under each cut knob, its own stack: the merged plate centred
+    // on the knob's own axis, DIRECTLY under its feet, and the slope
+    // selector under the plate - the whole stack 60 px tall, ending
+    // flush with the front end's own floor
+    line.removeFromTop (2);
+    auto plateBand = line.removeFromTop (18);
+    line.removeFromTop (2);
+    auto slopeBand = line.removeFromTop (38);
+
+    highCutOnButton.setBounds (plateBand.removeFromLeft (83).withSizeKeepingCentre (56, 18));
+    highCutSlope.setBounds (slopeBand.removeFromLeft (83).withSizeKeepingCentre (52, 38));
+
+    lowCutOnButton.setBounds (plateBand.removeFromRight (83).withSizeKeepingCentre (56, 18));
+    lowCutSlope.setBounds (slopeBand.removeFromRight (83).withSizeKeepingCentre (52, 38));
+
+    // and the cut glyphs, inside their knobs' own value strips (the
+    // 76 x 18 readout box every knob carries), at the Hz value's left
+    // edge - the text centred in its box, the curve hugging it from
+    // the left, never more than 2 px away, and never further left
+    // than the knob's own edge (the v2.83 fix, kept)
+    const auto cutGlyph = [] (CostesSlider& cutKnob, SectionIcon& cutIcon)
     {
-        auto line = row.reduced (4, 2);   // 222 x 150
-
-        // the two knobs at the TOP of the line, one at each edge -
-        // the EQ's own 83 x 101 square
-        auto knobStrip = line.removeFromTop (101);
-        gainKnob.setBounds (knobStrip.removeFromLeft (83));
-        cutKnob.setBounds (knobStrip.removeFromRight (83));
-
-        // v2.84.0 (Clement's remark 2): the merged button DESCENDED -
-        // it sits level with the knobs' own value band now, the gain's
-        // reading at its left and the Hz at its right, its own bottom
-        // ending flush with the knobs' feet
-        knobStrip.removeFromTop (83);
-        cutButton.setBounds (knobStrip.removeFromTop (18));
-
-        // the caption band under the knobs: the slope selector rides
-        // DIRECTLY under the button, level with the caption that rides
-        // under the gain knob - the whole stack one band lower than
-        // the knobs
-        line.removeFromTop (2);
-        auto gainCaptionBounds = line.removeFromLeft (83).removeFromTop (18);
-        auto slopeBounds = line.removeFromLeft (56).removeFromTop (38);
-        cutSlope.setBounds (slopeBounds.reduced (2, 0));
-
-        // the caption under the gain knob: the glyph hugs the WORD's
-        // left edge, and the label keeps the FULL 83 px cell - JUCE's
-        // drawFittedText draws NOTHING when the box is tighter than
-        // the string's own sub-pixel advance (the v2.83 tight
-        // getStringWidth box lost TILT and kept TRIM IN on rounding
-        // luck alone - v2.84.0, Clement's remark 1)
-        const int textWidth = gainCaption.getFont().getStringWidth (gainCaption.getText());
-        const int unitW = 18 + textWidth;
-        const int unitX = gainCaptionBounds.getCentreX() - unitW / 2;
-        gainIcon.setBounds (unitX, gainCaptionBounds.getY() + 1, 16, 16);
-        gainCaption.setBounds (gainCaptionBounds);
-
-        // and the cut glyph, back on screen: inside the knob's own
-        // value strip (the 76 x 18 readout box every knob carries),
-        // at the Hz value's left edge - the text centred in its box,
-        // the curve hugging it from the left, never more than 2 px
-        // away, and never further left than the knob's own edge
         cutIcon.setVisible (true);
         auto* cutBox = dynamic_cast<juce::Label*> (cutKnob.getChildComponent (0));
         const int cutTextWidth = (cutBox != nullptr)
@@ -3523,16 +3547,8 @@ void CostesStripEditor::resized()
         cutIcon.setBounds (juce::Rectangle<int> (glyphX,
                                                  cutKnob.getBottom() - 17, 16, 16));
     };
-
-    auto lineOne = column1.removeFromTop (154);
-    frontEndLine (lineOne, trimInKnob, trimInLabel, trimIcon,
-                  highCutKnob, highCutSlope, highCutIcon, highCutOnButton);
-
-    column1.removeFromTop (4);   // a breath between the lines
-
-    auto lineTwo = column1.removeFromTop (154);
-    frontEndLine (lineTwo, tiltKnob, tiltLabel, tiltIcon,
-                  lowCutKnob, lowCutSlope, lowCutIcon, lowCutOnButton);
+    cutGlyph (highCutKnob, highCutIcon);
+    cutGlyph (lowCutKnob, lowCutIcon);
 
     // v2.79.0 (Clement's remark 1): a real breath between the end of
     // the filters and the start of the EQ - the merged block's last
@@ -3844,13 +3860,16 @@ void CostesStripEditor::resized()
     // ---- column 3: the output chain ----
     // six slots down the shorter panel (v2.78.0: the reserved slots
     // slim to 110 px, DRIVE keeps its own 150). v2.84.0 (Clement's
-    // remarks 3 to 6): the first four reserved frames come ALIVE -
-    // the IMAGE section, in the signal's own order: the phase-invert
-    // plate, then the stereo balance, stereo width and mono maker
-    // knobs, each riding under its engraved name inside its own
-    // frame. The sixth slot (OUTPUT TRIM) stays reserved, and the
-    // fifth is DRIVE - the knob, its caption and glyph, the OS plate
-    // under it all, the same per-column pattern as ever
+    // remarks 3 to 6): the first four reserved frames came ALIVE -
+    // the IMAGE section, in the signal's own order: the stereo
+    // balance, stereo width and mono maker knobs, each riding under
+    // its engraved name inside its own frame. v2.85.0 (Clement's
+    // request): the TILT moved here from the front end - it belongs
+    // with the signal as it leaves, and the phase plate traded
+    // places with it, back to the trim's own column. The sixth slot
+    // (OUTPUT TRIM) stays reserved, and the fifth is DRIVE - the
+    // knob, its caption and glyph, the OS plate under it all, the
+    // same per-column pattern as ever
     for (int i = 0; i < 6; ++i)
     {
         auto slot = column3.removeFromTop (i == 4 ? 150 : 110);
@@ -3888,15 +3907,17 @@ void CostesStripEditor::resized()
 
             // v2.84.0: the first four frames fill with their own
             // controls - the body sits under the painted name band,
-            // and the phase plate (a wide 56 x 24 plate, like every
-            // switch on the panel) and the three knobs (83 wide, the
-            // EQ knobs' own girth) ride centred in what is left
+            // and the knobs (83 wide, the EQ knobs' own girth) ride
+            // centred in what is left. v2.85.0: the TILT owns the
+            // first slot now - moved from the front end, its title
+            // the engraved name at the slot's head, the same square
+            // as the balance, width and mono maker under it
             auto body = slot.reduced (10, 4);
             body.removeFromTop (16);   // the engraved name's own band
 
             if (i == 0)
             {
-                phaseButton.setBounds (body.withSizeKeepingCentre (56, 24));
+                tiltKnob.setBounds (body.withSizeKeepingCentre (83, 86));
             }
             else if (i == 1)
             {
