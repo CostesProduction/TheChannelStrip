@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.85.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.86.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,41 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.86.0** — *Two blocks in the output column: IMAGE with the phase
+  plate, SHAPE OUT with the tilt, the drive and the new TRIM OUT - and
+  the console 14 px shorter again.*
+  - **The phase plate moved to the output column.** It rides the head
+    of the new IMAGE block, centred on the block's axis under its
+    engraved name, and it spells its own words now: "PHASE INVERT"
+    between its LED and its empty-set symbol, 118 px wide. The process
+    order never moved - the phase stays folded into the input gain's
+    own sign.
+  - **The TRIM IN caption rides at the knob's left.** Glyph and word
+    one mid-height unit in the free 70 px left of the trim, so the
+    caption's own height below the knob returns to the console: the
+    front-end block drops from 288 to 274 px and the panel from
+    860 x 800 to 860 x 786, the EQ keeping its whole room (its 105 px
+    pitch untouched).
+  - **The output column reads as TWO blocks, not five little frames.**
+    IMAGE at the top - the phase plate, then the stereo balance, the
+    stereo width and the mono maker, every knob with its caption word
+    under it; SHAPE OUT under it - the tilt, the drive with its OS
+    plate, and the new TRIM OUT. Both blocks 370 px tall with an 8 px
+    breath between them, and every knob of the column carries its own
+    caption word and glyph again.
+  - **The TRIM OUT is new.** The last gain the signal rides on its
+    way out, after the drive: the trim in's own sweep (-24 to +12 dB
+    in 0.1 dB steps, unity at the default) on the 20 ms one-pole.
+    The drive stage keeps its own parked discipline (a parked drive
+    writes nothing), and a parked trim out is bit-for-bit unity.
+  - 1011 checks (998 + 13 new: the caption at the knob's left, the two
+    blocks, the phase plate at the IMAGE head, the image knobs with
+    their captions, the SHAPE OUT stack, the trim out measured at
+    -6 dB, the parked bit-exact homecoming, both clamps and the knob's
+    attachment - plus the 34th control in the command-click loop and
+    the 24th cap colour; the icons loop runs its five glyphs whole
+    again).
+
 - **2.85.0** — *The interlocked front end: TRIM at the top middle
   with the phase plate under it, LPF bottom left / HPF bottom right
   with their stacks under their knobs, the TILT moved to the output
@@ -335,11 +370,13 @@ Delete `scanned_plugins.xml` to redo a full scan.
     caption word and glyph go dark, the column's own language.
   - The audio path is untouched: layout alone, sample-for-sample the
     v2.84 strip.
-  - 999 checks (989 + 10 new: the interlocked front end's own pins -
+  - 998 checks (989 + 9 new: the interlocked front end's own pins -
     the 800 px panel, the trim top middle, the phase plate under the
     caption, one stack per cut, the tilt in its engraved frame, the
     dark tilt caption and glyph, the tilt's parameter - and the tilt
-    frame pin of the IMAGE section).
+    frame pin of the IMAGE section; the icons loop's new dark-glyph
+    pin reuses one of the loop's own executions, so the count grows by
+    nine, not ten).
 
 - **2.84.0** — *Six remarks: the TILT caption returns, the cut-button
   stack descends level with the knobs, and the IMAGE section comes

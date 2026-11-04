@@ -344,6 +344,9 @@ CostesStrip::CostesStrip()
     stereoWidth   = apvts.getRawParameterValue ("stereoWidth");
     monoMakerHz   = apvts.getRawParameterValue ("monoMakerHz");
 
+    // the output trim (v2.86.0, Clement's request)
+    trimOutDb     = apvts.getRawParameterValue ("trimOutDb");
+
     eqOn    = apvts.getRawParameterValue ("eqOn");
     eq1Hz   = apvts.getRawParameterValue ("eq1Hz");
     eq1Gain = apvts.getRawParameterValue ("eq1Gain");
@@ -387,6 +390,7 @@ CostesStrip::CostesStrip()
              && driveOversampled != nullptr
              && phaseInvert != nullptr && stereoBalance != nullptr
              && stereoWidth != nullptr && monoMakerHz != nullptr
+             && trimOutDb != nullptr
              && eqOn != nullptr && eq1Hz != nullptr && eq1Gain != nullptr
              && eq1Bell != nullptr && eq2Hz != nullptr && eq2Gain != nullptr
              && eq2Oct != nullptr && eq3Hz != nullptr && eq3Gain != nullptr
@@ -1456,6 +1460,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                 return juce::jlimit (0.0f, 2000.0f, hzParse (t));
             })));
 
+    // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
+    // signal rides on its way out, the SHAPE OUT block's own knob.
+    // The trim in's own sweep: -24 to +12 dB in 0.1 dB steps, unity
+    // at the default
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "trimOutDb", 1 }, "Trim Out",
+        juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
     return layout;
 }
 
@@ -1480,6 +1495,11 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     trimInGain.reset (currentSampleRate, 0.02);
     trimInGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (trimInDb->load()));
+
+    // v2.86.0: the output trim rides the same 20 ms one-pole - a
+    // ridden knob is a slow ramp, the trim's own discipline
+    trimOutGain.reset (currentSampleRate, 0.02);
+    trimOutGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (trimOutDb->load()));
 
     // the IMAGE section's own states (v2.84.0): the balance and
     // width gains ride the trim's own 20 ms ramp, the mono maker's
@@ -1921,6 +1941,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
 
     trimInGain.setTargetValue (juce::Decibels::decibelsToGain (trimInDb->load()));
+
+    // v2.86.0: the output trim tracks its own knob the same way -
+    // one target per block, the 20 ms ramp carrying every change
+    trimOutGain.setTargetValue (juce::Decibels::decibelsToGain (trimOutDb->load()));
 
     refreshCutCoefficients();
     refreshEqCoefficients();
@@ -2515,8 +2539,14 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                              juce::jmax (compOutPower, detectorFloorPower)),
                          std::memory_order_relaxed);
 
-    if (drive <= 0.0f)
-        return;   // the blend term vanishes: drive 0 is bit-exactly clean
+    // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
+    // signal rides on its way out. The drive stage keeps its own
+    // early-out discipline (the blend term vanishes at drive 0, so a
+    // parked drive writes nothing), but the trim out must still
+    // speak after it - the whole drive block now sits under its own
+    // guard, and the trim out closes the chain
+    if (drive > 0.0f)
+    {
 
     if (! useOS)
     {
@@ -2553,6 +2583,19 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         juce::dsp::AudioBlock<float> outputBlock (buffer);
         oversampler->processSamplesDown (outputBlock);
     }
+
+    }   // the drive stage's own guard
+
+    // v2.86.0 (Clement's request): the TRIM OUT, the very end of the
+    // chain - after the drive, the last word on the way out. It rides
+    // the same discipline as the trim in: the multiply always runs,
+    // and a parked knob (exactly 0 dB, the default) settles at exactly
+    // 1.0f - x * 1.0f is the x that came in, bit for bit, so the strip
+    // keeps its parked bit-exactness while a ridden knob ramps home on
+    // the 20 ms one-pole like every gain on the panel
+    for (int ch = 0; ch < numChannels; ++ch)
+        for (int i = 0; i < numSamples; ++i)
+            channels[ch][i] *= trimOutGain.getNextValue();
 }
 
 juce::AudioProcessorEditor* CostesStrip::createEditor()
@@ -2684,19 +2727,25 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.63.0 (Clement's remark 4): the LPF knob wears the same
     // pastel red cap as the EQ's HF band
     setUpKnob (highCutKnob,  nullptr, "", 24000.0f, eqHfDisc);
-    // v2.85.0 (Clement's request): the tilt moved to the output
-    // column, where the slot's engraved name IS its title - no
-    // caption word rides under the knob any more
-    setUpKnob (tiltKnob,   nullptr,     "",         0.0f,    knobDisc);
+    // v2.86.0 (Clement's request): the tilt rides the SHAPE OUT
+    // block now, its own caption word under its knob again
+    setUpKnob (tiltKnob,   &tiltLabel,     "TILT",      0.0f,    knobDisc);
     setUpKnob (driveKnob, &driveLabel,   "DRIVE",    0.0f,    knobDisc);
 
     // the IMAGE section's knobs (v2.84.0, Clement's remarks 4 to 6):
     // the stereo balance parks at CENTER, the stereo width at 100 %,
     // and the mono maker at 0 = off - double-click parks each one
-    // back to its honest, bit-exact neutral
-    setUpKnob (balanceKnob,    nullptr, "",   0.0f,  knobDisc);
-    setUpKnob (widthKnob,      nullptr, "", 100.0f,  knobDisc);
-    setUpKnob (monoMakerKnob,  nullptr, "",   0.0f,  knobDisc);
+    // back to its honest, bit-exact neutral. v2.86.0 (Clement's
+    // request): the IMAGE block's engraved name no longer spells
+    // each knob's own title - every knob carries its caption word
+    // again, the way the whole column reads now
+    setUpKnob (balanceKnob,    &balanceLabel,    "STEREO BALANCE",   0.0f,  knobDisc);
+    setUpKnob (widthKnob,      &widthLabel,      "STEREO WIDTH",   100.0f,  knobDisc);
+    setUpKnob (monoMakerKnob, &monoMakerLabel,  "MONO MAKER",       0.0f,  knobDisc);
+
+    // v2.86.0 (Clement's request): the TRIM OUT - the SHAPE OUT
+    // block's last knob, the gain the signal rides on its way out
+    setUpKnob (trimOutKnob, &trimOutLabel, "TRIM OUT", 0.0f, knobDisc);
 
     // the EQ knobs (v2.61.0): the same ergonomics, one FREQ and one GAIN
     // per band - double-click parks each band on its SSL-style starting
@@ -2720,8 +2769,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (trimIcon);
     addAndMakeVisible (lowCutIcon);
     addAndMakeVisible (highCutIcon);
-    // v2.85.0: the tilt's own glyph stays dark - its title is the
-    // engraved TILT at the head of the output column's first slot now
+    // v2.86.0: the tilt's own glyph is back - the SHAPE OUT block
+    // spells its name at its head, but every knob carries its own
+    // caption word and glyph under it again, the column's new way
+    addAndMakeVisible (tiltIcon);
+    addAndMakeVisible (trimOutIcon);
     addAndMakeVisible (driveIcon);
 
     // the band glyphs (v2.62.0; re-cut in v2.78.0, Clement's remarks 4
@@ -2942,8 +2994,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (highCutOnButton);
 
     // the IMAGE section's phase plate (v2.84.0, Clement's remark 3):
-    // the empty-set symbol itself, the polarity sign - the plate
-    // needs no caption word, the circle-and-slash reads on its own
+    // v2.86.0 (Clement's request): the plate moved to the head of the
+    // IMAGE block and carries its own words now - "PHASE INVERT"
+    // spelled beside the LED, the empty-set symbol at its right, the
+    // same plate language as every other switch on the panel
     addAndMakeVisible (phaseButton);
 
     // the dynamics' on/off plates (v2.64.0): "EXP ON" / "EXP OFF" and
@@ -2997,6 +3051,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "tiltDb", tiltKnob);
     driveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "driveDb", driveKnob);
+    trimOutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "trimOutDb", trimOutKnob);
     oversampleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "driveOversampled", oversampleButton);
 
@@ -3144,7 +3200,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // button + slope stacks ride under their knobs - the two 154 px
     // lines become ONE 288 px block and the panel drops another
     // 24 px, 860 x 800, the EQ keeping its own 105 px pitch
-    setSize (860, 800);
+    // v2.86.0 (Clement's request): the console loses another 14 px -
+    // the phase plate left for the output column and the TRIM IN
+    // caption moved to the trim's side, the front-end block dropping
+    // from 288 to 274, the EQ keeping its own whole 105 px room
+    setSize (860, 786);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3352,26 +3412,29 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.drawLine (14.0f, 47.0f, 240.0f, 47.0f, 1.0f);
     // v2.80.0: the rule rides under the EQ's header band.
     // v2.83.0 (Clement's remark 3): the taller front-end rows had
-    // carried it down to y = 339 - straight through the HPF knob -
-    // so it returns to its own place: JUST above the EQ ON plate.
-    // v2.85.0: the interlocked front end carries the header up with
-    // it - the plate's band starts at y = 354 (the signature 26 +
-    // the 288 px block + the 12 px breath + the EQ area's own 4 px),
-    // and the rule rides 2 px above, at 352
-    g.drawLine (14.0f, 352.0f, 240.0f, 352.0f, 1.0f);
+    // carried it down to y = 339 - straight through the HPF knob - so
+    // it returns to its own place: JUST above the EQ ON plate.
+    // v2.86.0: the tighter front end carries the header up with it -
+    // the plate's band starts at y = 340 (the signature 26 + the
+    // 274 px block + the 12 px breath + the EQ area's own 4 px), and
+    // the rule rides 2 px above, at 338
+    g.drawLine (14.0f, 338.0f, 240.0f, 338.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
-    // paints nothing rather than an inverted frame). v2.85.0: the
-    // FIRST frame's name is TILT - the tilt moved here from the
-    // front end, and the phase plate left for the trim's own column
+    // paints nothing rather than an inverted frame). v2.86.0
+    // (Clement's request): the output column reads as TWO blocks
+    // now - IMAGE (the phase plate and the image knobs) at the top
+    // of the column, SHAPE OUT (the tilt, the drive, the trim out)
+    // under it - and the silkscreen paints each block's own name at
+    // its head
     {
-        static const char* const reservedNames[5] =
-            { "TILT", "STEREO PAN", "STEREO WIDTH", "MONO MAKER", "OUTPUT TRIM" };
+        static const char* const reservedNames[2] =
+            { "IMAGE", "SHAPE OUT" };
 
         g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
 
-        for (int i = 0; i < 5; ++i)
+        for (int i = 0; i < 2; ++i)
         {
             auto frame = reservedFrames[(size_t) i].reduced (4, 2);
 
@@ -3462,38 +3525,45 @@ void CostesStripEditor::resized()
     // CONSOLE signature names it from the top band (painted in
     // paint(), where INPUT once read). v2.85.0 (Clement's request):
     // the block INTERLOCKS - the tilt left for the output column,
-    // so the trim rides the TOP MIDDLE with the phase plate right
-    // under its caption, and the two cuts share the BOTTOM band, the
-    // LPF at the left edge and the HPF at the right, each with its
-    // own button + slope stack riding UNDER its knob. The two old
-    // 154 px lines become ONE 288 px block - the console loses 24 px
-    // of height, and the EQ keeps its own whole room
+    // so the trim rides the TOP MIDDLE, the two cuts sharing the
+    // BOTTOM band, the LPF at the left edge and the HPF at the
+    // right, each with its own button + slope stack riding UNDER its
+    // knob. v2.86.0 (Clement's request): the phase plate left for
+    // the IMAGE block and the TRIM IN caption moved to the knob's
+    // LEFT, so the block drops from 288 to 274 - the console loses
+    // another 14 px of height, and the EQ keeps its own whole room
     column1.removeFromTop (24);   // the signature's own band
 
-    auto frontEnd = column1.removeFromTop (288);
-    auto line = frontEnd.reduced (4, 2);   // 222 x 284
+    // v2.86.0 (Clement's request): the front end tightens again -
+    // the phase plate left for the IMAGE block at the head of the
+    // output column, and the TRIM IN caption rides at the KNOB'S
+    // LEFT now, glyph and word one mid-height unit, so the caption's
+    // own height below the trim returns to the console. The block
+    // drops from 288 to 274: the trim row, a breath, then the cuts'
+    // band with each button + slope stack riding under its own knob
+    auto frontEnd = column1.removeFromTop (274);
+    auto line = frontEnd.reduced (4, 2);   // 222 x 270
 
     // the input trim, TOP MIDDLE - the EQ's own 83 x 101 square,
-    // centred on the cuts' own middle axis: the free 56 px street
-    // the two cuts leave below carries the phase plate ON THAT SAME
-    // axis (withSizeKeepingCentre would round 139 px of slack to the
-    // left and put the knob 1 px off the street's own centre - the
-    // knob is placed from the strip's centre itself, so the trim,
-    // its caption, the phase plate and the street all read as one
-    // column)
+    // centred on the cuts' own middle axis (withSizeKeepingCentre
+    // would round 139 px of slack to the left and put the knob 1 px
+    // off the street's own centre - the knob is placed from the
+    // strip's centre itself, so the trim and the free street below
+    // it read as one column)
     auto trimStrip = line.removeFromTop (101);
     trimInKnob.setBounds (juce::Rectangle<int> (trimStrip.getCentreX() - 83 / 2,
                                                 trimStrip.getY(), 83, 101));
 
-    // the trim's caption, under the knob: glyph and word ONE centred
-    // unit, the label keeping its FULL 83 px cell - JUCE's
-    // drawFittedText draws NOTHING from a box tighter than the
-    // string's own sub-pixel advance (the v2.83 tight box lost TILT,
-    // the v2.84 lesson)
-    line.removeFromTop (2);
-    const auto trimCaptionBounds = juce::Rectangle<int> (trimInKnob.getX(),
-                                                        line.getY(), 83, 18);
-    line.removeFromTop (18);
+    // the trim's caption AT THE KNOB'S LEFT (v2.86.0, Clement's
+    // request): glyph and word ONE centred unit riding the free 70 px
+    // left of the knob, at the knob row's own mid-height - the label
+    // keeps the FULL cell, JUCE's drawFittedText draws NOTHING from a
+    // box tighter than the string's own sub-pixel advance (the v2.83
+    // tight box lost TILT, the v2.84 lesson)
+    const auto trimCaptionBounds = juce::Rectangle<int> (line.getX(),
+                                                        trimStrip.getY() + (101 - 18) / 2,
+                                                        trimInKnob.getX() - line.getX(),
+                                                        18);
 
     const int trimTextWidth = trimInLabel.getFont()
                                   .getStringWidth (trimInLabel.getText());
@@ -3502,18 +3572,16 @@ void CostesStripEditor::resized()
                         trimCaptionBounds.getY() + 1, 16, 16);
     trimInLabel.setBounds (trimCaptionBounds);
 
-    // the cuts' own band, under the trim stack: the LPF at the LEFT
-    // edge, the HPF at the RIGHT, both wearing the 83 x 101 square -
-    // and the phase plate in the FREE middle column between them,
-    // right under the TRIM IN caption (v2.85.0, Clement's request:
-    // the phase plate moved here from the output column's first
-    // slot; the process order itself never moves - the phase stays
+    // the cuts' own band, under a breath: the LPF at the LEFT edge,
+    // the HPF at the RIGHT, both wearing the 83 x 101 square - and
+    // the middle street between them FREE now (v2.86.0: the phase
+    // plate lives in the IMAGE block at the head of the output
+    // column; the process order itself never moves - the phase stays
     // folded into the input gain's own sign)
-    line.removeFromTop (2);
+    line.removeFromTop (8);
     auto cutKnobStrip = line.removeFromTop (101);
     highCutKnob.setBounds (cutKnobStrip.removeFromLeft (83));    // the LPF, bottom left
     lowCutKnob.setBounds (cutKnobStrip.removeFromRight (83));    // the HPF, bottom right
-    phaseButton.setBounds (cutKnobStrip.removeFromTop (24));
 
     // under each cut knob, its own stack: the merged plate centred
     // on the knob's own axis, DIRECTLY under its feet, and the slope
@@ -3858,81 +3926,90 @@ void CostesStripEditor::resized()
     }
 
     // ---- column 3: the output chain ----
-    // six slots down the shorter panel (v2.78.0: the reserved slots
-    // slim to 110 px, DRIVE keeps its own 150). v2.84.0 (Clement's
-    // remarks 3 to 6): the first four reserved frames came ALIVE -
-    // the IMAGE section, in the signal's own order: the stereo
-    // balance, stereo width and mono maker knobs, each riding under
-    // its engraved name inside its own frame. v2.85.0 (Clement's
-    // request): the TILT moved here from the front end - it belongs
-    // with the signal as it leaves, and the phase plate traded
-    // places with it, back to the trim's own column. The sixth slot
-    // (OUTPUT TRIM) stays reserved, and the fifth is DRIVE - the
-    // knob, its caption and glyph, the OS plate under it all, the
-    // same per-column pattern as ever
-    for (int i = 0; i < 6; ++i)
+    // TWO blocks down the shorter panel (v2.86.0, Clement's request):
+    // the five little reserved frames and DRIVE's own slot became TWO
+    // engraved blocks - IMAGE at the top of the column (the phase
+    // plate with its own words, the stereo balance, the stereo width
+    // and the mono maker, every knob with its caption word under
+    // it), SHAPE OUT under it (the tilt, the drive with its OS
+    // plate, and the new TRIM OUT - the gain the signal rides on its
+    // way out). Both blocks 370 px tall with an 8 px breath between
+    // them, ending flush under the EQ's own floor
+    auto imageBlock = column3.removeFromTop (370);
+    reservedFrames[0] = imageBlock;
+    column3.removeFromTop (8);   // the breath between the blocks
+    auto shapeBlock = column3.removeFromTop (370);
+    reservedFrames[1] = shapeBlock;
+
+    // ---- the IMAGE block ----
+    auto imageBody = imageBlock;
+    imageBody.removeFromTop (16);   // the engraved name's own band
+
+    // the phase plate at the block's head, under its engraved name:
+    // "PHASE INVERT" with the LED at its left and the empty-set
+    // symbol at its right, 118 px of the column's own width
+    imageBody.removeFromTop (2);
+    phaseButton.setBounds (imageBody.removeFromTop (26)
+                                .withSizeKeepingCentre (118, 26));
+
+    // the three image knobs, each with its caption word under it -
+    // the block's engraved name names the SECTION now, so every knob
+    // spells its own title again (v2.86.0, the column's new way)
+    CostesSlider* imageKnobList[3] = { &balanceKnob, &widthKnob, &monoMakerKnob };
+    juce::Label* imageWordList[3]  = { &balanceLabel, &widthLabel, &monoMakerLabel };
+
+    for (int i = 0; i < 3; ++i)
     {
-        auto slot = column3.removeFromTop (i == 4 ? 150 : 110);
-
-        if (i < 5)
-            column3.removeFromTop (6);   // a breath between the slots
-
-        if (i == 4)
-        {
-            auto cell = slot.reduced (8, 2);
-
-            // the OS plate rides the cell's bottom, as ever
-            auto toggleBounds = cell.removeFromBottom (26);
-            toggleBounds = toggleBounds.withSizeKeepingCentre (
-                juce::jmin (toggleBounds.getWidth(), 110), 26);
-            oversampleButton.setBounds (toggleBounds);
-
-            auto driveCaption = cell.removeFromBottom (18);
-            driveLabel.setBounds (driveCaption);
-
-            const int driveTextWidth = driveLabel.getFont()
-                                          .getStringWidth (driveLabel.getText());
-            driveIcon.setBounds (driveCaption.getCentreX() - driveTextWidth / 2 - 21,
-                                driveCaption.getY() + 1, 16, 16);
-
-            driveKnob.setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 96),
-                juce::jmin (cell.getHeight(), 96)));
-        }
-        else
-        {
-            // the reserved frames store the slot's own bounds - the
-            // silkscreen paints each one's name at its head
-            reservedFrames[(size_t) (i < 4 ? i : 4)] = slot;
-
-            // v2.84.0: the first four frames fill with their own
-            // controls - the body sits under the painted name band,
-            // and the knobs (83 wide, the EQ knobs' own girth) ride
-            // centred in what is left. v2.85.0: the TILT owns the
-            // first slot now - moved from the front end, its title
-            // the engraved name at the slot's head, the same square
-            // as the balance, width and mono maker under it
-            auto body = slot.reduced (10, 4);
-            body.removeFromTop (16);   // the engraved name's own band
-
-            if (i == 0)
-            {
-                tiltKnob.setBounds (body.withSizeKeepingCentre (83, 86));
-            }
-            else if (i == 1)
-            {
-                balanceKnob.setBounds (body.withSizeKeepingCentre (83, 86));
-            }
-            else if (i == 2)
-            {
-                widthKnob.setBounds (body.withSizeKeepingCentre (83, 86));
-            }
-            else if (i == 3)
-            {
-                monoMakerKnob.setBounds (body.withSizeKeepingCentre (83, 86));
-            }
-        }
+        imageBody.removeFromTop (2);
+        imageKnobList[(size_t) i]->setBounds (imageBody.removeFromTop (86)
+                                                  .withSizeKeepingCentre (83, 86));
+        imageBody.removeFromTop (2);   // the caption's own breath
+        imageWordList[(size_t) i]->setBounds (imageBody.removeFromTop (18)
+                                                  .reduced (4, 0));
     }
+
+    // ---- the SHAPE OUT block ----
+    auto shapeBody = shapeBlock;
+    shapeBody.removeFromTop (16);   // the engraved name's own band
+
+    // the tilt, its caption word and glyph back under its knob
+    shapeBody.removeFromTop (2);
+    tiltKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
+    shapeBody.removeFromTop (2);   // the caption's own breath
+    auto tiltCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    tiltLabel.setBounds (tiltCaption);
+    const int tiltTextWidth = tiltLabel.getFont()
+                                  .getStringWidth (tiltLabel.getText());
+    tiltIcon.setBounds (tiltCaption.getCentreX() - (18 + tiltTextWidth) / 2,
+                        tiltCaption.getY() + 1, 16, 16);
+
+    // the drive - the knob in the block's own 83 x 86 square now,
+    // its caption under it, the OS plate under the caption, the same
+    // per-knob pattern as the whole column
+    shapeBody.removeFromTop (2);
+    driveKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
+    shapeBody.removeFromTop (2);   // the caption's own breath
+    auto driveCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    driveLabel.setBounds (driveCaption);
+    const int driveTextWidth = driveLabel.getFont()
+                                  .getStringWidth (driveLabel.getText());
+    driveIcon.setBounds (driveCaption.getCentreX() - (18 + driveTextWidth) / 2,
+                         driveCaption.getY() + 1, 16, 16);
+    shapeBody.removeFromTop (2);
+    oversampleButton.setBounds (shapeBody.removeFromTop (26)
+                                    .withSizeKeepingCentre (110, 26));
+
+    // the TRIM OUT, the block's last knob - the gain the signal rides
+    // on its way out, the fader glyph at its caption's left
+    shapeBody.removeFromTop (2);
+    trimOutKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
+    shapeBody.removeFromTop (2);   // the caption's own breath
+    auto trimOutCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    trimOutLabel.setBounds (trimOutCaption);
+    const int trimOutTextWidth = trimOutLabel.getFont()
+                                     .getStringWidth (trimOutLabel.getText());
+    trimOutIcon.setBounds (trimOutCaption.getCentreX() - (18 + trimOutTextWidth) / 2,
+                           trimOutCaption.getY() + 1, 16, 16);
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 {
@@ -4337,10 +4414,12 @@ void CostesStripEditor::PhaseToggle::paintButton (juce::Graphics& g,
     // the IMAGE section's phase plate (v2.84.0, Clement's remark 3):
     // the same SSL plate language as every other switch on the panel
     // - lit amber with a live LED while the programme is inverted,
-    // black with a dead LED while it plays normal - but the plate
-    // carries no word: it carries the polarity sign itself, the
-    // empty-set symbol, drawn as the vector circle-and-slash so the
-    // panel never leaves its hundred-percent ASCII rule
+    // black with a dead LED while it plays normal. v2.86.0
+    // (Clement's request): the plate rides the head of the IMAGE
+    // block and spells its own name now - "PHASE INVERT" between the
+    // LED and the empty-set symbol, drawn as the vector
+    // circle-and-slash so the panel never leaves its hundred-percent
+    // ASCII rule
     const bool on = getToggleState();
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 
@@ -4368,10 +4447,21 @@ void CostesStripEditor::PhaseToggle::paintButton (juce::Graphics& g,
         g.fillEllipse (led);
     }
 
+    // v2.86.0 (Clement's request): the plate carries its own words
+    // now - "PHASE INVERT" between the LED and the symbol, the same
+    // two-tone engraving as the words on the lit plates. The 118 px
+    // plate leaves the word 78 px of its own - the 9.5 bold caption
+    // face needs ~70 - so the words read whole
+    const auto symbolArea = bounds.removeFromRight (20.0f);
+
+    g.setColour (on ? engraving : plateText);
+    g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
+    g.drawText ("PHASE INVERT", bounds, juce::Justification::centred);
+
     // the empty-set symbol: a 16 px circle with the slash riding its
     // diagonal, from the top-right rim down to the bottom-left - the
     // same two-tone engraving as the words on the lit plates
-    const auto symbol = bounds.withSizeKeepingCentre (16.0f, 16.0f);
+    const auto symbol = symbolArea.withSizeKeepingCentre (16.0f, 16.0f);
 
     g.setColour (on ? engraving : plateText);
     g.drawEllipse (symbol, 1.6f);

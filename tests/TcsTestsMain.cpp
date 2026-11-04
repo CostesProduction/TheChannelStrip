@@ -4567,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 49,
-                "the strip's forty-nine parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 50,
+                "the strip's fifty parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 49,
-                "the strip exposes exactly forty-nine parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 50,
+                "the strip exposes exactly fifty parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5109,8 +5109,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 49,
-                "the restored strip's forty-nine parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 50,
+                "the restored strip's fifty parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5248,8 +5248,8 @@ void testCostesStripSessionDeep()
                         "the expander range restores (the reported knob)");
         }
 
-        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 49,
-                    "the restored strip's forty-nine parameters are relayed");
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 50,
+                    "the restored strip's fifty parameters are relayed");
 
         // a host can restore twice (Studio One's launch sequence does):
         // the second pass re-hosts a fresh strip and re-applies the
@@ -5466,7 +5466,7 @@ void testCostesStripSessionDeep()
                         "the expander range is intact after 50 cycles");
         }
 
-        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 49,
+        expectTrue (cycleProc.getHostedStrip().getRelayedParameterCount() >= 50,
                     "the cycled strip's parameters stay relayed");
     }
 }
@@ -5654,10 +5654,12 @@ void testCostesStripSectionIcons()
     // knobs - 860 x 824, the EQ keeping its own whole room.
     // v2.85.0 (Clement's request): the front end interlocks - the
     // tilt leaves for the output column and the two 154 px lines
-    // become one 288 px block - 860 x 800, the EQ keeping its whole
-    // room again
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 800,
-                "the strip panel opens as the three-column console with the interlocked front end (860 x 800)");
+    // become one 288 px block - 860 x 800. v2.86.0 (Clement's
+    // request): the phase plate left for the IMAGE block and the
+    // TRIM IN caption moved to the trim's side - the block drops to
+    // 274 and the panel to 860 x 786, the EQ keeping its whole room
+    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 786,
+                "the strip panel opens as the three-column console with the tightened front end (860 x 786)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5676,20 +5678,11 @@ void testCostesStripSectionIcons()
         expectTrue (icons[(size_t) i]->type == expectedTypes[i],
                     "the section icons sit in column order (trim, low cut, high cut, tilt, drive)");
 
-        // v2.85.0 (Clement's request): the tilt moved to the output
-        // column, where the slot's engraved name IS its title - the
-        // tilt's own glyph goes dark
-        if (i == 3)
-        {
-            expectTrue (! icons[(size_t) 3]->isVisible(),
-                        "the tilt's own glyph goes dark - its title is the engraved TILT on the output column now");
-            continue;
-        }
-
-        // v2.83.0 (Clement's remark 2): the HPF and LPF curve glyphs
-        // are BACK - inside their knobs' own value strips, hugging
-        // the Hz values' left edge - so every other section icon is
-        // laid out on the panel
+        // v2.86.0 (Clement's request): the tilt's glyph is BACK -
+        // the SHAPE OUT block spells its name at its head, but
+        // every knob carries its own caption word and glyph again,
+        // the output column's new way - so every section icon is
+        // laid out on the panel once more
         expectTrue (icons[(size_t) i]->isVisible()
                         && editor.getLocalBounds().contains (icons[(size_t) i]->getBounds()),
                     "every section icon is laid out inside the panel");
@@ -6057,11 +6050,11 @@ void testCostesStripSectionIcons()
                 "the console reads as three columns - the front end, the dynamics, the output chain");
 
     // the reserved frames (v2.75.0, Clement's spec): the TRANSIENT
-    // slot engraved between the two stages, TILT (v2.85.0: the
-    // phase plate traded places with it, back to the trim's own
-    // column), STEREO PAN, STEREO WIDTH and MONO MAKER stacked above
-    // DRIVE in column 3, OUTPUT TRIM under it - the frames the
-    // builds to come will fill
+    // slot engraved between the two stages, and column 3 reading
+    // as TWO engraved blocks since v2.86.0 (Clement's request) -
+    // IMAGE at the top of the column (the phase plate and the image
+    // knobs), SHAPE OUT under it (the tilt, the drive, the trim out),
+    // the five little reserved frames gone
     {
         const auto& transient = editor.getTransientFrame();
         const auto& reserved = editor.getReservedFrames();
@@ -6069,12 +6062,14 @@ void testCostesStripSectionIcons()
         expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
                         && meters[3]->getBounds().getY() > transient.getBottom()
                         && transient.getHeight() == 220
-                        && reserved[0].getY() < reserved[1].getY()
-                        && reserved[1].getY() < reserved[2].getY()
-                        && reserved[2].getY() < reserved[3].getY()
-                        && reserved[3].getBottom() <= sliders[4]->getBounds().getY()
-                        && sliders[4]->getBounds().getBottom() <= reserved[4].getY(),
-                    "the reserved frames sit engraved in the grid - TRANSIENT at its own 220 px between the stages, the output chain around DRIVE");
+                        && reserved[0].getY() == 26
+                        && reserved[0].getHeight() == 370
+                        && reserved[1].getY() == reserved[0].getBottom() + 8
+                        && reserved[1].getHeight() == 370
+                        && reserved[1].getBottom() <= editor.getHeight() - 8
+                        && reserved[0].getY() < sliders[4]->getBounds().getY()
+                        && sliders[4]->getBounds().getBottom() <= reserved[1].getBottom(),
+                    "the two blocks sit engraved in the grid - TRANSIENT at its own 220 px between the stages, IMAGE and SHAPE OUT stacked down column 3");
     }
 
     // v2.72.0 (Clement's request): each stage's GR ladder sits at the
@@ -6210,10 +6205,11 @@ void testCostesStripKnobDefaultsAndCaps()
     // five knobs and its sidechain pair (v2.66.0: the expander's
     // attack knob became a FAST/SLOW plate; v2.72.0: the compressor's
     // LINK selector joins as the 32nd control; v2.73.0: the expander's
-    // KNEE selector closes the array as the 33rd)
+    // KNEE selector closes the dynamics; v2.86.0: the TRIM OUT knob
+    // joins as the 34th, the SHAPE OUT block's last)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[33] =
+    const char* paramIds[34] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
@@ -6222,10 +6218,11 @@ void testCostesStripKnobDefaultsAndCaps()
         "expThreshold", "expRange", "expRelease", "expRatio", "expMix",
         "compThreshold", "compRatio", "compRelease", "compGain", "compMix",
         "compHpf", "compScLpf", "expScHpf", "expScLpf",
-        "compLink", "expKnee"
+        "compLink", "expKnee",
+        "trimOutDb"
     };
 
-    const float expectedDefaults[33] =
+    const float expectedDefaults[34] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
@@ -6234,12 +6231,13 @@ void testCostesStripKnobDefaultsAndCaps()
         -50.0f, 0.0f, 0.3f, 2.0f, 100.0f,
         0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 16.0f,
         24000.0f, 16.0f, 24000.0f,
-        3.0f, 0.0f
+        3.0f, 0.0f,
+        0.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[33] =
+    const float perturbed[34] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
@@ -6248,13 +6246,14 @@ void testCostesStripKnobDefaultsAndCaps()
         -22.5f, 18.0f, 1.4f, 7.0f, 35.0f,
         -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f,
         2500.0f, 400.0f, 2500.0f,
-        0.0f, 16.0f
+        0.0f, 16.0f,
+        4.5f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 33; ++i)
+    for (int i = 0; i < 34; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -6267,7 +6266,7 @@ void testCostesStripKnobDefaultsAndCaps()
                     "a command-click restores the parameter's default through the attachment");
     }
 
-    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 23
+    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 24
     // rotary knobs carry their band's colour on the
     // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
     // red high cut, the LPF now (v2.63.0), the EQ bands speak the SSL
@@ -6278,10 +6277,11 @@ void testCostesStripKnobDefaultsAndCaps()
     // knob became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
     // loop. The eight linear selectors draw no cap, so they are not in
     // the loop ----
-    const int knobIndex[23] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
+    const int knobIndex[24] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
                                17, 18, 19, 20, 21,
-                               22, 23, 24, 25, 26 };
-    const unsigned int knobCap[23] =
+                               22, 23, 24, 25, 26,
+                               33 };
+    const unsigned int knobCap[24] =
     {
         0xff23232au, 0xff23232au, 0xffcd7f6du, 0xff23232au, 0xff23232au,
         0xff23232au, 0xff23232au,
@@ -6291,13 +6291,14 @@ void testCostesStripKnobDefaultsAndCaps()
         0xffcd7f6du, 0xffefe0bcu, 0xffefe0bcu,
         0xffefe0bcu, 0xffefe0bcu,
         0xffcd7f6du, 0xff6f9fd4u, 0xff6f9fd4u,
-        0xff6f9fd4u, 0xff6f9fd4u
+        0xff6f9fd4u, 0xff6f9fd4u,
+        0xff23232au
     };
 
-    for (int k = 0; k < 23; ++k)
+    for (int k = 0; k < 24; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor, and both THRESH knobs the console's own red since v2.80.0)");
+                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor, both THRESH knobs the console's own red since v2.80.0, and the new trim out the console's own black)");
 
     // v2.75.0 (Clement's spec): the front end is the console's first
     // column - the trim knob at its head, the EQ's first band under
@@ -8128,17 +8129,18 @@ void testV283FourRemarks()
     // the taller front-end rows had carried the rule down to y = 339,
     // straight through the HPF knob; it belongs just above the EQ ON
     // plate. v2.85.0: the interlocked front end carries the header up
-    // with it - the plate's band starts at y = 354, the rule rides 2
-    // px above, at 352. The harness paints the panel and probes the
+    // with it - and v2.86.0: the tightened front end carries it up
+    // again - the plate's band starts at y = 340, the rule rides 2
+    // px above, at 338. The harness paints the panel and probes the
     // rule's own rows against the clean air above the EQ
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 800, true);
+        juce::Image canvas (juce::Image::ARGB, 860, 786, true);
         juce::Graphics g (canvas);
         editorForV283.paint (g);
 
-        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 351).getRed(),
-                                          canvas.getPixelAt (100, 352).getRed());
-        const int cleanRow = canvas.getPixelAt (100, 340).getRed();
+        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 337).getRed(),
+                                          canvas.getPixelAt (100, 338).getRed());
+        const int cleanRow = canvas.getPixelAt (100, 334).getRed();
 
         expectTrue (ruleRow < 190 && cleanRow > 200,
                     "the engraved rule rides just above the EQ ON plate again - no more crossing the HPF knob");
@@ -8158,17 +8160,18 @@ void testV283FourRemarks()
                     && cutPlates83[1]->getBounds().getY() == sliders83[2]->getBounds().getBottom() + 2,
                 "the merged buttons ride centred under their own knobs' feet - the HPF's under the HPF, the LPF's under the LPF");
 
-    // ---- and the gain captions keep their glyphs inside the knobs' own column ----
-    // the fader glyph and its words hang as ONE centred unit under
-    // the knob - the old text-relative offset fell off the knob's
-    // own 83 px for TRIM IN, the unit never does
+    // ---- and the gain caption keeps its glyph inside its own cell ----
+    // the fader glyph and its words hang as ONE centred unit. v2.86.0
+    // (Clement's request): the unit rides at the KNOB'S LEFT now, in
+    // the free 70 px the trim's own row leaves there, at the row's own
+    // mid-height - the old text-relative offset never leaves the
+    // caption's own cell, and neither does the move
     expectTrue (icons83[0] != nullptr && sliders83[0] != nullptr
                     && icons83[0]->isVisible()
-                    && icons83[0]->getBounds().getY() >= sliders83[0]->getBounds().getBottom() + 2
-                    && icons83[0]->getBounds().getBottom() <= sliders83[0]->getBounds().getBottom() + 22
-                    && icons83[0]->getBounds().getX() >= sliders83[0]->getBounds().getX()
-                    && icons83[0]->getBounds().getRight() <= sliders83[0]->getBounds().getRight(),
-                "the trim caption's fader glyph rides under its knob, inside the knob's own 83 px column - one centred unit with its words");
+                    && icons83[0]->getBounds().getRight() <= sliders83[0]->getBounds().getX()
+                    && icons83[0]->getBounds().getY() >= sliders83[0]->getBounds().getY()
+                    && icons83[0]->getBounds().getBottom() <= sliders83[0]->getBounds().getBottom(),
+                "the trim caption's fader glyph rides at its knob's left, one centred unit with its words at the knob row's own mid-height - never outside the caption's own cell");
 }
 
 void testV284ImageSection()
@@ -8186,22 +8189,24 @@ void testV284ImageSection()
     const auto cutPlates = editorForV284.getCutPlateButtons();
     const auto captions  = editorForV284.getGainCaptions();
 
-    // ---- Clement's remark 1 of v2.84.0, read again in v2.85.0:
-    // the TILT's title travels with the knob ---- JUCE's fitted-text
+    // ---- Clement's remark 1 of v2.84.0, read again in v2.86.0:
+    // the captions travel with their knobs ---- JUCE's fitted-text
     // label draws NOTHING when its box is tighter than the string's
     // own sub-pixel advance - the v2.83 tight box kept "TRIM IN" on
     // rounding luck and lost "TILT". The TRIM IN caption keeps its
-    // FULL 83 px cell, level under its knob - and the tilt's own
-    // title now lives out in the output column, where the engraved
-    // slot name spells it, so the tilt's caption word goes dark
+    // FULL cell, riding at the knob's LEFT now (v2.86.0, Clement's
+    // request - the caption's height below the trim returns to the
+    // console) - and the tilt's caption word is back under its knob,
+    // in the SHAPE OUT block
     expectTrue (captions[0] != nullptr && captions[1] != nullptr
                     && sliders[0] != nullptr
                     && captions[0]->getText() == "TRIM IN"
                     && captions[0]->isVisible()
-                    && captions[0]->getWidth() == 83
-                    && captions[0]->getBounds().getY() == sliders[0]->getBounds().getBottom() + 2
-                    && ! captions[1]->isVisible(),
-                "the TRIM IN caption keeps its FULL 83 px cell, level under its knob - and the tilt's own title is the engraved TILT of the output column now, its caption word dark");
+                    && captions[0]->getBounds().getRight() <= sliders[0]->getBounds().getX()
+                    && captions[0]->getBounds().getY() >= sliders[0]->getBounds().getY()
+                    && captions[0]->getBounds().getBottom() <= sliders[0]->getBounds().getBottom()
+                    && captions[1]->isVisible(),
+                "the TRIM IN caption rides at its knob's left, mid-height of the trim's own row - and the TILT caption is written again, under its knob in the SHAPE OUT block");
 
     // ---- the cut stacks ride UNDER their own knobs, v2.85.0 ----
     // each merged plate centred on its knob's own axis, DIRECTLY
@@ -8222,57 +8227,59 @@ void testV284ImageSection()
                 "the slope selectors hang DIRECTLY under their buttons - under their own knobs' stacks");
 
     // ---- Clement's remarks 3 to 6: the IMAGE section fills the
-    // reserved frames ---- and v2.85.0: the tilt knob took the
-    // first frame (its engraved name spells its title), the balance,
-    // width and mono maker knobs in the next three, each riding
-    // under its engraved name inside its own frame
+    // output column's blocks ---- and v2.86.0 (Clement's request):
+    // the column reads as TWO blocks now - IMAGE at the top with
+    // the phase plate and the balance, width and mono maker knobs,
+    // SHAPE OUT under it with the tilt, the drive and the trim out,
+    // every knob carrying its own caption word under it
     {
         const auto phaseBtn   = editorForV284.getPhaseButton();
         const auto imageKnobs = editorForV284.getImageKnobs();
+        const auto outCaps    = editorForV284.getOutputColumnCaptions();
         const auto& reserved  = editorForV284.getReservedFrames();
 
-        // the phase plate moved BACK to the trim's own column
-        // (v2.85.0, Clement's request): it rides the free middle
-        // street between the two cuts, centred on the trim's own
-        // axis, right under the TRIM IN caption
+        // the phase plate moved to the IMAGE block's head
+        // (v2.86.0, Clement's request): 118 px wide to carry its own
+        // "PHASE INVERT" words, centred on the block's own axis,
+        // right under the engraved name's band
         expectTrue (phaseBtn != nullptr
-                        && phaseBtn->getBounds().getWidth() == 56
-                        && phaseBtn->getBounds().getHeight() == 24
-                        && sliders[0] != nullptr && sliders[1] != nullptr
-                        && captions[0] != nullptr
-                        && phaseBtn->getBounds().getCentreX() == sliders[0]->getBounds().getCentreX()
-                        && phaseBtn->getBounds().getY() == captions[0]->getBounds().getBottom() + 2
-                        && phaseBtn->getBounds().getY() == sliders[1]->getBounds().getY(),
-                    "the phase plate rides the trim's own street now - centred on the trim's axis, right under the TRIM IN caption, at the cuts' band");
+                        && imageKnobs[0] != nullptr
+                        && phaseBtn->getBounds().getWidth() == 118
+                        && phaseBtn->getBounds().getHeight() == 26
+                        && phaseBtn->getBounds().getCentreX() == reserved[0].getCentreX()
+                        && phaseBtn->getBounds().getY() == reserved[0].getY() + 16 + 2
+                        && phaseBtn->getBounds().getBottom() < imageKnobs[0]->getBounds().getY(),
+                    "the phase plate rides the head of the IMAGE block - 118 px for its own words, centred on the block's axis, under the engraved name");
 
-        // and the tilt knob owns the first reserved frame, under
-        // the engraved TILT that spells its title (v2.85.0)
+        // and the tilt knob owns the SHAPE OUT block's first slot,
+        // under the block's own engraved name (v2.86.0)
         expectTrue (sliders[3] != nullptr
                         && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
-                        && sliders[3]->getBounds().getX() >= reserved[0].getX() + 4
-                        && sliders[3]->getBounds().getRight() <= reserved[0].getRight() - 4
-                        && sliders[3]->getBounds().getY() >= reserved[0].getY() + 16
-                        && sliders[3]->getBounds().getBottom() <= reserved[0].getBottom(),
-                    "the tilt knob rides under its engraved TILT, 83 x 86 inside the first frame of the output column");
+                        && sliders[3]->getBounds().getX() >= reserved[1].getX() + 4
+                        && sliders[3]->getBounds().getRight() <= reserved[1].getRight() - 4
+                        && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
+                        && sliders[3]->getBounds().getBottom() <= reserved[1].getBottom(),
+                    "the tilt knob rides the SHAPE OUT block, 83 x 86 under the block's own head");
 
         expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
                         && imageKnobs[2] != nullptr
+                        && outCaps[0] != nullptr && outCaps[1] != nullptr
+                        && outCaps[2] != nullptr
                         && imageKnobs[0]->getWidth() == 83
                         && imageKnobs[1]->getWidth() == 83
                         && imageKnobs[2]->getWidth() == 83
-                        && imageKnobs[0]->getBounds().getX() >= reserved[1].getX() + 4
-                        && imageKnobs[0]->getBounds().getRight() <= reserved[1].getRight() - 4
-                        && imageKnobs[0]->getBounds().getY() >= reserved[1].getY() + 16
-                        && imageKnobs[0]->getBounds().getBottom() <= reserved[1].getBottom()
-                        && imageKnobs[1]->getBounds().getX() >= reserved[2].getX() + 4
-                        && imageKnobs[1]->getBounds().getRight() <= reserved[2].getRight() - 4
-                        && imageKnobs[1]->getBounds().getY() >= reserved[2].getY() + 16
-                        && imageKnobs[1]->getBounds().getBottom() <= reserved[2].getBottom()
-                        && imageKnobs[2]->getBounds().getX() >= reserved[3].getX() + 4
-                        && imageKnobs[2]->getBounds().getRight() <= reserved[3].getRight() - 4
-                        && imageKnobs[2]->getBounds().getY() >= reserved[3].getY() + 16
-                        && imageKnobs[2]->getBounds().getBottom() <= reserved[3].getBottom(),
-                    "the balance, width and mono maker knobs ride under their engraved names, 83 wide inside their own frames");
+                        && imageKnobs[0]->getBounds().getX() >= reserved[0].getX() + 4
+                        && imageKnobs[0]->getBounds().getRight() <= reserved[0].getRight() - 4
+                        && imageKnobs[0]->getBounds().getY() > phaseBtn->getBounds().getBottom()
+                        && imageKnobs[0]->getBounds().getBottom() < imageKnobs[1]->getBounds().getY()
+                        && imageKnobs[1]->getBounds().getBottom() < imageKnobs[2]->getBounds().getY()
+                        && imageKnobs[2]->getBounds().getBottom() <= reserved[0].getBottom()
+                        && outCaps[0]->isVisible() && outCaps[1]->isVisible()
+                        && outCaps[2]->isVisible()
+                        && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 2
+                        && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 2
+                        && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 2,
+                    "the balance, width and mono maker knobs stack down the IMAGE block, 83 wide, each with its caption word directly under it");
 
         // and the controls ride their parameters, like every other
         // control on the panel
@@ -8500,7 +8507,7 @@ void testV284ImageSection()
 
 void testV285InterlockedFrontEnd()
 {
-    beginTest ("v2.85.0: the interlocked front end - TRIM at the top middle with the phase plate under it, LPF bottom left / HPF bottom right, the tilt out in the output column");
+    beginTest ("v2.85.0: the interlocked front end - TRIM at the top middle, LPF bottom left / HPF bottom right, the tilt out in the output column");
 
     CostesStrip stripForV285;
     stripForV285.prepareToPlay (48000.0, 512);
@@ -8515,12 +8522,14 @@ void testV285InterlockedFrontEnd()
     const auto phaseBtn  = editorForV285.getPhaseButton();
     const auto& reserved = editorForV285.getReservedFrames();
 
-    // ---- the console LOSES 24 px of height ---- the two 154 px
-    // front-end lines become ONE 288 px block, and the panel drops
-    // from 860 x 824 to 860 x 800 with the EQ keeping its own whole
-    // room (its 105 px pitch pinned in the v2.60 test, unchanged)
-    expectTrue (editorForV285.getWidth() == 860 && editorForV285.getHeight() == 800,
-                "the console takes less vertical room - the panel drops from 860 x 824 to 860 x 800, the EQ keeping its whole room");
+    // ---- the console loses ANOTHER 14 px (v2.86.0) ---- the phase
+    // plate left for the IMAGE block and the TRIM IN caption moved
+    // to the trim's side, so the front-end block drops from 288 to
+    // 274 and the panel from 860 x 800 to 860 x 786, the EQ keeping
+    // its own whole room (its 105 px pitch pinned in the v2.60 test,
+    // unchanged)
+    expectTrue (editorForV285.getWidth() == 860 && editorForV285.getHeight() == 786,
+                "the console takes less vertical room again - the panel drops from 860 x 800 to 860 x 786, the EQ keeping its whole room");
 
     // ---- the trim rides the TOP MIDDLE, the cuts the bottom band ----
     // the trim centred on the column's own axis, ABOVE the cuts;
@@ -8534,18 +8543,19 @@ void testV285InterlockedFrontEnd()
                     && sliders[2]->getBounds().getX() < sliders[1]->getBounds().getX(),
                 "the input trim rides the top middle - the LPF bottom left and the HPF bottom right, level under it");
 
-    // ---- the phase plate, right under the TRIM IN caption ----
-    // the free middle street the two cuts leave is exactly the
-    // plate's own 56 px, centred on the trim's own axis - the plate
-    // starts 2 px under the caption, at the cuts' band own top
-    expectTrue (phaseBtn != nullptr && captions[0] != nullptr
-                    && sliders[0] != nullptr && sliders[1] != nullptr
-                    && phaseBtn->getBounds().getWidth() == 56
-                    && phaseBtn->getBounds().getHeight() == 24
-                    && phaseBtn->getBounds().getCentreX() == sliders[0]->getBounds().getCentreX()
-                    && phaseBtn->getBounds().getY() == captions[0]->getBounds().getBottom() + 2
-                    && phaseBtn->getBounds().getY() == sliders[1]->getBounds().getY(),
-                "the phase plate sits right under the TRIM IN caption - centred on the trim's axis, riding the cuts' band");
+    // ---- the phase plate LEFT the front end (v2.86.0) ---- it
+    // lives at the head of the IMAGE block now, so the free middle
+    // street between the two cuts carries nothing any more. The
+    // probe asks the street's own centre, on the trim's axis: with
+    // no child sitting there, the editor answers with ITSELF (JUCE's
+    // getComponentAt never returns nullptr inside its own bounds)
+    expectTrue (phaseBtn != nullptr
+                    && sliders[1] != nullptr && sliders[2] != nullptr
+                    && phaseBtn->getBounds().getX() >= 706
+                    && phaseBtn->getBounds().getY() == 44
+                    && editorForV285.getComponentAt (127,
+                        sliders[1]->getBounds().getCentreY()) == &editorForV285,
+                "the phase plate left the front end's middle street - it lives at the head of the IMAGE block in the output column now");
 
     // ---- each cut's stack rides UNDER its own knob ---- the merged
     // plate centred on the knob's own axis, 2 px under its feet, and
@@ -8572,28 +8582,215 @@ void testV285InterlockedFrontEnd()
                 "the LPF's stack rides under its own knob too");
 
     // ---- the tilt, out in the output column ---- the knob wears the
-    // image knobs' own 83 x 86, riding under the engraved TILT at the
-    // head of the first reserved frame
+    // image knobs' own 83 x 86, riding the SHAPE OUT block's first
+    // slot under the block's engraved name (v2.86.0)
     expectTrue (sliders[3] != nullptr
                     && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
-                    && sliders[3]->getBounds().getX() >= reserved[0].getX() + 4
-                    && sliders[3]->getBounds().getRight() <= reserved[0].getRight() - 4
-                    && sliders[3]->getBounds().getY() >= reserved[0].getY() + 16
-                    && sliders[3]->getBounds().getBottom() <= reserved[0].getBottom(),
-                "the tilt knob lives in the output column now - 83 x 86, under the engraved TILT of the first frame");
+                    && sliders[3]->getBounds().getX() >= reserved[1].getX() + 4
+                    && sliders[3]->getBounds().getRight() <= reserved[1].getRight() - 4
+                    && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
+                    && sliders[3]->getBounds().getBottom() <= reserved[1].getBottom(),
+                "the tilt knob lives in the output column now - 83 x 86, riding the SHAPE OUT block under its engraved name");
 
-    // ---- and its old caption word and glyph go dark ---- the
-    // engraved name IS the title, the way of the whole column
+    // ---- and its caption word and glyph are back (v2.86.0) ----
+    // the block spells its name at its head, so every knob carries
+    // its own title again, the column's own new way
     expectTrue (captions[1] != nullptr && icons[(size_t) 3] != nullptr
-                    && ! captions[1]->isVisible()
-                    && ! icons[(size_t) 3]->isVisible(),
-                "the tilt's caption word and glyph go dark - the engraved slot name is its title, the output column's own way");
+                    && captions[1]->isVisible()
+                    && icons[(size_t) 3]->isVisible()
+                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 2,
+                "the tilt's caption word and glyph are back under its knob - every knob of the output column spells its own title again");
 
     // ---- and the knob still rides its parameter ---- the move is
     // layout alone, the audio path never moved
     stripForV285.getApvts().getParameterAsValue ("tiltDb").setValue (2.0f);
     expectNear (sliders[3]->getValue(), 2.0, 0.5,
                 "the tilt knob still rides its parameter from its new home - the process order never moved");
+}
+
+void testV286ImageAndShapeBlocks()
+{
+    beginTest ("v2.86.0: the output column reads as TWO blocks - IMAGE with the phase plate and the image knobs, SHAPE OUT with the tilt, the drive and the new TRIM OUT");
+
+    CostesStrip stripForV286;
+    stripForV286.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editorForV286 (stripForV286);
+    editorForV286.setVisible (true);
+
+    const auto sliders   = editorForV286.getStripSliders();
+    const auto captions  = editorForV286.getGainCaptions();
+    const auto outCaps   = editorForV286.getOutputColumnCaptions();
+    const auto imageKnobs = editorForV286.getImageKnobs();
+    const auto phaseBtn  = editorForV286.getPhaseButton();
+    const auto& reserved = editorForV286.getReservedFrames();
+
+    // ---- Clement's remark 2: the TRIM IN caption rides at the
+    // knob's LEFT ---- glyph and word one mid-height unit in the
+    // free 70 px left of the trim, so the caption's own height
+    // below the trim returns to the console (the front-end block
+    // drops to 274 and the panel to 860 x 786, pinned in the v2.60
+    // and v2.85 tests)
+    expectTrue (captions[0] != nullptr && sliders[0] != nullptr
+                    && captions[0]->getBounds().getRight() <= sliders[0]->getBounds().getX()
+                    && captions[0]->getBounds().getY() >= sliders[0]->getBounds().getY()
+                    && captions[0]->getBounds().getBottom() <= sliders[0]->getBounds().getBottom(),
+                "the TRIM IN caption rides at its knob's left, mid-height of the trim's own row - the freed height below the trim is the console's own");
+
+    // ---- Clement's remark 3: TWO blocks, not five little frames ----
+    // IMAGE at the top of the column, SHAPE OUT under it, both 370 px
+    // tall with an 8 px breath between them, ending above the panel's
+    // own floor
+    expectTrue (reserved[0].getHeight() == 370
+                    && reserved[1].getY() == reserved[0].getBottom() + 8
+                    && reserved[1].getHeight() == 370
+                    && reserved[1].getBottom() <= editorForV286.getHeight() - 8,
+                "the output column carries TWO engraved blocks - IMAGE and SHAPE OUT, 370 px each with a breath between, ending above the panel's floor");
+
+    // ---- Clement's remark 1: the phase plate at the IMAGE block's
+    // head ---- "PHASE INVERT" spelled between the LED and the
+    // empty-set symbol, 118 px to carry its own words, centred on
+    // the block's axis under the engraved name
+    expectTrue (phaseBtn != nullptr
+                    && phaseBtn->getBounds().getWidth() == 118
+                    && phaseBtn->getBounds().getHeight() == 26
+                    && phaseBtn->getBounds().getCentreX() == reserved[0].getCentreX()
+                    && phaseBtn->getBounds().getY() == reserved[0].getY() + 16 + 2
+                    && phaseBtn->getBounds().getBottom() < imageKnobs[0]->getBounds().getY(),
+                "the phase plate rides the IMAGE block's head - PHASE INVERT and the empty-set symbol in the button itself, under the engraved name");
+
+    // ---- the IMAGE block's knobs, each with its own caption word
+    // (remark 3) ---- the balance, the width, the mono maker, stacked
+    // under the phase plate, every caption riding 2 px under its knob
+    expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
+                    && imageKnobs[2] != nullptr
+                    && outCaps[0] != nullptr && outCaps[1] != nullptr
+                    && outCaps[2] != nullptr
+                    && imageKnobs[0]->getWidth() == 83 && imageKnobs[0]->getHeight() == 86
+                    && imageKnobs[0]->getBounds().getY() > phaseBtn->getBounds().getBottom()
+                    && imageKnobs[1]->getBounds().getY() > imageKnobs[0]->getBounds().getBottom()
+                    && imageKnobs[2]->getBounds().getY() > imageKnobs[1]->getBounds().getBottom()
+                    && imageKnobs[2]->getBounds().getBottom() <= reserved[0].getBottom()
+                    && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 2
+                    && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 2
+                    && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 2,
+                "the balance, width and mono maker stack down the IMAGE block - each with its caption word directly under its own knob");
+
+    // ---- the SHAPE OUT block (remark 3): the tilt, the drive, and
+    // the new TRIM OUT ---- all three the 83 x 86 square, stacked
+    // in the block under its engraved name, the tilt's and the trim
+    // out's own captions riding under their knobs
+    expectTrue (sliders[3] != nullptr && sliders[4] != nullptr && sliders[33] != nullptr
+                    && captions[1] != nullptr && outCaps[3] != nullptr
+                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
+                    && sliders[4]->getWidth() == 83 && sliders[4]->getHeight() == 86
+                    && sliders[33]->getWidth() == 83 && sliders[33]->getHeight() == 86
+                    && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
+                    && sliders[4]->getBounds().getY() > sliders[3]->getBounds().getBottom()
+                    && sliders[33]->getBounds().getY() > sliders[4]->getBounds().getBottom()
+                    && sliders[33]->getBounds().getBottom() <= reserved[1].getBottom()
+                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 2
+                    && outCaps[3]->getBounds().getY() == sliders[33]->getBounds().getBottom() + 2,
+                "the SHAPE OUT block stacks the tilt, the drive and the TRIM OUT - all 83 x 86, the captions under their knobs, ending inside the block");
+
+    // ---- the TRIM OUT rides the very END of the chain ---- -6 dB on
+    // the way out, measured once the 20 ms ramp has settled
+    stripForV286.getApvts().getParameterAsValue ("trimOutDb").setValue (-6.0f);
+
+    {
+        SineSource trimSrc (1000.0, 48000.0, 1.0f);
+        juce::AudioBuffer<float> trimBlock (2, 512);
+        juce::MidiBuffer noMidi;
+
+        for (int n = 0; n < 100; ++n)   // ~1.07 s, the ramp long settled
+        {
+            trimSrc.fill (trimBlock);
+            stripForV286.processBlock (trimBlock, noMidi);
+        }
+
+        trimSrc.fill (trimBlock);
+        stripForV286.processBlock (trimBlock, noMidi);
+
+        expectNear (juce::Decibels::gainToDecibels (juce::jmax (peakOf (trimBlock, 0),
+                                                                peakOf (trimBlock, 1))),
+                    -6.0, 0.15,
+                    "the trim out rides the very end of the chain - -6 dB on the way out reads -6 dB");
+    }
+
+    // ---- and a PARKED trim out is the strip's own unity ---- two
+    // fresh strips drinking the SAME stream, one parked since birth,
+    // the other ridden to -6 dB and brought home: the trim only ever
+    // multiplies the buffer on its way out (it never touches a state
+    // upstream), so once the 20 ms ramp has landed both strips sit at
+    // exactly 1.0f - x * 1.0f is the x that came in, bit for bit
+    {
+        CostesStrip parkedStrip;
+        parkedStrip.prepareToPlay (48000.0, 512);
+
+        CostesStrip roamedStrip;
+        roamedStrip.prepareToPlay (48000.0, 512);
+        roamedStrip.getApvts().getParameterAsValue ("trimOutDb").setValue (-6.0f);
+
+        SineSource parkedSrc (1000.0, 48000.0, 0.3f);
+        SineSource roamedSrc (1000.0, 48000.0, 0.3f);   // the SAME stream, its own clock
+
+        juce::AudioBuffer<float> parkedBlock (2, 512);
+        juce::AudioBuffer<float> roamedBlock (2, 512);
+        juce::MidiBuffer noMidi;
+
+        for (int n = 0; n < 100; ++n)   // ~1.07 s, one parked, one at -6 dB
+        {
+            parkedSrc.fill (parkedBlock);
+            parkedStrip.processBlock (parkedBlock, noMidi);
+
+            roamedSrc.fill (roamedBlock);
+            roamedStrip.processBlock (roamedBlock, noMidi);
+        }
+
+        roamedStrip.getApvts().getParameterAsValue ("trimOutDb").setValue (0.0f);
+
+        for (int n = 0; n < 100; ++n)   // the ride home, then long settled
+        {
+            parkedSrc.fill (parkedBlock);
+            parkedStrip.processBlock (parkedBlock, noMidi);
+
+            roamedSrc.fill (roamedBlock);
+            roamedStrip.processBlock (roamedBlock, noMidi);
+        }
+
+        bool identical = true;
+
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < 512; ++i)
+            {
+                const float a = parkedBlock.getSample (c, i);
+                const float b = roamedBlock.getSample (c, i);
+
+                // exact bit equality via </> (no -Wfloat-equal): the
+                // outputs are never NaN, so !(a<b || a>b) IS a == b
+                // that compares the stored floats exactly
+                if (a < b || a > b)
+                    identical = false;
+            }
+
+        expectTrue (identical,
+                    "a parked trim out is bit-for-bit unity - the strip that came home from -6 dB processes the same block into the same bits as one that never left");
+    }
+
+    // ---- the trim in's own sweep and its clamps (remark 3: the trim
+    // out takes the TRIM IN's own -24 to +12 dB), and the knob rides
+    // its parameter through the attachment ----
+    stripForV286.getApvts().getParameterAsValue ("trimOutDb").setValue (-30.0f);
+    expectNear (stripForV286.getApvts().getRawParameterValue ("trimOutDb")->load(), -24.0, 0.01,
+                "the trim out clamps a typed -30 dB to its -24 dB floor - the trim in's own sweep");
+
+    stripForV286.getApvts().getParameterAsValue ("trimOutDb").setValue (20.0f);
+    expectNear (stripForV286.getApvts().getRawParameterValue ("trimOutDb")->load(), 12.0, 0.01,
+                "the trim out clamps a typed +20 dB to its +12 dB ceiling");
+
+    stripForV286.getApvts().getParameterAsValue ("trimOutDb").setValue (2.0f);
+    expectNear (sliders[33]->getValue(), 2.0, 0.5,
+                "the trim out knob rides its parameter from its new home - the last gain the signal rides on its way out");
 }
 
 void testIntegrationRealConsole()
@@ -8752,6 +8949,7 @@ int main (int argc, char* argv[])
     testV283FourRemarks();
     testV284ImageSection();
     testV285InterlockedFrontEnd();
+    testV286ImageAndShapeBlocks();
 
     if (integration)
         testIntegrationRealConsole();

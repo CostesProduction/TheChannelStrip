@@ -257,6 +257,7 @@ private:
 
     // raw pointers into the APVTS parameters (lock-free reads)
     std::atomic<float>* trimInDb          = nullptr;
+    std::atomic<float>* trimOutDb         = nullptr;   // v2.86.0
     std::atomic<float>* lowCutHz          = nullptr;
     std::atomic<float>* lowCutOrder       = nullptr;
     std::atomic<float>* lowCutOn          = nullptr; // 0.0 / 1.0 (v2.59.0)
@@ -336,6 +337,7 @@ private:
     // and the tilt move per block - a knob turn is already a slow ramp,
     // and each block only steps the response a fraction of a dB
     juce::SmoothedValue<float> trimInGain;
+    juce::SmoothedValue<float> trimOutGain;   // v2.86.0: the last gain, 20 ms as ever
 
     // the cuts: [section][channel], the first (order + 1) / 2 sections
     // active (an odd order's first section is the first-order stage)
@@ -584,7 +586,7 @@ public:
     // expander's own pair - the compressor's LINK selector (v2.72.0)
     // as index 31, and the expander's KNEE selector (v2.73.0) as
     // index 32
-    std::array<CostesSlider*, 33> getStripSliders()
+    std::array<CostesSlider*, 34> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
@@ -596,7 +598,8 @@ public:
                  &compGainKnob, &compMixKnob,
                  &compHpfSlider, &compScLpfSlider,
                  &expScHpfSlider, &expScLpfSlider,
-                 &compLinkSlider, &expKneeSlider };
+                 &compLinkSlider, &expKneeSlider,
+                 &trimOutKnob };   // v2.86.0: the trim out closes the array as the 34th
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob -
@@ -703,12 +706,12 @@ public:
     // offline harness can pin the three-column grid - the TRANSIENT
     // slot waits between the two dynamics stages, and the five
     // named frames stack down column 3 in the signal's own order:
-    // TILT (v2.85.0: the tilt moved here from the front end, its
-    // title the engraved name), STEREO PAN, STEREO WIDTH, MONO MAKER,
-    // OUTPUT TRIM (DRIVE already lives in its own slot between the
-    // last two)
+    // v2.86.0 (Clement's request): TWO blocks now - IMAGE (the phase
+    // plate, the balance, the width, the mono maker) at the top of
+    // the column, SHAPE OUT (the tilt, the drive, the trim out) under
+    // it
     const juce::Rectangle<int>& getTransientFrame() const { return transientFrame; }
-    const std::array<juce::Rectangle<int>, 5>& getReservedFrames() const { return reservedFrames; }
+    const std::array<juce::Rectangle<int>, 2>& getReservedFrames() const { return reservedFrames; }
 
     // v2.70.0 (Clement's remark 1): the panel front's own grain - a
     // 96 x 96 deterministic speckle tile baked once at construction
@@ -862,13 +865,20 @@ public:
     }
 
     // v2.84.0 (Clement's remark 1): the front-end captions, for the
-    // harness' "TILT must be written" pin. v2.85.0: the TRIM IN
-    // caption alone is laid out - the tilt's own title is the
-    // engraved TILT at the head of the output column's first slot
-    // now, so the tilt caption stays dark
+    // harness' "TILT must be written" pin. v2.86.0: the tilt rides
+    // the SHAPE OUT block now, its own caption word under its knob
+    // again
     std::array<juce::Label*, 2> getGainCaptions()
     {
         return { &trimInLabel, &tiltLabel };
+    }
+
+    // v2.86.0 (Clement's request): the output column's own caption
+    // words, in block order - the IMAGE block's three (balance,
+    // width, mono maker), then the SHAPE OUT block's trim out
+    std::array<juce::Label*, 4> getOutputColumnCaptions()
+    {
+        return { &balanceLabel, &widthLabel, &monoMakerLabel, &trimOutLabel };
     }
 
 private:
@@ -876,13 +886,17 @@ private:
 
     CostesSlider trimInKnob, lowCutKnob, highCutKnob, tiltKnob, driveKnob;
     CostesSlider lowCutSlope, highCutSlope;
+    CostesSlider trimOutKnob;   // v2.86.0 (Clement's request): the TRIM OUT
     juce::Label trimInLabel, tiltLabel, driveLabel;
+    juce::Label balanceLabel, widthLabel, monoMakerLabel;   // v2.86.0: the IMAGE block's own words
+    juce::Label trimOutLabel;                                // v2.86.0
 
     SectionIcon trimIcon   { SectionIcon::Icon::trim };
     SectionIcon lowCutIcon { SectionIcon::Icon::lowCut };
     SectionIcon highCutIcon{ SectionIcon::Icon::highCut };
     SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
     SectionIcon driveIcon  { SectionIcon::Icon::drive };
+    SectionIcon trimOutIcon { SectionIcon::Icon::trim };   // v2.86.0: the fader glyph, the trim's own
 
     // the EQ band glyphs (v2.62.0; re-cut in v2.70.0 and again in
     // v2.78.0, Clement's remarks 4 and 6): all four bands keep a free
@@ -962,11 +976,13 @@ private:
 
     // v2.75.0 (Clement's request): the reserved slots the future
     // builds will fill - the TRANSIENT stage's slot between the two
-    // dynamics halves, and the output chain's yet-to-come sections
-    // down column 3. Painted as engraved empty frames that name
-    // their section; laid out in resized
+    // dynamics halves, and the output chain's sections down column
+    // 3. v2.86.0 (Clement's request): column 3 reads as TWO engraved
+    // blocks now - IMAGE at the top (the phase plate and the image
+    // knobs), SHAPE OUT under it (the tilt, the drive and the new
+    // trim out) - the five little reserved frames are gone
     juce::Rectangle<int> transientFrame;
-    std::array<juce::Rectangle<int>, 5> reservedFrames {};
+    std::array<juce::Rectangle<int>, 2> reservedFrames {};
 
     // v2.68.0 (Clement's remark): every glyph of the dynamics sections
     // is gone - the two stages read through their captions, their knob
@@ -1098,6 +1114,7 @@ private:
                                 false, -18.0f, 0.0f, 18, 1.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimOutAttachment;   // v2.86.0
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaseAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> balanceAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> widthAttachment;
