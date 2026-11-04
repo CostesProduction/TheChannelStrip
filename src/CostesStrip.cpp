@@ -210,6 +210,14 @@ namespace
     const juce::Colour plateText    (0xffe8dcbf);
     const juce::Colour screwColour  (0xff8a7d63);
 
+    // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel tiles read
+    // in two warm beiges): the zones wear a LOCAL background tile -
+    // tone A a broken white, tone B a honey beige, both LIGHT like
+    // the cream front so a tile reads as a shade of the panel itself,
+    // and far enough apart to tell the two zones apart at a glance
+    const juce::Colour zoneTileA (0xfff9f3e3);
+    const juce::Colour zoneTileB (0xffe6d5a9);
+
     // v2.65.0: the dynamics meters' LEDs. The IN ladders speak the
     // console's green with an amber top (the over-region of a level
     // meter); the GR ladders speak the classic reduction orange - the
@@ -2670,6 +2678,32 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // reset in the destructor (the JUCE LookAndFeel ownership rule)
     setLookAndFeel (&look);
 
+    // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel zones): the
+    // ten LOCAL background tiles, added FIRST so they paint behind
+    // every knob, plate and word. Tone A - a broken white - wears the
+    // TRIM IN, the phase plate, the stereo width, the tilt and the
+    // trim out; tone B - a honey beige - wears the two cuts, the
+    // stereo balance, the mono maker and the drive with its OS plate.
+    // Every tile carries the panel's own grain and never intercepts a
+    // click, so the streets stay empty and the knobs keep their drag
+    // (highCut is the LPF, lowCut the HPF - the knobs' own names)
+    trimInZone.tint = zoneTileA;
+    highCutZone.tint = zoneTileB;
+    lowCutZone.tint = zoneTileB;
+    phaseZone.tint = zoneTileA;
+    balanceZone.tint = zoneTileB;
+    widthZone.tint = zoneTileA;
+    monoMakerZone.tint = zoneTileB;
+    tiltZone.tint = zoneTileA;
+    driveZone.tint = zoneTileB;
+    trimOutZone.tint = zoneTileA;
+
+    for (auto* tile : getZoneTiles())
+    {
+        tile->grain = &grainTexture;
+        addAndMakeVisible (*tile);
+    }
+
     // the ergonomic knob setup shared by all five: horizontal-or-vertical
     // rotary drag, a wide 320 px travel (fine adjustments without
     // touching the keyboard), double-click back to the default, and an
@@ -3556,10 +3590,16 @@ void CostesStripEditor::resized()
 
     // the trim's caption AT THE KNOB'S LEFT (v2.86.0, Clement's
     // request): glyph and word ONE centred unit riding the free 70 px
-    // left of the knob, at the knob row's own mid-height - the label
-    // keeps the FULL cell, JUCE's drawFittedText draws NOTHING from a
-    // box tighter than the string's own sub-pixel advance (the v2.83
-    // tight box lost TILT, the v2.84 lesson)
+    // left of the knob, at the knob row's own mid-height.
+    // v2.87.0 (Clement's remark 1): the word and its glyph ride at a
+    // small breath now - the old one-unit formula drew the word
+    // centred in the FULL cell while the glyph sat as if the word
+    // began 18 px into the unit, so the word's first letters rode
+    // INTO the glyph. The word's box is its own advance plus a 4 px
+    // margin at each side - never tighter than the string's own
+    // sub-pixel advance (the v2.83 lesson) - the glyph sits at the
+    // box's left with its own 4 px breath, and the whole unit hangs
+    // centred in the street
     const auto trimCaptionBounds = juce::Rectangle<int> (line.getX(),
                                                         trimStrip.getY() + (101 - 18) / 2,
                                                         trimInKnob.getX() - line.getX(),
@@ -3567,10 +3607,11 @@ void CostesStripEditor::resized()
 
     const int trimTextWidth = trimInLabel.getFont()
                                   .getStringWidth (trimInLabel.getText());
-    const int trimUnitW = 18 + trimTextWidth;
-    trimIcon.setBounds (trimCaptionBounds.getCentreX() - trimUnitW / 2,
-                        trimCaptionBounds.getY() + 1, 16, 16);
-    trimInLabel.setBounds (trimCaptionBounds);
+    const int trimUnitW = 16 + trimTextWidth + 8;
+    const int trimUnitX = trimCaptionBounds.getCentreX() - trimUnitW / 2;
+    trimIcon.setBounds (trimUnitX, trimCaptionBounds.getY() + 1, 16, 16);
+    trimInLabel.setBounds (trimUnitX + 16, trimCaptionBounds.getY(),
+                           trimTextWidth + 8, 18);
 
     // the cuts' own band, under a breath: the LPF at the LEFT edge,
     // the HPF at the RIGHT, both wearing the 83 x 101 square - and
@@ -3617,6 +3658,23 @@ void CostesStripEditor::resized()
     };
     cutGlyph (highCutKnob, highCutIcon);
     cutGlyph (lowCutKnob, lowCutIcon);
+
+    // v2.87.0 (Clement's remark 4): the front end's own zone tiles -
+    // tone A behind the trim's whole row (the word's street and the
+    // knob), tone B behind each cut's whole stack (knob, plate and
+    // slope) - flush with the block's frame at the outer edges, grown
+    // 6 px into the streets between them, flush with their zone's
+    // own top and floor (highCut is the LPF, lowCut the HPF)
+    trimInZone.setBounds (juce::Rectangle<int> (line.getX(), trimStrip.getY(),
+                                                trimInKnob.getRight() + 6 - line.getX(),
+                                                trimStrip.getHeight()));
+    highCutZone.setBounds (juce::Rectangle<int> (line.getX(), cutKnobStrip.getY(),
+                                                 83 + 6,
+                                                 slopeBand.getBottom() - cutKnobStrip.getY()));
+    lowCutZone.setBounds (juce::Rectangle<int> (lowCutKnob.getX() - 6,
+                                                cutKnobStrip.getY(),
+                                                83 + 6,
+                                                slopeBand.getBottom() - cutKnobStrip.getY()));
 
     // v2.79.0 (Clement's remark 1): a real breath between the end of
     // the filters and the start of the EQ - the merged block's last
@@ -3954,62 +4012,99 @@ void CostesStripEditor::resized()
 
     // the three image knobs, each with its caption word under it -
     // the block's engraved name names the SECTION now, so every knob
-    // spells its own title again (v2.86.0, the column's new way)
+    // spells its own title again (v2.86.0, the column's new way).
+    // v2.87.0 (Clement's remark 3): the caption hugs ITS OWN knob -
+    // ONE breath under its feet - and leaves a THREE-breath street
+    // before the next knob, so no word can read as the knob's below
     CostesSlider* imageKnobList[3] = { &balanceKnob, &widthKnob, &monoMakerKnob };
     juce::Label* imageWordList[3]  = { &balanceLabel, &widthLabel, &monoMakerLabel };
+    ZoneTile* imageTileList[3]     = { &balanceZone, &widthZone, &monoMakerZone };
 
     for (int i = 0; i < 3; ++i)
     {
-        imageBody.removeFromTop (2);
-        imageKnobList[(size_t) i]->setBounds (imageBody.removeFromTop (86)
-                                                  .withSizeKeepingCentre (83, 86));
-        imageBody.removeFromTop (2);   // the caption's own breath
-        imageWordList[(size_t) i]->setBounds (imageBody.removeFromTop (18)
-                                                  .reduced (4, 0));
+        imageBody.removeFromTop (3);   // the street after the unit above
+        const auto imageKnobBounds = imageBody.removeFromTop (86)
+                                         .withSizeKeepingCentre (83, 86);
+        imageKnobList[(size_t) i]->setBounds (imageKnobBounds);
+        imageBody.removeFromTop (1);   // the caption hugs its own knob
+        const auto imageWordBounds = imageBody.removeFromTop (18)
+                                         .reduced (4, 0);
+        imageWordList[(size_t) i]->setBounds (imageWordBounds);
+
+        // v2.87.0 (Clement's remark 4): the zone's tile - grown 6 px
+        // past the knob's sides, flush with the zone's own top (the
+        // knob) and floor (the caption word)
+        imageTileList[(size_t) i]->setBounds (imageKnobBounds.expanded (6, 0)
+                                                  .withBottom (imageWordBounds.getBottom()));
     }
+
+    // the phase plate's own tile, tone A - 6 px past the plate's
+    // sides, flush with its top and floor
+    phaseZone.setBounds (phaseButton.getBounds().expanded (6, 0));
 
     // ---- the SHAPE OUT block ----
     auto shapeBody = shapeBlock;
     shapeBody.removeFromTop (16);   // the engraved name's own band
 
-    // the tilt, its caption word and glyph back under its knob
+    // the tilt, its caption word and glyph back under its knob.
+    // v2.87.0 (Clement's remark 3): the caption hugs ITS OWN knob -
+    // ONE breath under its feet, a THREE-breath street before the
+    // next - and (remark 2) the glyph rides at a small breath from
+    // its word: the word is drawn centred in its box, so the glyph
+    // takes its place 4 px left of the word's own left edge (the old
+    // formula sat it 7 px INTO the word)
     shapeBody.removeFromTop (2);
-    tiltKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
-    shapeBody.removeFromTop (2);   // the caption's own breath
+    const auto tiltKnobBounds = shapeBody.removeFromTop (86)
+                                    .withSizeKeepingCentre (83, 86);
+    tiltKnob.setBounds (tiltKnobBounds);
+    shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto tiltCaption = shapeBody.removeFromTop (18).reduced (4, 0);
     tiltLabel.setBounds (tiltCaption);
     const int tiltTextWidth = tiltLabel.getFont()
                                   .getStringWidth (tiltLabel.getText());
-    tiltIcon.setBounds (tiltCaption.getCentreX() - (18 + tiltTextWidth) / 2,
+    tiltIcon.setBounds (tiltCaption.getCentreX() - tiltTextWidth / 2 - 16 - 4,
                         tiltCaption.getY() + 1, 16, 16);
+    tiltZone.setBounds (tiltKnobBounds.expanded (6, 0)
+                           .withBottom (tiltCaption.getBottom()));
 
     // the drive - the knob in the block's own 83 x 86 square now,
     // its caption under it, the OS plate under the caption, the same
-    // per-knob pattern as the whole column
-    shapeBody.removeFromTop (2);
-    driveKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
-    shapeBody.removeFromTop (2);   // the caption's own breath
+    // per-knob pattern as the whole column. The OS plate belongs to
+    // the drive, so the drive's tile carries them BOTH
+    shapeBody.removeFromTop (3);
+    const auto driveKnobBounds = shapeBody.removeFromTop (86)
+                                     .withSizeKeepingCentre (83, 86);
+    driveKnob.setBounds (driveKnobBounds);
+    shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto driveCaption = shapeBody.removeFromTop (18).reduced (4, 0);
     driveLabel.setBounds (driveCaption);
     const int driveTextWidth = driveLabel.getFont()
                                   .getStringWidth (driveLabel.getText());
-    driveIcon.setBounds (driveCaption.getCentreX() - (18 + driveTextWidth) / 2,
+    driveIcon.setBounds (driveCaption.getCentreX() - driveTextWidth / 2 - 16 - 4,
                          driveCaption.getY() + 1, 16, 16);
     shapeBody.removeFromTop (2);
     oversampleButton.setBounds (shapeBody.removeFromTop (26)
                                     .withSizeKeepingCentre (110, 26));
+    driveZone.setBounds (driveKnobBounds.expanded (6, 0)
+                            .withBottom (oversampleButton.getBounds().getBottom()));
 
     // the TRIM OUT, the block's last knob - the gain the signal rides
-    // on its way out, the fader glyph at its caption's left
-    shapeBody.removeFromTop (2);
-    trimOutKnob.setBounds (shapeBody.removeFromTop (86).withSizeKeepingCentre (83, 86));
-    shapeBody.removeFromTop (2);   // the caption's own breath
+    // on its way out, the fader glyph at its caption's left. A
+    // FOUR-breath street after the OS plate keeps the drive's own
+    // zone together and sets the trim out apart
+    shapeBody.removeFromTop (4);
+    const auto trimOutKnobBounds = shapeBody.removeFromTop (86)
+                                       .withSizeKeepingCentre (83, 86);
+    trimOutKnob.setBounds (trimOutKnobBounds);
+    shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto trimOutCaption = shapeBody.removeFromTop (18).reduced (4, 0);
     trimOutLabel.setBounds (trimOutCaption);
     const int trimOutTextWidth = trimOutLabel.getFont()
                                      .getStringWidth (trimOutLabel.getText());
-    trimOutIcon.setBounds (trimOutCaption.getCentreX() - (18 + trimOutTextWidth) / 2,
+    trimOutIcon.setBounds (trimOutCaption.getCentreX() - trimOutTextWidth / 2 - 16 - 4,
                            trimOutCaption.getY() + 1, 16, 16);
+    trimOutZone.setBounds (trimOutKnobBounds.expanded (6, 0)
+                              .withBottom (trimOutCaption.getBottom()));
 }
 void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 {
@@ -4703,6 +4798,41 @@ void CostesStripEditor::SectionIcon::paint (juce::Graphics& g)
         : type;
 
     drawGlyph (g, getLocalBounds().toFloat(), shape, engraving);
+}
+
+void CostesStripEditor::ZoneTile::paint (juce::Graphics& g)
+{
+    // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel zones): the
+    // zone's own background tile - a rounded rectangle in one of the
+    // two warm beiges, carrying the panel's own grain so the tile
+    // reads as a shade of the cream front, edged with a whisper of
+    // the knob bezel. It paints behind everything and never takes a
+    // click; the degenerate-size paints of the harness's chaos test
+    // find nothing to divide here
+    auto b = getLocalBounds().toFloat();
+
+    if (b.getWidth() < 2.0f || b.getHeight() < 2.0f)
+        return;
+
+    g.setColour (tint);
+    g.fillRoundedRectangle (b, 8.0f);
+
+    if (grain != nullptr)
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle (b, 8.0f);
+        g.saveState();
+        g.reduceClipRegion (clip);
+
+        for (int tileY = 0; tileY < getHeight(); tileY += grain->getHeight())
+            for (int tileX = 0; tileX < getWidth(); tileX += grain->getWidth())
+                g.drawImageAt (*grain, tileX, tileY);
+
+        g.restoreState();
+    }
+
+    g.setColour (juce::Colour (0xffb0a380).withMultipliedAlpha (0.55f));
+    g.drawRoundedRectangle (b.reduced (0.5f), 8.0f, 1.0f);
 }
 
 void CostesStripEditor::StripLookAndFeel::drawRotarySlider (juce::Graphics& g,

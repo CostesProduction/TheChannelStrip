@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.86.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.87.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,33 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.87.0** — *The caption glyphs ride at a breath from their words,
+  every caption word hugs its own knob, and the AMEK-style zone tiles
+  paint a local background in two warm beiges.*
+  - **The glyphs ride at a breath (remarks 1 and 2).** The TRIM IN,
+    TILT, DRIVE and TRIM OUT captions drew their words with the glyph
+    sitting INTO the word - the old one-unit formula centred the word
+    in the full cell while the glyph sat as if the word began 18 px
+    into the unit. Every glyph now rides at a 4 px breath from its
+    word, the TRIM IN unit centred in the free street left of the
+    trim, the SHAPE OUT glyphs to the left of their centred words.
+  - **Every caption hugs its own knob (remark 3).** The caption word
+    rides ONE breath under its own knob's feet and leaves a
+    THREE-breath street before the next knob, so no word can read as
+    the knob's below. The OS plate keeps its own two-breath slot
+    under the drive's caption, and the TRIM OUT sits a four-breath
+    street below it. The blocks keep their exact height - the layout
+    is a redistribution, the panel never grew.
+  - **The AMEK-style zone tiles (remark 4).** Ten local background
+    tiles in TWO warm beiges, both light like the cream front: tone A
+    - a broken white - behind the TRIM IN, the phase plate, the
+    stereo width, the tilt and the trim out; tone B - a honey beige -
+    behind the two cuts (knob, plate and slope), the stereo balance,
+    the mono maker and the drive with its OS plate. Every tile
+    carries the panel's own grain, wears a whisper of the knob bezel
+    as its edge, and never intercepts a click: the knobs keep their
+    drag and the streets stay empty.
 
 - **2.86.0** — *Two blocks in the output column: IMAGE with the phase
   plate, SHAPE OUT with the tilt, the drive and the new TRIM OUT - and

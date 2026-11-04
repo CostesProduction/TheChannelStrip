@@ -8276,9 +8276,9 @@ void testV284ImageSection()
                         && imageKnobs[2]->getBounds().getBottom() <= reserved[0].getBottom()
                         && outCaps[0]->isVisible() && outCaps[1]->isVisible()
                         && outCaps[2]->isVisible()
-                        && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 2
-                        && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 2
-                        && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 2,
+                        && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 1
+                        && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 1
+                        && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 1,
                     "the balance, width and mono maker knobs stack down the IMAGE block, 83 wide, each with its caption word directly under it");
 
         // and the controls ride their parameters, like every other
@@ -8598,7 +8598,7 @@ void testV285InterlockedFrontEnd()
     expectTrue (captions[1] != nullptr && icons[(size_t) 3] != nullptr
                     && captions[1]->isVisible()
                     && icons[(size_t) 3]->isVisible()
-                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 2,
+                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 1,
                 "the tilt's caption word and glyph are back under its knob - every knob of the output column spells its own title again");
 
     // ---- and the knob still rides its parameter ---- the move is
@@ -8671,9 +8671,9 @@ void testV286ImageAndShapeBlocks()
                     && imageKnobs[1]->getBounds().getY() > imageKnobs[0]->getBounds().getBottom()
                     && imageKnobs[2]->getBounds().getY() > imageKnobs[1]->getBounds().getBottom()
                     && imageKnobs[2]->getBounds().getBottom() <= reserved[0].getBottom()
-                    && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 2
-                    && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 2
-                    && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 2,
+                    && outCaps[0]->getBounds().getY() == imageKnobs[0]->getBounds().getBottom() + 1
+                    && outCaps[1]->getBounds().getY() == imageKnobs[1]->getBounds().getBottom() + 1
+                    && outCaps[2]->getBounds().getY() == imageKnobs[2]->getBounds().getBottom() + 1,
                 "the balance, width and mono maker stack down the IMAGE block - each with its caption word directly under its own knob");
 
     // ---- the SHAPE OUT block (remark 3): the tilt, the drive, and
@@ -8689,8 +8689,8 @@ void testV286ImageAndShapeBlocks()
                     && sliders[4]->getBounds().getY() > sliders[3]->getBounds().getBottom()
                     && sliders[33]->getBounds().getY() > sliders[4]->getBounds().getBottom()
                     && sliders[33]->getBounds().getBottom() <= reserved[1].getBottom()
-                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 2
-                    && outCaps[3]->getBounds().getY() == sliders[33]->getBounds().getBottom() + 2,
+                    && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 1
+                    && outCaps[3]->getBounds().getY() == sliders[33]->getBounds().getBottom() + 1,
                 "the SHAPE OUT block stacks the tilt, the drive and the TRIM OUT - all 83 x 86, the captions under their knobs, ending inside the block");
 
     // ---- the TRIM OUT rides the very END of the chain ---- -6 dB on
@@ -8868,6 +8868,191 @@ void testIntegrationRealConsole()
     expectTrue (maxAbsDifference (stereoBlock, reference) == 0.0f,
                 "dry passthrough after clearing the console");
 }
+
+// v2.87.0 (Clement's four remarks): the caption glyphs ride at a
+// small breath from their words, every caption word hugs ITS OWN
+// knob, and the AMEK-style zone tiles paint a LOCAL background in
+// two warm beiges behind the coloured zones
+void testV287ZoneTilesAndCaptionBreath()
+{
+    beginTest ("v2.87.0: the glyph breaths, the captions hugging their own knobs, and the AMEK-style two-beige zone tiles");
+
+    CostesStrip stripForV287;
+    stripForV287.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editorForV287 (stripForV287);
+    editorForV287.setVisible (true);
+
+    const auto sliders     = editorForV287.getStripSliders();
+    const auto captions    = editorForV287.getGainCaptions();
+    const auto outCaps     = editorForV287.getOutputColumnCaptions();
+    const auto icons       = editorForV287.getSectionIcons();
+    const auto imageKnobs  = editorForV287.getImageKnobs();
+    const auto phaseBtn    = editorForV287.getPhaseButton();
+    const auto cutPlates   = editorForV287.getCutPlateButtons();
+    const auto& reserved   = editorForV287.getReservedFrames();
+    const auto tiles       = editorForV287.getZoneTiles();
+
+    // the caption words' own font - the one setUpKnob gives them all
+    const juce::Font captionFont (juce::FontOptions (11.0f, juce::Font::bold));
+
+    // ---- Clement's remark 1: the TRIM IN glyph rides at a small
+    // breath from its word ---- the old one-unit formula centred the
+    // WORD in the full cell while the glyph sat as if the word began
+    // 18 px into the unit, so the word's first letters rode INTO the
+    // glyph. Now the word's box is its own advance plus a 4 px margin
+    // at each side (never tighter than the string's sub-pixel
+    // advance - the v2.83 lesson), the glyph sits at the box's left,
+    // and the whole unit hangs centred in the free street
+    {
+        const int trimTextWidth = captionFont.getStringWidth (captions[0]->getText());
+
+        expectTrue (captions[0] != nullptr && icons[0] != nullptr
+                        && captions[0]->getBounds().getWidth() == trimTextWidth + 8
+                        && icons[0]->getBounds().getRight() == captions[0]->getBounds().getX()
+                        && icons[0]->getBounds().getX() >= 16
+                        && captions[0]->getBounds().getRight() <= sliders[0]->getBounds().getX()
+                        && icons[0]->getBounds().getX()
+                               + (icons[0]->getWidth() + captions[0]->getBounds().getWidth()) / 2
+                           == 51,
+                    "the TRIM IN glyph rides at a 4 px breath from its word - the word's box keeps a 4 px margin at its left, one centred unit on the street's own axis");
+    }
+
+    // ---- Clement's remark 2: TILT, DRIVE and TRIM OUT, the same
+    // breath ---- the word is drawn centred in its box, so the glyph
+    // sits at exactly (the word's left edge - its own 16 px - the 4
+    // px breath) - its right edge rides 4 px short of the word
+    {
+        const int tiltTextWidth    = captionFont.getStringWidth ("TILT");
+        const int driveTextWidth   = captionFont.getStringWidth ("DRIVE");
+        const int trimOutTextWidth = captionFont.getStringWidth ("TRIM OUT");
+
+        expectTrue (icons[3] != nullptr && icons[4] != nullptr && icons[5] != nullptr
+                        && captions[1] != nullptr && outCaps[3] != nullptr
+                        && icons[3]->getBounds().getRight()
+                               == captions[1]->getBounds().getCentreX() - tiltTextWidth / 2 - 4
+                        && icons[4]->getBounds().getRight()
+                               == reserved[1].getCentreX() - driveTextWidth / 2 - 4
+                        && icons[5]->getBounds().getRight()
+                               == outCaps[3]->getBounds().getCentreX() - trimOutTextWidth / 2 - 4,
+                    "TILT, DRIVE and TRIM OUT carry their glyphs at the same 4 px breath - no word's first letters under a glyph any more");
+    }
+
+    // ---- Clement's remark 3: every caption hugs ITS OWN knob ----
+    // ONE breath under its own knob's feet, a THREE-breath street
+    // before the next knob; the OS plate keeps its own two-breath
+    // slot under the drive's caption, and the trim out sits a
+    // four-breath street below it
+    expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
+                    && imageKnobs[2] != nullptr && phaseBtn != nullptr
+                    && imageKnobs[0]->getBounds().getY() == phaseBtn->getBounds().getBottom() + 3
+                    && imageKnobs[1]->getBounds().getY() == outCaps[0]->getBounds().getBottom() + 3
+                    && imageKnobs[2]->getBounds().getY() == outCaps[1]->getBounds().getBottom() + 3
+                    && outCaps[2]->getBounds().getBottom() <= reserved[0].getBottom(),
+                "the IMAGE captions hug their own knobs - one breath under the feet, a three-breath street before the next knob");
+
+    expectTrue (sliders[3] != nullptr && sliders[4] != nullptr
+                    && sliders[33] != nullptr && captions[1] != nullptr
+                    && sliders[4]->getBounds().getY() == captions[1]->getBounds().getBottom() + 3
+                    && sliders[33]->getBounds().getY()
+                           == sliders[4]->getBounds().getBottom() + (1 + 18 + 2 + 26 + 4)
+                    && outCaps[3]->getBounds().getBottom() <= reserved[1].getBottom(),
+                "the SHAPE OUT captions hug their own knobs too - the drive keeps its OS plate's slot, the trim out rides a four-breath street below");
+
+    // ---- Clement's remark 4: the AMEK-style zone tiles ---- two
+    // warm beiges, both LIGHT like the cream front: tone A - a
+    // broken white - behind the trim in, the phase plate, the stereo
+    // width, the tilt and the trim out; tone B - a honey beige -
+    // behind the two cuts, the stereo balance, the mono maker and
+    // the drive with its OS plate
+    {
+        const juce::Colour toneA (0xfff9f3e3);
+        const juce::Colour toneB (0xffe6d5a9);
+        const bool isToneA[10] = { true, false, false, true, false, true, false,
+                                  true, false, true };
+
+        bool tones = true;
+
+        for (int i = 0; i < 10; ++i)
+            tones = tones && tiles[(size_t) i] != nullptr
+                         && tiles[(size_t) i]->isVisible()
+                         && tiles[(size_t) i]->tint == (isToneA[i] ? toneA : toneB);
+
+        expectTrue (tones,
+                    "the ten zone tiles wear their two warm beiges - A behind the trim in, phase, width, tilt and trim out, B behind the cuts, balance, mono maker and drive");
+    }
+
+    // every tile carries its whole zone - knob, plates, caption
+    // words - grown 6 px past the knob's sides, flush with its
+    // zone's own top and floor. The caption labels keep their FULL
+    // column box (the v2.84 lesson - never a box tighter than the
+    // string's own advance), a box WIDER than the tile itself: what
+    // the tile carries is the caption's own ROW and the word's own
+    // axis, not the label's invisible box. And the word's own axis
+    // never meets the tile's integer axis EXACTLY: the knob's odd
+    // 83 in the even 142-wide column truncates (142 - 83) / 2 to
+    // 29, so the knob (and its tile, grown 6 past its sides) rides
+    // HALF A PIXEL left of the column's true axis, while the
+    // caption box - reduced (4, 0) of that same column - keeps the
+    // exact axis: juce's integer getCentreX() reads the two one
+    // pixel apart (729 + 95 / 2 = 776 against 710 + 134 / 2 = 777).
+    // The pin tolerates the truncation quantum, never more
+    const auto captionRidesTheTile = [] (CostesStripEditor::ZoneTile* tile,
+                                         juce::Label* caption) -> bool
+    {
+        return tile->getBounds().getY() <= caption->getBounds().getY()
+            && caption->getBounds().getBottom() <= tile->getBounds().getBottom()
+            && std::abs (tile->getBounds().getCentreX()
+                            - caption->getBounds().getCentreX()) <= 1;
+    };
+
+    expectTrue (tiles[0]->getBounds().contains (sliders[0]->getBounds())
+                    && tiles[0]->getBounds().contains (captions[0]->getBounds())
+                    && tiles[0]->getBounds().getRight() == sliders[0]->getBounds().getRight() + 6
+                    && tiles[1]->getBounds().contains (sliders[2]->getBounds())    // the LPF's knob
+                    && tiles[1]->getBounds().contains (cutPlates[1]->getBounds())
+                    && tiles[1]->getBounds().contains (sliders[6]->getBounds())
+                    && tiles[2]->getBounds().contains (sliders[1]->getBounds())    // the HPF's knob
+                    && tiles[2]->getBounds().contains (cutPlates[0]->getBounds())
+                    && tiles[2]->getBounds().contains (sliders[5]->getBounds())
+                    && tiles[3]->getBounds().contains (phaseBtn->getBounds())
+                    && tiles[4]->getBounds().contains (imageKnobs[0]->getBounds())
+                    && tiles[4]->getBounds().getX() == imageKnobs[0]->getBounds().getX() - 6
+                    && tiles[4]->getBounds().getWidth() == 83 + 12
+                    && captionRidesTheTile (tiles[4], outCaps[0])
+                    && tiles[5]->getBounds().contains (imageKnobs[1]->getBounds())
+                    && captionRidesTheTile (tiles[5], outCaps[1])
+                    && tiles[6]->getBounds().contains (imageKnobs[2]->getBounds())
+                    && captionRidesTheTile (tiles[6], outCaps[2])
+                    && tiles[7]->getBounds().contains (sliders[3]->getBounds())
+                    && captionRidesTheTile (tiles[7], captions[1])
+                    && tiles[8]->getBounds().contains (sliders[4]->getBounds())
+                    && tiles[8]->getBounds().getBottom()
+                           == sliders[4]->getBounds().getBottom() + (1 + 18 + 2 + 26)
+                    && tiles[9]->getBounds().contains (sliders[33]->getBounds())
+                    && captionRidesTheTile (tiles[9], outCaps[3]),
+                "every tile carries its whole zone - knob, plates, caption words - grown past the knob's sides, flush with its zone's floor");
+
+    // and no tile ever rides over another: the streets between the
+    // zones stay FREE, the tiles never steal a click (the probes land
+    // ON a tile's own margin, and the editor answers with ITSELF -
+    // JUCE's getComponentAt skips what never intercepts a click),
+    // and the whole column still ends flush: layout alone
+    expectTrue (tiles[1]->getBounds().getRight() < tiles[2]->getBounds().getX()
+                    && tiles[1]->getBounds().getRight() < 127
+                    && tiles[2]->getBounds().getX() > 127
+                    && tiles[0]->getBounds().getBottom() < tiles[1]->getBounds().getY()
+                    && editorForV287.getComponentAt (tiles[1]->getBounds().getRight() - 3,
+                                                     tiles[1]->getBounds().getY() + 2)
+                           == &editorForV287
+                    && editorForV287.getComponentAt (tiles[4]->getBounds().getX() + 2,
+                                                     tiles[4]->getBounds().getY() + 2)
+                           == &editorForV287
+                    && reserved[0].getHeight() == 370
+                    && reserved[1].getHeight() == 370
+                    && tiles[9]->getBounds().getBottom() <= reserved[1].getBottom(),
+                "the tiles never cover the streets and never steal a click - the blocks keep their height, the panel never grew");
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -8950,6 +9135,7 @@ int main (int argc, char* argv[])
     testV284ImageSection();
     testV285InterlockedFrontEnd();
     testV286ImageAndShapeBlocks();
+    testV287ZoneTilesAndCaptionBreath();
 
     if (integration)
         testIntegrationRealConsole();

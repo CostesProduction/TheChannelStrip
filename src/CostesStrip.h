@@ -541,6 +541,22 @@ public:
         const ShelfModeToggle* follows = nullptr;
     };
 
+    // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel zones): a
+    // LOCAL background tile - a rounded rectangle in one of the two
+    // warm beiges, worn behind a zone's knobs, plates and words. It
+    // never intercepts a click, so the knobs keep their own drag and
+    // the empty streets stay empty; it carries the panel's own grain
+    // so it reads as a shade of the cream front, not a sticker
+    struct ZoneTile : public juce::Component
+    {
+        ZoneTile() { setInterceptsMouseClicks (false, false); }
+
+        void paint (juce::Graphics& g) override;
+
+        juce::Colour tint { 0xfff9f3e3 };
+        const juce::Image* grain = nullptr;
+    };
+
     struct CostesSlider : public juce::Slider
     {
         // the value a command-click restores (setUpKnob/setUpSlope set
@@ -608,9 +624,15 @@ public:
 
     // the icons in column order (trim, low cut, high cut, tilt, drive),
     // for the offline test harness
-    std::array<SectionIcon*, 5> getSectionIcons()
+    // v2.78.0 (Clement's remark 5): the strip's own five glyphs, for
+    // the harness. v2.86.0: the trim out carries the fader glyph too
+    // (the trim's own), so the sixth entry rides at the END - the
+    // indices of the five never moved (v2.87.0: the harness pins the
+    // glyph breaths of all four caption units)
+    std::array<SectionIcon*, 6> getSectionIcons()
     {
-        return { &trimIcon, &lowCutIcon, &highCutIcon, &tiltIcon, &driveIcon };
+        return { &trimIcon, &lowCutIcon, &highCutIcon, &tiltIcon, &driveIcon,
+                 &trimOutIcon };
     }
 
     // v2.78.0 (Clement's remarks 4 and 6): every band's glyph stands
@@ -881,6 +903,19 @@ public:
         return { &balanceLabel, &widthLabel, &monoMakerLabel, &trimOutLabel };
     }
 
+    // v2.87.0 (Clement's remark 4): the zone tiles in panel order -
+    // the front end's three (trim in, LPF, HPF), the IMAGE block's
+    // four (phase, balance, width, mono maker), the SHAPE OUT block's
+    // three (tilt, drive with its OS plate, trim out) - for the
+    // offline harness to pin their bounds, their tones and their
+    // click-through
+    std::array<ZoneTile*, 10> getZoneTiles()
+    {
+        return { &trimInZone, &highCutZone, &lowCutZone,
+                 &phaseZone, &balanceZone, &widthZone, &monoMakerZone,
+                 &tiltZone, &driveZone, &trimOutZone };
+    }
+
 private:
     CostesStrip& owner;
 
@@ -897,6 +932,24 @@ private:
     SectionIcon tiltIcon   { SectionIcon::Icon::tilt };
     SectionIcon driveIcon  { SectionIcon::Icon::drive };
     SectionIcon trimOutIcon { SectionIcon::Icon::trim };   // v2.86.0: the fader glyph, the trim's own
+
+    // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel zones): the
+    // ten LOCAL background tiles - tone A behind the trim in, the
+    // phase plate, the stereo width, the tilt and the trim out; tone
+    // B behind the two cuts, the stereo balance, the mono maker and
+    // the drive with its OS plate. Added first in the editor, so they
+    // paint behind everything (highCut is the LPF, lowCut the HPF -
+    // the knobs' own names)
+    ZoneTile trimInZone;
+    ZoneTile highCutZone;
+    ZoneTile lowCutZone;
+    ZoneTile phaseZone;
+    ZoneTile balanceZone;
+    ZoneTile widthZone;
+    ZoneTile monoMakerZone;
+    ZoneTile tiltZone;
+    ZoneTile driveZone;
+    ZoneTile trimOutZone;
 
     // the EQ band glyphs (v2.62.0; re-cut in v2.70.0 and again in
     // v2.78.0, Clement's remarks 4 and 6): all four bands keep a free
