@@ -226,6 +226,14 @@ public:
         return juce::Time::getMillisecondCounterHiRes() - transClipLastMs.load (std::memory_order_relaxed) < 1000.0;
     }
 
+    // v2.91.0 (Clement's request): the WET GAIN balance readout -
+    // the section's level delta, OUT minus IN in dB, from the same
+    // 10 ms RMS one-poles the honest meters ride. Unity (zero)
+    // means the section changes the CONTRAST without changing the
+    // loudness, so the makeup can be set by ear and eye: the editor
+    // engraves the reading beside the GR bar
+    float getTransBalanceDb() const { return transBalanceDb.load (std::memory_order_relaxed); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -477,6 +485,12 @@ private:
     float transPeakDecayFactor = 0.0f;
     float transGainCoef        = 0.0f;   // the gain one-pole, 2 ms
     static constexpr float transDetectorDeadZone = 1.0e-3f;   // -60 dBFS
+    // v2.91.0: the section's own OUT level - a 10 ms RMS one-pole fed
+    // every sample, parked or not, so the WET GAIN balance readout
+    // (out minus in, in dB) tells the truth even while the PUNCH
+    // plate is dark. The IN side needs no state of its own: the
+    // expander's OUT one-pole reads the very same sample
+    float transOutPower        = 0.0f;
 
     // the dynamics meters (v2.65.0): the per-block snapshots the four
     // SSL ladders read. The IN meters start at the detector's floor
@@ -494,6 +508,11 @@ private:
     // are gone with their one-poles (the neighbouring sections
     // already meter those samples)
     std::atomic<float> transMeterGrDb { 0.0f };
+    // v2.91.0: the WET GAIN balance readout - the section's OUT
+    // level (a one-pole fed every sample, parked or not) minus its
+    // IN level (the expander's own OUT one-pole), both floored at
+    // the detector's silence so a silent section reads a clean 0.0
+    std::atomic<float> transBalanceDb { 0.0f };
     // v2.90.0: last wall-clock moment the wet signal touched the
     // CLIPPER's rail (-1e12 = never); the plate's LED peak-holds
     // for one second from this timestamp
@@ -985,6 +1004,11 @@ public:
         double holdStampMs = 0.0;
         double holdLastMs = 0.0;
         bool holdSet = false;
+
+        // v2.91.0: the WET GAIN balance readout's display smoothing -
+        // an EMA advanced in the paint itself (the 30 Hz pass), so a
+        // fresh repaint always holds the settled reading
+        float balEma = 0.0f;
     };
 
     // the six ladders in stage order - the expander's IN/OUT/GR trio

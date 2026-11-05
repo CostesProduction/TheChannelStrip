@@ -9077,7 +9077,7 @@ void testV287ZoneTilesAndCaptionBreath()
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout");
 
     juce::MidiBuffer noMidi;
 
@@ -9201,6 +9201,12 @@ void testV288TransientDesigner()
     expectTrue (std::abs (strip->getTransGrDb()) <= 0.01,
                 "the parked section's GR bar reads its dead centre");
 
+    // ---- the balance readout (v2.91.0): the section's OUT-minus-IN
+    // delta - parked, the two one-poles see the same samples and the
+    // reading sits at an exact zero ----
+    expectTrue (std::abs (strip->getTransBalanceDb()) <= 0.05,
+                "the parked section's balance readout reads its dead centre - out minus in is zero");
+
     // ---- the CLIPPER's LED (v2.90.0): the plate's dot burns red for
     // a second after the wet half touches the rail - on the parked
     // tone nothing has clipped yet, so the LED reads dark ----
@@ -9212,6 +9218,8 @@ void testV288TransientDesigner()
     setParam ("transGain", 6.0f);
     expectNear (measureSteadyDb (0.1) - juce::Decibels::gainToDecibels (0.1), 6.0, 0.15,
                 "the GAIN knob rides the wet half - a steady tone reads +6 dB");
+    expectNear (strip->getTransBalanceDb(), 6.0, 0.15,
+                "the balance readout tells the truth on a +6 dB gain - out minus in reads the boost");
 
     // ---- the MIX blends: half wet reads half the boost ----
     setParam ("transMix", 50.0f);

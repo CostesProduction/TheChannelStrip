@@ -1688,6 +1688,10 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     // armed to "never clipped yet"
     transMeterGrDb.store (0.0f, std::memory_order_relaxed);
     transClipLastMs.store (-1.0e12, std::memory_order_relaxed);
+    // v2.91.0: the balance readout starts from unity - a fresh strip
+    // changes nothing yet
+    transOutPower = 0.0f;
+    transBalanceDb.store (0.0f, std::memory_order_relaxed);
 
     for (auto& section : compSidechain)
         section.reset();
@@ -2576,6 +2580,21 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 transEnvSlow = 0.0f;
                 transGainDb  = 0.0f;
             }
+
+            // v2.91.0 (Clement's request): the section's own OUT
+            // one-pole - fed unconditionally, parked or not, so the
+            // WET GAIN balance readout tells the truth even while
+            // the PUNCH plate is dark. The expander's OUT pole two
+            // stages up is the IN side; the per-block snapshot
+            // carves their delta into transBalanceDb
+            float transOutLevel = 0.0f;
+
+            for (int ch = 0; ch < numChannels; ++ch)
+                transOutLevel = juce::jmax (transOutLevel,
+                                           std::abs (channels[ch][i]));
+
+            transOutPower += (transOutLevel * transOutLevel - transOutPower)
+                * detectorCoef;
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -2796,6 +2815,18 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // bar fills right of centre), a cut negative (fills left),
     // unity reads dead centre
     transMeterGrDb.store (transGainDb, std::memory_order_relaxed);
+
+    // v2.91.0 (Clement's request): the WET GAIN balance readout - the
+    // section's level delta, OUT minus IN, both one-poles floored at
+    // the detector's silence so a parked or silent section reads a
+    // clean 0.0. The editor engraves the reading beside the GR bar:
+    // turn the makeup until it reads 0 and the section changes the
+    // contrast without changing the loudness
+    transBalanceDb.store (10.0f * std::log10 (
+                              juce::jmax (transOutPower, detectorFloorPower))
+                              - 10.0f * std::log10 (
+                              juce::jmax (expOutPower, detectorFloorPower)),
+                          std::memory_order_relaxed);
 
     // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
     // signal rides on its way out. The drive stage keeps its own
@@ -4796,6 +4827,28 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
     g.setColour (engraving);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText ("GR", captionStrip, juce::Justification::centred);
+
+    // v2.91.0 (Clement's request): the WET GAIN balance readout -
+    // the section's OUT-minus-IN level delta, engraved at the right
+    // of the caption line. Turn the WET GAIN until it reads 0 and
+    // the section changes the contrast without changing the
+    // loudness. Green within half a dB of unity, amber beyond - the
+    // meter EMA keeps the digits calm at 30 Hz
+    {
+        const float raw = juce::jlimit (-30.0f, 30.0f, owner.getTransBalanceDb());
+        balEma += (raw - balEma) * 0.12f;
+
+        juce::String balText = (balEma >= 0.5f) ? "BAL +" : "BAL ";
+        balText += juce::String (std::abs (balEma), 1);
+        balText += " dB";
+
+        g.setColour ((std::abs (balEma) <= 0.5f) ? meterGreen : valueArc);
+        g.setFont (juce::Font (juce::FontOptions (8.0f)));
+        g.drawText (balText,
+                    juce::Rectangle<int> (captionStrip.getRight() - 78,
+                                          captionStrip.getY(), 70, 12),
+                    juce::Justification::centredRight);
+    }
 
     // the track: the full width under its caption
     auto trackStrip = b.removeFromTop (14);

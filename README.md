@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.90.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.91.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.91.0** — *The WET GAIN balance readout.*
+  - **BAL, engraved beside the GR bar (Clement's request).** Turning
+    ATTACK and SUSTAIN up reshapes the transients and changes the
+    loudness with them - the WET GAIN exists to bring it back, but
+    nothing told you where unity loudness was. The section's caption
+    line now carries **BAL ±x.x dB**: the section's own level delta,
+    OUT minus IN, both sides one-pole smoothed (10 ms) and floored
+    at the detector's silence - a parked or silent section reads a
+    clean 0.0. Turn the WET GAIN until it reads **0** and the section
+    changes the contrast without changing the loudness. Green within
+    half a dB of unity, amber beyond, the digits calmed by a display
+    EMA (~0.3 s at 30 Hz).
 - **2.90.0** — *The transient designer slimmed, the CLIPPER's LED,
   and taller dynamics ladders.*
   - **One GR bar instead of three ladders (Clement's call).** The
