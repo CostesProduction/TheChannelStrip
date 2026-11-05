@@ -677,16 +677,30 @@ public:
         // time the box is (re)created; 0 keeps the default size
         float readoutFontHeight = 0.0f;
 
+        // v2.92.0 (Clement's request): a knob may carry a DETENT step
+        // - the drag and the wheel snap the value to whole steps, the
+        // way a cranked pot notches under your fingers. 1 dB on the
+        // two THRESH knobs and the transient's ATTACK and SUSTAIN;
+        // 0 keeps the free sweep
+        float detentStep = 0.0f;
+
         // with the command key down the click jumps straight to the
         // default and the drag never starts; without it the normal JUCE
         // drag runs untouched
         void mouseDown (const juce::MouseEvent& e) override;
         void mouseDrag (const juce::MouseEvent& e) override;
         void mouseUp (const juce::MouseEvent& e) override;
+        void mouseWheelMove (const juce::MouseEvent& e,
+                             const juce::MouseWheelDetails& wheel) override;
 
         // what a command-click does - public so the offline harness can
         // exercise the exact path the mouse takes
         void applyCmdClickDefault();
+
+        // v2.92.0: what a detented drag does at every step - public so
+        // the offline harness can exercise the exact path the mouse
+        // takes, the same discipline as applyCmdClickDefault
+        void applyDetent();
 
     private:
         bool cmdDefaultActive = false;
@@ -1005,10 +1019,13 @@ public:
         double holdLastMs = 0.0;
         bool holdSet = false;
 
-        // v2.91.0: the WET GAIN balance readout's display smoothing -
-        // an EMA advanced in the paint itself (the 30 Hz pass), so a
-        // fresh repaint always holds the settled reading
+        // v2.91.0: the WET GAIN balance readout's display state.
+        // v2.92.0 (Clement's request): the reading stopped dancing -
+        // the EMA slowed to ~1.5 s and the display value LATCHES
+        // once a second (1 Hz), off the paint's own 30 Hz pass
         float balEma = 0.0f;
+        float balLatch = 0.0f;
+        double balLastLatchMs = 0.0;
     };
 
     // the six ladders in stage order - the expander's IN/OUT/GR trio

@@ -5657,9 +5657,12 @@ void testCostesStripSectionIcons()
     // become one 288 px block - 860 x 800. v2.86.0 (Clement's
     // request): the phase plate left for the IMAGE block and the
     // TRIM IN caption moved to the trim's side - the block drops to
-    // 274 and the panel to 860 x 786, the EQ keeping its whole room
-    expectTrue (editor.getWidth() == 860 && editor.getHeight() == 786,
-                "the strip panel opens as the three-column console with the tightened front end (860 x 786)");
+    // 274 and the panel to 860 x 786, the EQ keeping its whole room.
+    // v2.92.0 (Clement's request): the console tightens one more
+    // time - the signature band slims, the margins and seams
+    // breathe narrower, and the panel reads 830 x 770
+    expectTrue (editor.getWidth() == 830 && editor.getHeight() == 770,
+                "the strip panel opens as the three-column console, tightened top to floor (830 x 770)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5777,8 +5780,8 @@ void testCostesStripSectionIcons()
     // TOP MIDDLE - centred on the column's own axis, the middle
     // street the two cuts leave free below it
     expectTrue (sliders[0] != nullptr
-                    && sliders[0]->getBounds().getCentreX() == 12 + 230 / 2
-                    && sliders[0]->getBounds().getX() >= 12,
+                    && sliders[0]->getBounds().getCentreX() == 10 + 230 / 2
+                    && sliders[0]->getBounds().getX() >= 10,
                 "the input trim rides the top middle of the front end - centred on the column's own axis (v2.85)");
 
     for (int i = 17; i < 33; ++i)
@@ -5958,12 +5961,13 @@ void testCostesStripSectionIcons()
 
     // v2.76.0 (Clement's remark): the dynamics stages returned to
     // their v2.74 height. v2.90.0 (Clement's request): the 50 px the
-    // transient section gave up went to the two stages - the
-    // ladders stand 236 px tall now
+    // transient section gave up went to the two stages. v2.92.0
+    // (Clement's request): the margin savings flow here - the
+    // stages grow to 280 and the ladders stand 246 px tall
     expectTrue (meters[0] != nullptr && meters[3] != nullptr
-                    && meters[0]->getHeight() == 236
-                    && meters[3]->getHeight() == 236,
-                "the dynamics stages grew with the transient's 50 px - the ladders 236 px tall");
+                    && meters[0]->getHeight() == 246
+                    && meters[3]->getHeight() == 246,
+                "the dynamics stages grew with the margins' savings - the ladders 246 px tall");
 
     // v2.85.0 (Clement's request): the front end INTERLOCKS - the
     // input trim rides the TOP MIDDLE (0), and the two cuts share
@@ -6049,12 +6053,13 @@ void testCostesStripSectionIcons()
 
     // and the three columns themselves: the trim knob inside the
     // 230 px front end, the expander's THRESH (17) inside the middle
-    // column, DRIVE (4) inside the 142 px output chain at the right
+    // column, DRIVE (4) inside the 138 px output chain at the right
+    // (v2.92.0: the 10 px margins and seams all the way down)
     expectTrue (sliders[0] != nullptr && sliders[17] != nullptr && sliders[4] != nullptr
-                    && sliders[0]->getBounds().getRight() <= 242
+                    && sliders[0]->getBounds().getRight() <= 240
                     && sliders[17]->getBounds().getX() >= 254
-                    && sliders[17]->getBounds().getRight() <= 694
-                    && sliders[4]->getBounds().getX() >= 706,
+                    && sliders[17]->getBounds().getRight() <= 678
+                    && sliders[4]->getBounds().getX() >= 700,
                 "the console reads as three columns - the front end, the dynamics, the output chain");
 
     // the reserved frames (v2.75.0, Clement's spec): the TRANSIENT
@@ -6070,11 +6075,11 @@ void testCostesStripSectionIcons()
         expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
                         && meters[3]->getBounds().getY() > transient.getBottom()
                         && transient.getHeight() == 170
-                        && reserved[0].getY() == 26
+                        && reserved[0].getY() == 16
                         && reserved[0].getHeight() == 370
                         && reserved[1].getY() == reserved[0].getBottom() + 8
                         && reserved[1].getHeight() == 370
-                        && reserved[1].getBottom() <= editor.getHeight() - 8
+                        && reserved[1].getBottom() <= editor.getHeight() - 6
                         && reserved[0].getY() < sliders[4]->getBounds().getY()
                         && sliders[4]->getBounds().getBottom() <= reserved[1].getBottom(),
                     "the two blocks sit engraved in the grid - TRANSIENT at its own 170 px between the stages, IMAGE and SHAPE OUT stacked down column 3");
@@ -6325,8 +6330,8 @@ void testCostesStripKnobDefaultsAndCaps()
     // the cuts, both inside the same 230 px column and stacked in
     // the sound's own order
     expectTrue (sliders[0] != nullptr && sliders[7] != nullptr
-                    && sliders[0]->getBounds().getRight() <= 242
-                    && sliders[7]->getBounds().getRight() <= 242
+                    && sliders[0]->getBounds().getRight() <= 240
+                    && sliders[7]->getBounds().getRight() <= 240
                     && sliders[7]->getBounds().getY() > sliders[0]->getBounds().getBottom(),
                 "the trim knob and the EQ's first band stack inside column 1, one under the other");
 }
@@ -8150,17 +8155,19 @@ void testV283FourRemarks()
     // straight through the HPF knob; it belongs just above the EQ ON
     // plate. v2.85.0: the interlocked front end carries the header up
     // with it - and v2.86.0: the tightened front end carries it up
-    // again - the plate's band starts at y = 340, the rule rides 2
-    // px above, at 338. The harness paints the panel and probes the
-    // rule's own rows against the clean air above the EQ
+    // again. v2.92.0: the tightened console carries it up once more -
+    // the EQ's own area starts at y = 320, the plate's band at 324,
+    // and the rule rides 2 px above, at 322. The harness paints the
+    // panel and probes the rule's own rows against the clean air
+    // above the EQ
     {
-        juce::Image canvas (juce::Image::ARGB, 860, 786, true);
+        juce::Image canvas (juce::Image::ARGB, 830, 770, true);
         juce::Graphics g (canvas);
         editorForV283.paint (g);
 
-        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 337).getRed(),
-                                          canvas.getPixelAt (100, 338).getRed());
-        const int cleanRow = canvas.getPixelAt (100, 334).getRed();
+        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 321).getRed(),
+                                          canvas.getPixelAt (100, 322).getRed());
+        const int cleanRow = canvas.getPixelAt (100, 318).getRed();
 
         expectTrue (ruleRow < 190 && cleanRow > 200,
                     "the engraved rule rides just above the EQ ON plate again - no more crossing the HPF knob");
@@ -8548,8 +8555,8 @@ void testV285InterlockedFrontEnd()
     // 274 and the panel from 860 x 800 to 860 x 786, the EQ keeping
     // its own whole room (its 105 px pitch pinned in the v2.60 test,
     // unchanged)
-    expectTrue (editorForV285.getWidth() == 860 && editorForV285.getHeight() == 786,
-                "the console takes less vertical room again - the panel drops from 860 x 800 to 860 x 786, the EQ keeping its whole room");
+    expectTrue (editorForV285.getWidth() == 830 && editorForV285.getHeight() == 770,
+                "v2.92.0 tightens the panel to 830 x 770 - the margins' savings the whole way down, the EQ keeping its whole room");
 
     // ---- the trim rides the TOP MIDDLE, the cuts the bottom band ----
     // the trim centred on the column's own axis, ABOVE the cuts;
@@ -8558,7 +8565,7 @@ void testV285InterlockedFrontEnd()
     // bottom right)
     expectTrue (sliders[0] != nullptr && sliders[1] != nullptr
                     && sliders[2] != nullptr
-                    && sliders[0]->getBounds().getCentreX() == 127
+                    && sliders[0]->getBounds().getCentreX() == 125
                     && sliders[0]->getBounds().getBottom() < sliders[1]->getBounds().getY()
                     && sliders[2]->getBounds().getY() == sliders[1]->getBounds().getY()
                     && sliders[1]->getBounds().getX() < sliders[2]->getBounds().getX(),
@@ -8572,9 +8579,9 @@ void testV285InterlockedFrontEnd()
     // getComponentAt never returns nullptr inside its own bounds)
     expectTrue (phaseBtn != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
-                    && phaseBtn->getBounds().getX() >= 706
-                    && phaseBtn->getBounds().getY() == 44
-                    && editorForV285.getComponentAt (127,
+                    && phaseBtn->getBounds().getX() >= 702
+                    && phaseBtn->getBounds().getY() == 34
+                    && editorForV285.getComponentAt (125,
                         sliders[1]->getBounds().getCentreY()) == &editorForV285,
                 "the phase plate left the front end's middle street - it lives at the head of the IMAGE block in the output column now");
 
@@ -8665,7 +8672,7 @@ void testV286ImageAndShapeBlocks()
     expectTrue (reserved[0].getHeight() == 370
                     && reserved[1].getY() == reserved[0].getBottom() + 8
                     && reserved[1].getHeight() == 370
-                    && reserved[1].getBottom() <= editorForV286.getHeight() - 8,
+                    && reserved[1].getBottom() <= editorForV286.getHeight() - 6,
                 "the output column carries TWO engraved blocks - IMAGE and SHAPE OUT, 370 px each with a breath between, ending above the panel's floor");
 
     // ---- Clement's remark 1: the phase plate at the IMAGE block's
@@ -8923,18 +8930,19 @@ void testV287ZoneTilesAndCaptionBreath()
     // glyph. Now the word's box is its own advance plus a 4 px margin
     // at each side (never tighter than the string's sub-pixel
     // advance - the v2.83 lesson), the glyph sits at the box's left,
-    // and the whole unit hangs centred in the free street
+    // and the whole unit hangs centred in the free street (v2.92.0:
+    // the street starts at x = 14 now, its centre at 49)
     {
         const int trimTextWidth = captionFont.getStringWidth (captions[0]->getText());
 
         expectTrue (captions[0] != nullptr && icons[0] != nullptr
                         && captions[0]->getBounds().getWidth() == trimTextWidth + 8
                         && icons[0]->getBounds().getRight() == captions[0]->getBounds().getX()
-                        && icons[0]->getBounds().getX() >= 16
+                        && icons[0]->getBounds().getX() >= 14
                         && captions[0]->getBounds().getRight() <= sliders[0]->getBounds().getX()
                         && icons[0]->getBounds().getX()
                                + (icons[0]->getWidth() + captions[0]->getBounds().getWidth()) / 2
-                           == 51,
+                           == 49,
                     "the TRIM IN glyph rides at a 4 px breath from its word - the word's box keeps a 4 px margin at its left, one centred unit on the street's own axis");
     }
 
@@ -9077,7 +9085,7 @@ void testV287ZoneTilesAndCaptionBreath()
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout; v2.92.0: the BAL face on the plates' line");
 
     juce::MidiBuffer noMidi;
 
@@ -9435,22 +9443,23 @@ void testV288TransientDesigner()
         const auto& frame   = editorForV288.getTransientFrame();
 
         // the knobs: one rank of four - ATTACK, SUSTAIN, WET GAIN,
-        // MIX - each 84 px square centred in its own 108 px cell
+        // MIX - each 84 px square centred in its own 106 px cell
+        // (v2.92.0: the block narrowed with the console)
         expectTrue (knobs[0] != nullptr && knobs[1] != nullptr
                         && knobs[2] != nullptr && knobs[3] != nullptr
-                        && knobs[0]->getBounds() == juce::Rectangle<int> (270, 387, 84, 84)
-                        && knobs[1]->getBounds() == juce::Rectangle<int> (378, 387, 84, 84)
-                        && knobs[2]->getBounds() == juce::Rectangle<int> (486, 387, 84, 84)
-                        && knobs[3]->getBounds() == juce::Rectangle<int> (594, 387, 84, 84),
+                        && knobs[0]->getBounds() == juce::Rectangle<int> (265, 375, 84, 84)
+                        && knobs[1]->getBounds() == juce::Rectangle<int> (371, 375, 84, 84)
+                        && knobs[2]->getBounds() == juce::Rectangle<int> (477, 375, 84, 84)
+                        && knobs[3]->getBounds() == juce::Rectangle<int> (583, 375, 84, 84),
                     "the four transient knobs sit one rank of four - ATTACK, SUSTAIN, WET GAIN, MIX, each 84 px square");
 
         // the captions hug their own knobs' feet and spell their words
         expectTrue (captions[0] != nullptr && captions[1] != nullptr
                         && captions[2] != nullptr && captions[3] != nullptr
-                        && captions[0]->getBounds() == juce::Rectangle<int> (260, 471, 104, 14)
-                        && captions[1]->getBounds() == juce::Rectangle<int> (368, 471, 104, 14)
-                        && captions[2]->getBounds() == juce::Rectangle<int> (476, 471, 104, 14)
-                        && captions[3]->getBounds() == juce::Rectangle<int> (584, 471, 104, 14)
+                        && captions[0]->getBounds() == juce::Rectangle<int> (256, 459, 102, 14)
+                        && captions[1]->getBounds() == juce::Rectangle<int> (362, 459, 102, 14)
+                        && captions[2]->getBounds() == juce::Rectangle<int> (468, 459, 102, 14)
+                        && captions[3]->getBounds() == juce::Rectangle<int> (574, 459, 102, 14)
                         && captions[0]->getText() == "ATTACK" && captions[1]->getText() == "SUSTAIN"
                         && captions[2]->getText() == "WET GAIN" && captions[3]->getText() == "MIX",
                     "the caption words hug their own knobs' feet - ATTACK, SUSTAIN / WET GAIN, MIX");
@@ -9458,23 +9467,105 @@ void testV288TransientDesigner()
         // the plates: PUNCH at the meters column's head, CLIPPER at
         // the block's top-right corner, both on the block's own top line
         expectTrue (punchBtn != nullptr && clipBtn != nullptr
-                        && punchBtn->getBounds() == juce::Rectangle<int> (258, 319, 88, 18)
-                        && clipBtn->getBounds() == juce::Rectangle<int> (590, 319, 100, 18),
+                        && punchBtn->getBounds() == juce::Rectangle<int> (254, 307, 88, 18)
+                        && clipBtn->getBounds() == juce::Rectangle<int> (578, 307, 100, 18),
                     "the PUNCH plate rides the meters column's head and the CLIPPER plate the block's top-right corner - both on the block's own top line");
 
-        // the GR bar: one horizontal strip, the full block width
-        // under the plates' line - the section's single meter
+        // the GR bar (v2.92.0, Clement's request): the meter owns
+        // the whole face from the plates' line down - its 62 px carry
+        // the BAL readout on the plates' own line, the GR caption,
+        // the bipolar track with its 1 dB divisions and the orange
+        // BALANCE bar, and the engraved scale below
         expectTrue (grBar != nullptr
-                        && grBar->getBounds() == juce::Rectangle<int> (258, 341, 432, 40),
-                    "the bipolar GR bar rides the full block width under the plates' line - the section's single meter");
+                        && grBar->getBounds() == juce::Rectangle<int> (254, 307, 424, 62),
+                    "the meter owns the whole face from the plates' line down - the BAL readout rides its top strip, the bipolar GR bar under it");
+
+        // v2.92.0: the plates sit ON TOP of the meter (the meter is
+        // added first, the plates after), so the BAL readout on the
+        // meter's own top strip reads LEVEL with PUNCH ON and
+        // CLIPPER ON - and the plates keep their own clicks
+        expectTrue (grBar->getBounds().getY() == punchBtn->getBounds().getY()
+                        && grBar->getBounds().getY() == clipBtn->getBounds().getY()
+                        && grBar->getBounds().getCentreX() == frame.getCentreX()
+                        && editorForV288.getComponentAt (punchBtn->getBounds().getCentreX(),
+                            punchBtn->getBounds().getCentreY()) == punchBtn
+                        && editorForV288.getComponentAt (clipBtn->getBounds().getCentreX(),
+                            clipBtn->getBounds().getCentreY()) == clipBtn,
+                    "the BAL readout rides the meter's own top strip - the plates' line itself, and the plates keep their own clicks on top of the meter");
 
         // the whole section sits inside its engraved frame, its title
         // band gone (v2.89.0), flush inside the frame's own floor
-        expectTrue (frame == juce::Rectangle<int> (254, 317, 440, 170)
+        expectTrue (frame == juce::Rectangle<int> (250, 305, 432, 170)
                         && punchBtn->getBounds().getY() == frame.getY() + 2
                         && knobs[0]->getBounds().getY() >= punchBtn->getBounds().getBottom()
                         && captions[3]->getBounds().getBottom() == frame.getBottom() - 2,
                     "the transient section owns its engraved 170 px frame - the frame alone carries the section, flush inside the frame's floor");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v2.92.0 (Clement's request): the CRANKED KNOBS - ATTACK, SUSTAIN and
+// the two THRESH knobs snap to whole decibels as the drag (or the
+// wheel) turns them, a detent per decibel under the finger; the WET
+// GAIN and MIX dosage pair keep their free sweep. The typed readout
+// and a loaded session keep whatever precision they carry - the crank
+// belongs to the drag, not to the parameter
+void testV292CrankedKnobs()
+{
+    beginTest ("v2.92.0: the cranked knobs - ATTACK, SUSTAIN and the two THRESH knobs snap to whole decibels as the drag turns them");
+
+    CostesStrip stripForV292;
+    stripForV292.prepareToPlay (48000.0, 512);
+
+    CostesStripEditor editorForV292 (stripForV292);
+    editorForV292.setVisible (true);
+
+    const auto sliders = editorForV292.getStripSliders();
+
+    // the crank itself: the expander's THRESH (17), the compressor's
+    // THRESH (22) and the transient's ATTACK (34) and SUSTAIN (35)
+    // carry the 1 dB detent; WET GAIN (36) and MIX (37) sweep free
+    expectTrue (sliders[17] != nullptr && sliders[22] != nullptr
+                    && sliders[34] != nullptr && sliders[35] != nullptr
+                    && sliders[36] != nullptr && sliders[37] != nullptr
+                    && sliders[17]->detentStep == 1.0f
+                    && sliders[22]->detentStep == 1.0f
+                    && sliders[34]->detentStep == 1.0f
+                    && sliders[35]->detentStep == 1.0f
+                    && sliders[36]->detentStep == 0.0f
+                    && sliders[37]->detentStep == 0.0f,
+                "the crank lives on the four character knobs - the two THRESH, ATTACK and SUSTAIN - while WET GAIN and MIX sweep free");
+
+    // a drag's every step snaps to the whole decibel - the harness
+    // drives the exact path the drag takes (the value the finger
+    // lands, then the crank), and the attachment carries the notch
+    // into the parameter tree
+    struct DetentProbe
+    {
+        size_t knob;
+        float turnedTo;
+        float landsOn;
+        const char* param;
+        const char* words;
+    };
+
+    const DetentProbe probes[] =
+    {
+        { 17, -23.4f, -23.0f, "expThreshold",  "the expander's THRESH snaps to the whole decibel the crank cuts" },
+        { 22, -44.6f, -45.0f, "compThreshold", "the compressor's THRESH snaps to the whole decibel the crank cuts" },
+        { 34,   7.4f,   7.0f, "transAttack",  "the transient's ATTACK snaps to the whole decibel the crank cuts" },
+        { 35,  -9.6f, -10.0f, "transSustain", "the transient's SUSTAIN snaps to the whole decibel the crank cuts" },
+        { 36,   4.4f,   4.4f, "transGain",    "WET GAIN keeps its free sweep - no crank under the dosage" },
+    };
+
+    for (const auto& probe : probes)
+    {
+        sliders[probe.knob]->setValue ((double) probe.turnedTo, juce::sendNotificationSync);
+        sliders[probe.knob]->applyDetent();
+
+        expectNear (stripForV292.getApvts().getRawParameterValue (probe.param)->load(),
+                    probe.landsOn, 0.001,
+                    probe.words);
     }
 }
 } // namespace
@@ -9561,6 +9652,7 @@ int main (int argc, char* argv[])
     testV286ImageAndShapeBlocks();
     testV287ZoneTilesAndCaptionBreath();
     testV288TransientDesigner();
+    testV292CrankedKnobs();
 
     if (integration)
         testIntegrationRealConsole();

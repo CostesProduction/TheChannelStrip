@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.91.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.92.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,27 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.92.0** - *The balance face: a calmer BAL readout engraved on
+  the plates' line, cranked character knobs, and a tighter console.*
+  - **BAL, big and still (Clement's request).** The WET GAIN balance
+    readout moved onto the GR meter's own top line - level with
+    PUNCH ON and CLIPPER ON, centred over the bar, in a bigger bold
+    face. The reading latches **once a second (1 Hz)** off a
+    ~1.5 s smoothing, so the digits stand still instead of dancing.
+  - **The orange BALANCE bar.** The delta now rides the GR track as
+    a moving vertical **orange bar** - the threshold bars' own
+    weight - and the track carries **engraved 1 dB divisions** end
+    to end.
+  - **Cranked knobs (1 dB).** ATTACK, SUSTAIN and the two THRESH
+    knobs snap to whole decibels under the finger (drag and wheel);
+    WET GAIN and MIX keep their free sweep. The typed readout and
+    loaded sessions keep their precision - the crank belongs to the
+    drag.
+  - **A tighter console (830 x 770).** The signature band slims, the
+    margins and seams narrow, the dynamics column loses 8 px and
+    the output column 16, the dynamics stages close to a 9 px
+    breath around the transient frame - and their ladders grow to
+    246 px with the room the margins gave up.
 - **2.91.0** — *The WET GAIN balance readout.*
   - **BAL, engraved beside the GR bar (Clement's request).** Turning
     ATTACK and SUSTAIN up reshapes the transients and changes the

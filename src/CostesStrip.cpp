@@ -3204,6 +3204,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (compGainKnob, &compGainLabel,      "GAIN",    0.0f, compKnobDisc);
     setUpKnob (compMixKnob, &compMixLabel,      "MIX",     100.0f, compKnobDisc);
 
+    // v2.92.0 (Clement's request): the two THRESH knobs are CRANKED -
+    // a whole decibel per notch under the finger, the drag and the
+    // wheel both, so the threshold lands on the number you meant and
+    // the IN ladder's red bar reads whole decibels with it
+    expThresholdKnob.detentStep = 1.0f;
+    compThresholdKnob.detentStep = 1.0f;
+
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
     // four knobs - ATTACK, SUSTAIN, WET GAIN, MIX - wearing the console's
     // own black aluminium caps, the section's identity at a glance
@@ -3217,6 +3224,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (transSustainKnob, &transSustainLabel, "SUSTAIN",   0.0f, knobDisc);
     setUpKnob (transGainKnob,    &transGainLabel,    "WET GAIN",  0.0f, knobDisc);
     setUpKnob (transMixKnob,     &transMixLabel,     "MIX",     100.0f, knobDisc);
+
+    // v2.92.0 (Clement's request): ATTACK and SUSTAIN are CRANKED - a
+    // whole decibel per notch, matching the bar's own 1 dB divisions,
+    // while the dosage pair (WET GAIN, MIX) keep their free sweep
+    transAttackKnob.detentStep = 1.0f;
+    transSustainKnob.detentStep = 1.0f;
 
     // the sidechain pair of each stage rides the cuts' own horizontal
     // selector - the SC HPF parks at 16 Hz, the SC LPF at 24000 Hz,
@@ -3347,6 +3360,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // plate grew a touch wider to carry it - and the PUNCH plate
     // joins at the block's head, the section's own master switch,
     // lit by default like EXP and COMP
+    // v2.92.0: the GR bar meter is added BEFORE the two plates - its
+    // top strip IS their line now (the BAL readout rides it, level
+    // with PUNCH and CLIPPER), so the plates must sit ON TOP of the
+    // meter to keep painting and taking their own clicks
+    addAndMakeVisible (transGrBar);
+
     transClipButton.caption = "CLIPPER";
     addAndMakeVisible (transClipButton);
     punchOnButton.caption = "PUNCH";
@@ -3370,11 +3389,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (compOutMeter);
     addAndMakeVisible (compGrMeter);
 
-    // v2.90.0: the transient's single meter - the horizontal bipolar
-    // GR bar (the IN and OUT ladders are gone, the neighbouring
-    // stages already meter those samples), and the CLIPPER plate's
-    // LED fed by the processor's one second peak-hold flag
-    addAndMakeVisible (transGrBar);
+    // v2.90.0: the transient's single meter was added here - v2.92.0
+    // moved it above the plates (its top strip is their line now)
 
     transClipButton.clipSignal = [this] { return owner.getTransClipActive(); };
 
@@ -3569,7 +3585,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // the phase plate left for the output column and the TRIM IN
     // caption moved to the trim's side, the front-end block dropping
     // from 288 to 274, the EQ keeping its own whole 105 px room
-    setSize (860, 786);
+    // v2.92.0 (Clement's request): the console tightens - the
+    // signature band slims, the margins and seams breathe narrower,
+    // the dynamics column 8 px narrower, the output column slimmer
+    // too, and the panel reads 830 x 770
+    setSize (830, 770);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3674,6 +3694,19 @@ void CostesStripEditor::CostesSlider::mouseDrag (const juce::MouseEvent& e)
         return;
 
     juce::Slider::mouseDrag (e);
+
+    // v2.92.0 (Clement's request): the crank - every step of a drag on
+    // a detented knob snaps the value to its whole step
+    applyDetent();
+}
+
+void CostesStripEditor::CostesSlider::mouseWheelMove (const juce::MouseEvent& e,
+                                                      const juce::MouseWheelDetails& wheel)
+{
+    juce::Slider::mouseWheelMove (e, wheel);
+
+    // the wheel rides the same crank the drag does
+    applyDetent();
 }
 
 void CostesStripEditor::CostesSlider::mouseUp (const juce::MouseEvent& e)
@@ -3690,6 +3723,23 @@ void CostesStripEditor::CostesSlider::mouseUp (const juce::MouseEvent& e)
 void CostesStripEditor::CostesSlider::applyCmdClickDefault()
 {
     setValue (cmdClickDefault, juce::sendNotificationSync);
+}
+
+void CostesStripEditor::CostesSlider::applyDetent()
+{
+    // v2.92.0 (Clement's request): the cranked knobs - the drag (and
+    // the wheel) snap the value to whole detentStep units. The typed
+    // readout and a loaded session keep whatever precision they carry
+    // - the crank belongs to the FINGER, not to the parameter
+    if (detentStep <= 0.0f)
+        return;
+
+    const double snapped = (double) juce::roundToInt ((float) (getValue()
+                                          / (double) detentStep))
+                           * (double) detentStep;
+
+    if (std::abs (getValue() - snapped) > 1.0e-6)
+        setValue (snapped, juce::sendNotificationSync);
 }
 
 void CostesStripEditor::paint (juce::Graphics& g)
@@ -3740,11 +3790,12 @@ void CostesStripEditor::paint (juce::Graphics& g)
         const int consoleW = consoleFont.getStringWidth ("CONSOLE");
 
         // the group centred over column 1: the trace, a breath, the
-        // name, the tick, a breath, CONSOLE
+        // name, the tick, a breath, CONSOLE. v2.92.0: the band slims
+        // to the 16 px the panel's own top margin gives it now
         const int groupW = 24 + 6 + costesW + 3 + 1 + 3 + consoleW;
-        const int groupX = 12 + juce::jmax (0, (230 - groupW) / 2);
-        const int bandY = 26;
-        const int bandH = 18;
+        const int groupX = 10 + juce::jmax (0, (230 - groupW) / 2);
+        const int bandY = 16;
+        const int bandH = 16;
 
         // the seismic line, the logo's own 50 x 20 trace scaled to
         // 24 px - a heartbeat running under the console's name
@@ -3757,13 +3808,15 @@ void CostesStripEditor::paint (juce::Graphics& g)
                                            bandY + bandH * 0.5f + (trace[i][1] - 10.0f) * 0.48f), 1.8f);
 
         // the name itself: COSTES in engraving, a small tick, CONSOLE
-        // in dim caps - the same stacked wording as ever
+        // in dim caps - the same stacked wording as ever. v2.92.0:
+        // the tick keeps a breath above the front end's own rule
+        // (the band slims to 16 px now - the rule rides at 31)
         const int nameX = groupX + 24 + 6;
         g.setFont (costesFont);
         g.drawText ("COSTES", juce::Rectangle<int> (nameX, bandY, costesW, bandH),
                     juce::Justification::centredLeft);
         g.setColour (engravingDim.withAlpha (0.7f));
-        g.drawVerticalLine (nameX + costesW + 3, bandY + 3.0f, bandY + 15.0f);
+        g.drawVerticalLine (nameX + costesW + 3, bandY + 3.0f, bandY + 13.0f);
         g.setFont (consoleFont);
         g.drawText ("CONSOLE", juce::Rectangle<int> (nameX + costesW + 7, bandY,
                                                      consoleW, bandH),
@@ -3779,19 +3832,24 @@ void CostesStripEditor::paint (juce::Graphics& g)
     // name at the frame's head
     g.setColour (engravingDim.withAlpha (0.5f));
 
-    g.drawVerticalLine (248, 32.0f, (float) getHeight() - 12.0f);
-    g.drawVerticalLine (700, 32.0f, (float) getHeight() - 12.0f);
+    // v2.92.0: the dividers ride the 10 px seams (x = 245 and 687),
+    // under the 16 px signature band
+    g.drawVerticalLine (245, 22.0f, (float) getHeight() - 10.0f);
+    g.drawVerticalLine (687, 22.0f, (float) getHeight() - 10.0f);
 
-    g.drawLine (14.0f, 47.0f, 240.0f, 47.0f, 1.0f);
+    // the rule over the front end block (v2.78.0): the block starts
+    // at y = 34 now (the 16 px band + the signature's own 18), and
+    // the rule rides 3 px above, at 31
+    g.drawLine (14.0f, 31.0f, 240.0f, 31.0f, 1.0f);
     // v2.80.0: the rule rides under the EQ's header band.
     // v2.83.0 (Clement's remark 3): the taller front-end rows had
     // carried it down to y = 339 - straight through the HPF knob - so
     // it returns to its own place: JUST above the EQ ON plate.
-    // v2.86.0: the tighter front end carries the header up with it -
-    // the plate's band starts at y = 340 (the signature 26 + the
-    // 274 px block + the 12 px breath + the EQ area's own 4 px), and
-    // the rule rides 2 px above, at 338
-    g.drawLine (14.0f, 338.0f, 240.0f, 338.0f, 1.0f);
+    // v2.86.0: the tighter front end carries the header up with it.
+    // v2.92.0: the tightened console carries it up again - the EQ's
+    // own area starts at y = 320 (16 + 18 + 274 + 12), its header
+    // band at 324, and the rule rides 2 px above, at 322
+    g.drawLine (14.0f, 322.0f, 240.0f, 322.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3831,11 +3889,13 @@ void CostesStripEditor::paint (juce::Graphics& g)
             g.drawRect (transientSlot, 1);
     }
 
-    // the four corner screws of the module front
+    // the four corner screws of the module front - the top pair rides
+    // in the signature band's own air (v2.92.0: y = 21, between the
+    // band and the columns' own 16 px head)
     for (int i = 0; i < 4; ++i)
     {
         const int x = (i % 2 == 0) ? 11 : width - 15;
-        const int y = (i < 2) ? 32 : getHeight() - 15;
+        const int y = (i < 2) ? 21 : getHeight() - 15;
 
         g.setColour (screwColour);
         g.fillEllipse ((float) x, (float) y, 5.0f, 5.0f);
@@ -3872,8 +3932,14 @@ void CostesStripEditor::resized()
 {
     auto area = getLocalBounds();
 
-    area.removeFromTop (26);    // the engraved signature band (v2.69.0)
-    area.removeFromBottom (8); // v2.75.0: the taller panel's own margin
+    // v2.92.0 (Clement's request): the console tightens - the
+    // engraved signature band slims from 26 to 16, the panel's own
+    // floor from 8 to 6, and the columns start at x = 10 with
+    // 10 px seams. The savings: the dynamics stages close on the
+    // transient frame (a 9 px breath where 21 px of air once stood)
+    // and the panel reads 830 x 770
+    area.removeFromTop (16);    // the engraved signature band (v2.69.0)
+    area.removeFromBottom (6); // the panel's own margin
 
     // v2.75.0 (Clement's spec): the console reads as THREE vertical
     // columns and the sound flows through them - down column 1 (the
@@ -3884,13 +3950,13 @@ void CostesStripEditor::resized()
     // left the left edge, so the margin it read down returns to the
     // console - the columns start at x = 12 and the front end grows
     // to 230 px
-    area.removeFromLeft (12);   // the grid's own left margin
+    area.removeFromLeft (10);   // the grid's own left margin
 
     auto column1 = area.removeFromLeft (230);
-    area.removeFromLeft (12);   // the first divider's seam
-    auto column2 = area.removeFromLeft (440);
-    area.removeFromLeft (12);   // the second divider's seam
-    auto column3 = area;        // 142 wide, 12 of margin at the right
+    area.removeFromLeft (10);   // the first divider's seam
+    auto column2 = area.removeFromLeft (432);
+    area.removeFromLeft (10);   // the second divider's seam
+    auto column3 = area;        // 138 wide - the blocks own the whole width
 
     // ---- column 1: the front end ----
     // v2.78.0 (Clement's remark 1): ONE block now - the COSTES
@@ -3903,8 +3969,10 @@ void CostesStripEditor::resized()
     // knob. v2.86.0 (Clement's request): the phase plate left for
     // the IMAGE block and the TRIM IN caption moved to the knob's
     // LEFT, so the block drops from 288 to 274 - the console loses
-    // another 14 px of height, and the EQ keeps its own whole room
-    column1.removeFromTop (24);   // the signature's own band
+    // another 14 px of height, and the EQ keeps its own whole room.
+    // v2.92.0: the signature's own band slims from 24 to 18 - the
+    // EQ keeps its whole 101 px rows still
+    column1.removeFromTop (18);   // the signature's own band
 
     // v2.86.0 (Clement's request): the front end tightens again -
     // the phase plate left for the IMAGE block at the head of the
@@ -4122,9 +4190,12 @@ void CostesStripEditor::resized()
     // v2.90.0 (Clement's request): the two dynamics stages grew to
     // 270 px - the 50 px the transient section gave up went to their
     // ladders, so the meters' scales breathe at the height the
-    // section lost
-    auto expBlock = column2.removeFromTop (270);
-    auto compBlock = column2.removeFromBottom (270);
+    // section lost. v2.92.0 (Clement's request): the panel's own
+    // savings flow here - the stages grow to 280 and their ladders
+    // to 246, the transient frame closing to a 9 px breath on either
+    // side where 21 px of air once stood
+    auto expBlock = column2.removeFromTop (280);
+    auto compBlock = column2.removeFromBottom (280);
 
     // v2.76.0 (Clement's remarks): the stages returned to their
     // v2.74 height, and the TRANSIENT slot kept its own engraved
@@ -4337,19 +4408,20 @@ void CostesStripEditor::resized()
     {
         auto block = transientFrame.reduced (4, 2);
 
-        // the plates ride the block's own top line: PUNCH at the
-        // meters column's head (88 px, the EXP and COMP plates' own
-        // width), CLIPPER at the top-right corner
+        // v2.92.0 (Clement's request): the meter owns the whole face
+        // from the plates' line down - its top strip IS the plates'
+        // line, so the BAL readout rides there, level with PUNCH and
+        // CLIPPER and centred over the bar it names. The plates keep
+        // their own line: they are added AFTER the meter, so they
+        // paint and take their clicks on top of it
+        transGrBar.setBounds (block.getX(), block.getY(), block.getWidth(), 62);
         punchOnButton.setBounds (block.getX(), block.getY(), 88, 18);
         transClipButton.setBounds (block.getRight() - 100, block.getY(), 100, 18);
 
-        // the plates' own line out of the room
-        block.removeFromTop (18);
-
-        // the GR bar: one horizontal strip under the plates' line,
-        // the full block width - the section's single meter
-        block.removeFromTop (4);
-        transGrBar.setBounds (block.removeFromTop (40));
+        // the plates' line (18), the breath under it (4), the GR
+        // caption (12), the track (14) and the engraved scale (14) -
+        // all of it the meter's own 62 px, out of the room
+        block.removeFromTop (62);
 
         // the knob field: one rank of four cells, the caption at
         // every cell's feet
@@ -4822,33 +4894,51 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
     // small enough to divide by
     auto b = getLocalBounds();
 
-    // the caption reads centred above the bar it names
+    // v2.92.0 (Clement's request): the BAL readout rides the meter's
+    // own top strip - the plates' line itself, level with PUNCH ON
+    // and CLIPPER ON, centred over the bar it names, bigger than the
+    // caption below it. The reading latches ONCE A SECOND (1 Hz) off
+    // a ~1.5 s EMA, so the digits stand still instead of dancing -
+    // a fresh paint only advances the smoothing; the latch decides
+    // what the eye gets to read. Green within half a dB of unity,
+    // amber beyond - turn the WET GAIN until it reads 0 and the
+    // section changes the contrast without changing the loudness
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const float raw = juce::jlimit (-30.0f, 30.0f, owner.getTransBalanceDb());
+
+        balEma += (raw - balEma) * 0.022f;   // ~1.5 s at 30 Hz
+
+        if (balLastLatchMs <= 0.0 || nowMs - balLastLatchMs >= 1000.0)
+        {
+            balLastLatchMs = nowMs;
+            balLatch = balEma;
+        }
+
+        juce::String balText;
+
+        if (balLatch >= 0.5f)
+            balText = "BAL +" + juce::String (balLatch, 1) + " dB";
+        else if (balLatch <= -0.5f)
+            balText = "BAL " + juce::String (balLatch, 1) + " dB";
+        else
+            balText = "BAL 0.0 dB";
+
+        auto balStrip = b.removeFromTop (18);
+
+        g.setColour ((std::abs (balLatch) <= 0.5f) ? meterGreen : valueArc);
+        g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+        g.drawText (balText, balStrip, juce::Justification::centred);
+    }
+
+    // the breath under the plates' line, then the caption that reads
+    // centred above the bar it names
+    b.removeFromTop (4);
+
     auto captionStrip = b.removeFromTop (12);
     g.setColour (engraving);
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.drawText ("GR", captionStrip, juce::Justification::centred);
-
-    // v2.91.0 (Clement's request): the WET GAIN balance readout -
-    // the section's OUT-minus-IN level delta, engraved at the right
-    // of the caption line. Turn the WET GAIN until it reads 0 and
-    // the section changes the contrast without changing the
-    // loudness. Green within half a dB of unity, amber beyond - the
-    // meter EMA keeps the digits calm at 30 Hz
-    {
-        const float raw = juce::jlimit (-30.0f, 30.0f, owner.getTransBalanceDb());
-        balEma += (raw - balEma) * 0.12f;
-
-        juce::String balText = (balEma >= 0.5f) ? "BAL +" : "BAL ";
-        balText += juce::String (std::abs (balEma), 1);
-        balText += " dB";
-
-        g.setColour ((std::abs (balEma) <= 0.5f) ? meterGreen : valueArc);
-        g.setFont (juce::Font (juce::FontOptions (8.0f)));
-        g.drawText (balText,
-                    juce::Rectangle<int> (captionStrip.getRight() - 78,
-                                          captionStrip.getY(), 70, 12),
-                    juce::Justification::centredRight);
-    }
 
     // the track: the full width under its caption
     auto trackStrip = b.removeFromTop (14);
@@ -4893,6 +4983,23 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
         g.fillRect (juce::Rectangle<float> (cx - w, ty + 1.0f, w, th - 2.0f));
     }
 
+    // v2.92.0 (Clement's request): the engraved 1 dB divisions - one
+    // hairline to the decibel across the whole track, over the fill
+    // like a ruler on the glass, the unity hairline excepted (it is
+    // the scale's own centre, brighter below). The ATTACK and
+    // SUSTAIN knobs crank to the same whole decibels, so the fill's
+    // edge lands ON a division
+    g.setColour (engravingDim.withAlpha (0.35f));
+
+    for (int v = -15; v <= 15; ++v)
+    {
+        if (v == 0)
+            continue;
+
+        const float x = cx + (float) v / 30.0f * tw;
+        g.drawLine (x, ty + 1.0f, x, ty + th - 1.0f, 1.0f);
+    }
+
     // the peak-hold mark (the ladders' own discipline): the bar
     // remembers the reading's SIGNED extreme for 3 s, then walks
     // home at 20 dB/s
@@ -4935,6 +5042,21 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
         // the same thick pastel-blue bar the GR ladders carry
         g.setColour (compKnobDisc);
         g.drawLine (mx, ty - 1.0f, mx, ty + th + 1.0f, 4.6f);
+    }
+
+    // v2.92.0 (Clement's request): the BALANCE bar - the section's
+    // OUT-minus-IN delta itself, riding the track as a MOVING
+    // VERTICAL ORANGE bar, the threshold bars' own weight and
+    // style (the IN ladders' red corner, laid flat). It reads the
+    // SAME 1 Hz latch the digits above read, so the bar and the
+    // number never disagree, and it pins at the engraved scale's
+    // edge when the delta outruns the bar
+    {
+        const float balX = cx + juce::jlimit (-15.0f, 15.0f, balLatch)
+                              / 30.0f * tw;
+
+        g.setColour (meterGrOrange);
+        g.drawLine (balX, ty - 1.0f, balX, ty + th + 1.0f, 4.6f);
     }
 
     // the engraved scale below the track: +15 / +10 / +5 / 0 /
