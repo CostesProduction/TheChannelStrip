@@ -4567,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 57,
-                "the strip's fifty-seven parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 56,
+                "the strip's fifty-six parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 57,
-                "the strip exposes exactly fifty-seven parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 56,
+                "the strip exposes exactly fifty-six parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5109,8 +5109,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 57,
-                "the restored strip's fifty-seven parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 56,
+                "the restored strip's fifty-six parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5248,8 +5248,8 @@ void testCostesStripSessionDeep()
                         "the expander range restores (the reported knob)");
         }
 
-        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 57,
-                    "the restored strip's fifty-seven parameters are relayed");
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 56,
+                    "the restored strip's fifty-six parameters are relayed");
 
         // a host can restore twice (Studio One's launch sequence does):
         // the second pass re-hosts a fresh strip and re-applies the
@@ -5853,12 +5853,18 @@ void testCostesStripSectionIcons()
                     && meters[5] != nullptr && meters[5]->mode == CostesStripEditor::DynamicsMeter::Mode::gainReduction,
                 "the meters come as IN, OUT then GR, stage by stage");
 
-    expectTrue (meters[0] != nullptr && meters[0]->expander
-                    && meters[1] != nullptr && meters[1]->expander
-                    && meters[2] != nullptr && meters[2]->expander
-                    && meters[3] != nullptr && ! meters[3]->expander
-                    && meters[4] != nullptr && ! meters[4]->expander
-                    && meters[5] != nullptr && ! meters[5]->expander,
+    expectTrue (meters[0] != nullptr
+                    && meters[0]->stage == CostesStripEditor::DynamicsMeter::Stage::expander
+                    && meters[1] != nullptr
+                    && meters[1]->stage == CostesStripEditor::DynamicsMeter::Stage::expander
+                    && meters[2] != nullptr
+                    && meters[2]->stage == CostesStripEditor::DynamicsMeter::Stage::expander
+                    && meters[3] != nullptr
+                    && meters[3]->stage == CostesStripEditor::DynamicsMeter::Stage::compressor
+                    && meters[4] != nullptr
+                    && meters[4]->stage == CostesStripEditor::DynamicsMeter::Stage::compressor
+                    && meters[5] != nullptr
+                    && meters[5]->stage == CostesStripEditor::DynamicsMeter::Stage::compressor,
                 "the first trio reads the expander, the second the compressor");
 
     // v2.70.0 (Clement's remark 3): the GR ladders went LINEAR - one
@@ -5959,18 +5965,19 @@ void testCostesStripSectionIcons()
                 "the dynamics stages stand at their v2.74 height again - the ladders 211 px tall");
 
     // v2.85.0 (Clement's request): the front end INTERLOCKS - the
-    // input trim rides the TOP MIDDLE (0), the LPF (2) at the
-    // bottom left and the HPF (1) at the bottom right share ONE
-    // band under it, the tilt left for the output column, and the
-    // EQ's first band (7) closes the column
+    // input trim rides the TOP MIDDLE (0), and the two cuts share
+    // ONE band under it, the tilt left for the output column, and
+    // the EQ's first band (7) closes the column. v2.89.0
+    // (Clement's swap): the HPF (1) moved to the bottom LEFT and the
+    // LPF (2) to the bottom RIGHT
     expectTrue (sliders[0] != nullptr && sliders[3] != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
                     && sliders[7] != nullptr
                     && sliders[2]->getBounds().getY() == sliders[1]->getBounds().getY()
-                    && sliders[2]->getBounds().getX() < sliders[1]->getBounds().getX()
+                    && sliders[1]->getBounds().getX() < sliders[2]->getBounds().getX()
                     && sliders[1]->getBounds().getY() > sliders[0]->getBounds().getY()
                     && sliders[7]->getBounds().getY() > sliders[1]->getBounds().getY(),
-                "the front end interlocks - TRIM at the top middle, LPF at the bottom left and HPF at the bottom right level under it, the EQ under both");
+                "the front end interlocks - TRIM at the top middle, HPF at the bottom left and LPF at the bottom right level under it (v2.89.0), the EQ under both");
 
     // v2.83.0 (Clement's remark 4): the front end's knobs wear the
     // EQ's own 83 x 101 square. v2.85.0: the tilt, out in the output
@@ -6207,11 +6214,12 @@ void testCostesStripKnobDefaultsAndCaps()
     // LINK selector joins as the 32nd control; v2.73.0: the expander's
     // KNEE selector closes the dynamics; v2.86.0: the TRIM OUT knob
     // joins as the 34th, the SHAPE OUT block's last; v2.88.0: the
-    // transient designer's own six join at the end - its ATTACK,
-    // SUSTAIN, GAIN and MIX knobs then its SC HPF / SC LPF selectors)
+    // transient designer's own four join at the end - its ATTACK,
+    // SUSTAIN, GAIN and MIX knobs; v2.89.0: its SC HPF / SC LPF
+    // selectors are gone with the corners themselves)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[40] =
+    const char* paramIds[38] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
@@ -6222,11 +6230,10 @@ void testCostesStripKnobDefaultsAndCaps()
         "compHpf", "compScLpf", "expScHpf", "expScLpf",
         "compLink", "expKnee",
         "trimOutDb",
-        "transAttack", "transSustain", "transGain", "transMix",
-        "transScHpf", "transScLpf"
+        "transAttack", "transSustain", "transGain", "transMix"
     };
 
-    const float expectedDefaults[40] =
+    const float expectedDefaults[38] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
@@ -6237,13 +6244,12 @@ void testCostesStripKnobDefaultsAndCaps()
         24000.0f, 16.0f, 24000.0f,
         3.0f, 0.0f,
         0.0f,
-        0.0f, 0.0f, 0.0f, 100.0f,
-        16.0f, 24000.0f
+        0.0f, 0.0f, 0.0f, 100.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[40] =
+    const float perturbed[38] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
@@ -6254,14 +6260,13 @@ void testCostesStripKnobDefaultsAndCaps()
         2500.0f, 400.0f, 2500.0f,
         0.0f, 16.0f,
         4.5f,
-        7.5f, -4.0f, -3.0f, 62.0f,
-        90.0f, 800.0f
+        7.5f, -4.0f, -3.0f, 62.0f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 40; ++i)
+    for (int i = 0; i < 38; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -7943,10 +7948,10 @@ void testV281FourRemarks()
     // the four front-end knobs shared 107 x 92 from v2.82.0;
     // v2.83.0 (Clement's remark 4) makes them the EQ's OWN square -
     // 83 x 101, the half-row every EQ knob owns. v2.85.0 (Clement's
-    // request): the trim rides the top middle, the LPF at the bottom
-    // left and the HPF at the bottom right share one band under it,
-    // and the tilt - out in the output column - wears the image
-    // knobs' own 83 x 86
+    // request): the trim rides the top middle, the two cuts share
+    // one band under it (v2.89.0, Clement's swap: the HPF at the
+    // bottom left, the LPF at the bottom right), and the tilt - out
+    // in the output column - wears the image knobs' own 83 x 86
     expectTrue (sliders81[0] != nullptr && sliders81[1] != nullptr
                     && sliders81[2] != nullptr && sliders81[3] != nullptr
                     && sliders81[0]->getWidth() == 83 && sliders81[0]->getHeight() == 101
@@ -7954,9 +7959,9 @@ void testV281FourRemarks()
                     && sliders81[2]->getWidth() == 83 && sliders81[2]->getHeight() == 101
                     && sliders81[3]->getWidth() == 83 && sliders81[3]->getHeight() == 86
                     && sliders81[2]->getBounds().getY() == sliders81[1]->getBounds().getY()
-                    && sliders81[2]->getBounds().getX() < sliders81[1]->getBounds().getX()
+                    && sliders81[1]->getBounds().getX() < sliders81[2]->getBounds().getX()
                     && sliders81[1]->getBounds().getY() > sliders81[0]->getBounds().getY(),
-                "the front end's knobs wear the EQ's own square - TRIM at the top middle, LPF bottom left and HPF bottom right level under it, the tilt the image knobs' 83 x 86");
+                "the front end's knobs wear the EQ's own square - TRIM at the top middle, HPF bottom left and LPF bottom right level under it (v2.89.0), the tilt the image knobs' 83 x 86");
 
     // and the cut slopes' "12 dB/oct" reads SMALLER inside its 52 px
     // box - 10 px, the size the look-and-feel's factory stamps on
@@ -8521,7 +8526,7 @@ void testV284ImageSection()
 
 void testV285InterlockedFrontEnd()
 {
-    beginTest ("v2.85.0: the interlocked front end - TRIM at the top middle, LPF bottom left / HPF bottom right, the tilt out in the output column");
+    beginTest ("v2.85.0: the interlocked front end - TRIM at the top middle, the two cuts level under it (HPF left / LPF right since v2.89.0), the tilt out in the output column");
 
     CostesStrip stripForV285;
     stripForV285.prepareToPlay (48000.0, 512);
@@ -8547,15 +8552,16 @@ void testV285InterlockedFrontEnd()
 
     // ---- the trim rides the TOP MIDDLE, the cuts the bottom band ----
     // the trim centred on the column's own axis, ABOVE the cuts;
-    // the LPF at the bottom left and the HPF at the bottom right
-    // share ONE band, level with each other
+    // the two cuts share ONE band, level with each other (v2.89.0,
+    // Clement's swap: the HPF at the bottom left, the LPF at the
+    // bottom right)
     expectTrue (sliders[0] != nullptr && sliders[1] != nullptr
                     && sliders[2] != nullptr
                     && sliders[0]->getBounds().getCentreX() == 127
                     && sliders[0]->getBounds().getBottom() < sliders[1]->getBounds().getY()
                     && sliders[2]->getBounds().getY() == sliders[1]->getBounds().getY()
-                    && sliders[2]->getBounds().getX() < sliders[1]->getBounds().getX(),
-                "the input trim rides the top middle - the LPF bottom left and the HPF bottom right, level under it");
+                    && sliders[1]->getBounds().getX() < sliders[2]->getBounds().getX(),
+                "the input trim rides the top middle - the HPF bottom left and the LPF bottom right, level under it (v2.89.0)");
 
     // ---- the phase plate LEFT the front end (v2.86.0) ---- it
     // lives at the head of the IMAGE block now, so the free middle
@@ -8903,7 +8909,6 @@ void testV287ZoneTilesAndCaptionBreath()
     const auto icons       = editorForV287.getSectionIcons();
     const auto imageKnobs  = editorForV287.getImageKnobs();
     const auto phaseBtn    = editorForV287.getPhaseButton();
-    const auto cutPlates   = editorForV287.getCutPlateButtons();
     const auto& reserved   = editorForV287.getReservedFrames();
     const auto tiles       = editorForV287.getZoneTiles();
 
@@ -8975,25 +8980,27 @@ void testV287ZoneTilesAndCaptionBreath()
 
     // ---- Clement's remark 4: the AMEK-style zone tiles ---- two
     // warm beiges, both LIGHT like the cream front: tone A - a
-    // broken white - behind the trim in, the phase plate, the stereo
-    // width, the tilt and the trim out; tone B - a honey beige -
-    // behind the two cuts, the stereo balance, the mono maker and
-    // the drive with its OS plate
+    // broken white - behind the phase plate, the stereo width, the
+    // tilt and the trim out; tone B - a honey beige - behind the
+    // stereo balance, the mono maker and the drive with its OS
+    // plate. v2.89.0 (Clement's verdict): the front end's three
+    // tiles are GONE - the trim, the HPF and the LPF stand bare on
+    // the cream, only the right column's seven remain
     {
         const juce::Colour toneA (0xfff9f3e3);
         const juce::Colour toneB (0xffe6d5a9);
-        const bool isToneA[10] = { true, false, false, true, false, true, false,
+        const bool isToneA[7] = { true, false, true, false,
                                   true, false, true };
 
         bool tones = true;
 
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < 7; ++i)
             tones = tones && tiles[(size_t) i] != nullptr
                          && tiles[(size_t) i]->isVisible()
                          && tiles[(size_t) i]->tint == (isToneA[i] ? toneA : toneB);
 
         expectTrue (tones,
-                    "the ten zone tiles wear their two warm beiges - A behind the trim in, phase, width, tilt and trim out, B behind the cuts, balance, mono maker and drive");
+                    "the seven zone tiles wear their two warm beiges - A behind the phase, the width, the tilt and the trim out, B behind the balance, the mono maker and the drive (the front end wears nothing since v2.89.0)");
     }
 
     // every tile carries its whole zone - knob, plates, caption
@@ -9020,67 +9027,56 @@ void testV287ZoneTilesAndCaptionBreath()
                             - caption->getBounds().getCentreX()) <= 1;
     };
 
-    expectTrue (tiles[0]->getBounds().contains (sliders[0]->getBounds())
-                    && tiles[0]->getBounds().contains (captions[0]->getBounds())
-                    && tiles[0]->getBounds().getRight() == sliders[0]->getBounds().getRight() + 6
-                    && tiles[1]->getBounds().contains (sliders[2]->getBounds())    // the LPF's knob
-                    && tiles[1]->getBounds().contains (cutPlates[1]->getBounds())
-                    && tiles[1]->getBounds().contains (sliders[6]->getBounds())
-                    && tiles[2]->getBounds().contains (sliders[1]->getBounds())    // the HPF's knob
-                    && tiles[2]->getBounds().contains (cutPlates[0]->getBounds())
-                    && tiles[2]->getBounds().contains (sliders[5]->getBounds())
-                    && tiles[3]->getBounds().contains (phaseBtn->getBounds())
-                    && tiles[4]->getBounds().contains (imageKnobs[0]->getBounds())
-                    && tiles[4]->getBounds().getX() == imageKnobs[0]->getBounds().getX() - 6
-                    && tiles[4]->getBounds().getWidth() == 83 + 12
-                    && captionRidesTheTile (tiles[4], outCaps[0])
-                    && tiles[5]->getBounds().contains (imageKnobs[1]->getBounds())
-                    && captionRidesTheTile (tiles[5], outCaps[1])
-                    && tiles[6]->getBounds().contains (imageKnobs[2]->getBounds())
-                    && captionRidesTheTile (tiles[6], outCaps[2])
-                    && tiles[7]->getBounds().contains (sliders[3]->getBounds())
-                    && captionRidesTheTile (tiles[7], captions[1])
-                    && tiles[8]->getBounds().contains (sliders[4]->getBounds())
-                    && tiles[8]->getBounds().getBottom()
+    expectTrue (tiles[0]->getBounds().contains (phaseBtn->getBounds())
+                    && tiles[1]->getBounds().contains (imageKnobs[0]->getBounds())
+                    && tiles[1]->getBounds().getX() == imageKnobs[0]->getBounds().getX() - 6
+                    && tiles[1]->getBounds().getWidth() == 83 + 12
+                    && captionRidesTheTile (tiles[1], outCaps[0])
+                    && tiles[2]->getBounds().contains (imageKnobs[1]->getBounds())
+                    && captionRidesTheTile (tiles[2], outCaps[1])
+                    && tiles[3]->getBounds().contains (imageKnobs[2]->getBounds())
+                    && captionRidesTheTile (tiles[3], outCaps[2])
+                    && tiles[4]->getBounds().contains (sliders[3]->getBounds())
+                    && captionRidesTheTile (tiles[4], captions[1])
+                    && tiles[5]->getBounds().contains (sliders[4]->getBounds())
+                    && tiles[5]->getBounds().getBottom()
                            == sliders[4]->getBounds().getBottom() + (1 + 18 + 2 + 26)
-                    && tiles[9]->getBounds().contains (sliders[33]->getBounds())
-                    && captionRidesTheTile (tiles[9], outCaps[3]),
+                    && tiles[6]->getBounds().contains (sliders[33]->getBounds())
+                    && captionRidesTheTile (tiles[6], outCaps[3]),
                 "every tile carries its whole zone - knob, plates, caption words - grown past the knob's sides, flush with its zone's floor");
 
-    // and no tile ever rides over another: the streets between the
-    // zones stay FREE, the tiles never steal a click (the probes land
-    // ON a tile's own margin, and the editor answers with ITSELF -
-    // JUCE's getComponentAt skips what never intercepts a click),
-    // and the whole column still ends flush: layout alone
-    expectTrue (tiles[1]->getBounds().getRight() < tiles[2]->getBounds().getX()
-                    && tiles[1]->getBounds().getRight() < 127
-                    && tiles[2]->getBounds().getX() > 127
-                    && tiles[0]->getBounds().getBottom() < tiles[1]->getBounds().getY()
-                    && editorForV287.getComponentAt (tiles[1]->getBounds().getRight() - 3,
+    // and no tile ever steals a click (the probes land ON a tile's
+    // own margin, and the editor answers with ITSELF - JUCE's
+    // getComponentAt skips what never intercepts a click), and the
+    // whole column still ends flush: layout alone. v2.89.0: the
+    // front end wears nothing any more, so the streets the old
+    // check walked are bare cream - the right column's own geometry
+    // is the whole story now
+    expectTrue (editorForV287.getComponentAt (tiles[1]->getBounds().getX() + 2,
                                                      tiles[1]->getBounds().getY() + 2)
-                           == &editorForV287
-                    && editorForV287.getComponentAt (tiles[4]->getBounds().getX() + 2,
-                                                     tiles[4]->getBounds().getY() + 2)
                            == &editorForV287
                     && reserved[0].getHeight() == 370
                     && reserved[1].getHeight() == 370
-                    && tiles[9]->getBounds().getBottom() <= reserved[1].getBottom(),
-                "the tiles never cover the streets and never steal a click - the blocks keep their height, the panel never grew");
+                    && tiles[6]->getBounds().getBottom() <= reserved[1].getBottom(),
+                "the tiles never steal a click - the blocks keep their height, the panel never grew");
 }
 
 // ---------------------------------------------------------------------------
 // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER - the
 // reserved slot's own section between the two dynamics stages. Four
-// knobs (ATTACK, SUSTAIN, GAIN, MIX), the SC HPF / SC LPF selectors
-// the expander and compressor already speak, and a CLIP plate that
-// bounds the wet half at the rail. Two envelope followers read the
-// sidechain-filtered stereo-linked detector - a fast one that leads on
-// the attacks, a slow one that carries the body - and their dB
-// difference drives the whole section
+// knobs (ATTACK, SUSTAIN, WET GAIN, MIX), the PUNCH plate that gates
+// the whole section and a CLIPPER plate that bounds the wet half at
+// the rail. Two envelope followers read the stereo-linked detector -
+// a fast one that leads on the attacks, a slow one that carries the
+// body - and their dB difference drives the whole section. v2.89.0
+// (Clement's restyle): the SC corners are GONE (the detector hears
+// the full band), the section owns its three ladders (IN, OUT and a
+// bipolar GR reading the gain modification from -15 to +15 dB), and
+// the PUNCH plate joins as the section's master switch
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the SC corners, makeup, mix, and the CLIP plate on the wet");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet, and the section's own ladders");
 
     juce::MidiBuffer noMidi;
 
@@ -9169,7 +9165,7 @@ void testV288TransientDesigner()
         return peak;
     };
 
-    // a settled steady-tone peak (the CLIP plate's own probe)
+    // a settled steady-tone peak (the CLIPPER plate's own probe)
     auto measureSteadyPeak = [&]() -> double
     {
         SineSource src (1000.0, 48000.0, 0.2f);
@@ -9197,6 +9193,14 @@ void testV288TransientDesigner()
     expectNear (measureSteadyDb (0.25) - juce::Decibels::gainToDecibels (0.25), 0.0, 0.1,
                 "the parked transient designer is a true bypass (attack 0, sustain 0, gain 0, the plate dark)");
 
+    // ---- the section's own ladders (v2.89.0): their one-poles feed
+    // every sample, parked or not, so on the parked tone the IN and
+    // the OUT read the same honest level and the bipolar GR reads
+    // its dead centre ----
+    expectTrue (std::abs (strip->getTransInDb() - strip->getTransOutDb()) <= 0.05
+                    && std::abs (strip->getTransGrDb()) <= 0.01,
+                "the transient's own ladders tell the truth on a parked tone - the IN matches the OUT, the GR reads unity");
+
     // ---- the GAIN rides the wet half: +6 dB on a steady tone, the
     // mix parked at 100 % ----
     setParam ("transGain", 6.0f);
@@ -9223,6 +9227,14 @@ void testV288TransientDesigner()
                 "the ATTACK knob boosts the burst's onset - the fast envelope leads the slow one and the wet half opens up");
     expectNear (measureSteadyDb (0.2) - juce::Decibels::gainToDecibels (0.2), 0.0, 0.3,
                 "a steady tone rides at unity under ATTACK +15 - the envelope lead settles at zero");
+
+    // ---- the PUNCH plate (v2.89.0): the section's own master
+    // switch - a dark plate parks the whole section wherever its
+    // knobs stand, ATTACK +15 and all ----
+    setParam ("transOn", false);
+    expectNear (measureSteadyDb (0.2) - juce::Decibels::gainToDecibels (0.2), 0.0, 0.1,
+                "a dark PUNCH plate parks the section wherever its knobs stand - ATTACK +15 breathes nothing");
+    setParam ("transOn", true);
 
     // ---- the SUSTAIN lifts the body: an exponentially decaying tone,
     // its tail reads louder with the knob up ----
@@ -9268,34 +9280,15 @@ void testV288TransientDesigner()
                 "the SUSTAIN knob lifts the decaying body - the tail reads louder than the parked reference");
     setParam ("transSustain", 0.0f);
 
-    // ---- the SC corners gate the detector: a 1600 Hz SC HPF lifts a
-    // 100 Hz body out of the detector and a 100 Hz SC LPF lifts a
-    // 4 kHz body the same way - the sustain boost dies and the raw
-    // tail rides through untouched (the -60 dBFS dead zone keeps a
-    // lifted band really lifted out: the corner leaves only a
-    // -60 dB ghost behind, far under the zone). The body's own
-    // onset click the corner lets through lands on the attack half
-    // of the control signal - and with the attack knob parked it
-    // breathes nothing, so the check rides the sustain half, where
-    // the click cannot lie ----
-    const double bassRaw = tailRmsDb (100.0, 0.0);
-    const double bassOpen = tailRmsDb (100.0, 15.0);
-    setParam ("transScHpf", 1600.0f);
-    const double bassFiltered = tailRmsDb (100.0, 15.0);
-    expectTrue (bassOpen > bassRaw + 6.0 && std::abs (bassFiltered - bassRaw) < 0.5,
-                "a 1600 Hz SC HPF lifts the 100 Hz body out of the detector - the sustain boost is gone, the raw tail rides through");
-    setParam ("transScHpf", 16.0f);
+    // ---- v2.89.0 (Clement's verdict): the SC corners are GONE - the
+    // detector hears the full band and the -60 dBFS dead zone keeps
+    // the section honest on its own, so there is no corner left to
+    // lift a band out. The parameters themselves are gone with them;
+    // a v2.88 session that carries the old corners loads clean (the
+    // unknown ids fall on the floor), and the blob below rides the
+    // section's own six ----
 
-    const double trebleRaw = tailRmsDb (4000.0, 0.0);
-    const double trebleOpen = tailRmsDb (4000.0, 15.0);
-    setParam ("transScLpf", 100.0f);
-    const double trebleFiltered = tailRmsDb (4000.0, 15.0);
-    expectTrue (trebleOpen > trebleRaw + 6.0 && std::abs (trebleFiltered - trebleRaw) < 0.5,
-                "a 100 Hz SC LPF lifts the 4 kHz body out of the detector - the sustain boost is gone, the raw tail rides through");
-    setParam ("transScLpf", 24000.0f);
-    setParam ("transSustain", 0.0f);
-
-    // ---- the CLIP plate bounds the WET half at the rail: a +18 dB
+    // ---- the CLIPPER plate bounds the WET half at the rail: a +18 dB
     // make-up on a 0.2 tone pushes the wet past the rail, the plate
     // catches it, and the dry half rides untouched through the blend.
     // The tolerance is the strip's own float32 floor, not slack: the
@@ -9316,7 +9309,7 @@ void testV288TransientDesigner()
     const double peakClipped = measureSteadyPeak();
 
     expectTrue (peakOpen > 1.2 && peakClipped <= 1.0 + 1.0e-3,
-                "the CLIP plate bounds the wet half at the rail - +18 dB of make-up clips at exactly 1.0");
+                "the CLIPPER plate bounds the wet half at the rail - +18 dB of make-up clips at exactly 1.0");
 
     setParam ("transMix", 50.0f);
     expectNear (measureSteadyPeak(), 0.6, 0.02,
@@ -9325,14 +9318,15 @@ void testV288TransientDesigner()
     setParam ("transGain", 0.0f);
     setParam ("transClipper", false);
 
-    // ---- the seven parameters ride the shell's own blob ----
+    // ---- the six parameters ride the shell's own blob (v2.89.0: the
+    // SC corners are gone with the params themselves; the PUNCH
+    // plate rides dark so the restore is never a no-op) ----
     setParam ("transAttack", 7.5f);
     setParam ("transSustain", -4.2f);
-    setParam ("transScHpf", 90.0f);
-    setParam ("transScLpf", 800.0f);
     setParam ("transGain", -3.0f);
     setParam ("transMix", 62.0f);
     setParam ("transClipper", true);
+    setParam ("transOn", false);
 
     juce::MemoryBlock state;
     proc.getStateInformation (state);
@@ -9351,20 +9345,18 @@ void testV288TransientDesigner()
                     "the transient attack restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("transSustain")->load(), -4.2, 0.01,
                     "the transient sustain restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("transScHpf")->load(), 90.0, 0.1,
-                    "the transient SC HPF corner restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("transScLpf")->load(), 800.0, 0.1,
-                    "the transient SC LPF corner restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("transGain")->load(), -3.0, 0.01,
                     "the transient gain restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("transMix")->load(), 62.0, 0.01,
                     "the transient mix restores");
         expectTrue (rehosted->getApvts().getRawParameterValue ("transClipper")->load() > 0.5f,
-                    "the CLIP plate's lit state restores");
+                    "the CLIPPER plate's lit state restores");
+        expectTrue (rehosted->getApvts().getRawParameterValue ("transOn")->load() < 0.5f,
+                    "the PUNCH plate's dark state restores");
     }
 
-    // ---- and a pre-2.88 session - the seven children gone from the
-    // tree - parks them all at their defaults ----
+    // ---- and a pre-2.88 session - the section's children gone from
+    // the tree - parks them all at their defaults ----
     auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
     expectTrue (xml != nullptr, "the strip state parses as XML");
 
@@ -9374,8 +9366,8 @@ void testV288TransientDesigner()
         {
             const auto id = xml->getChildElement (i)->getStringAttribute ("id");
 
-            if (id == "transAttack" || id == "transSustain" || id == "transScHpf"
-                || id == "transScLpf" || id == "transGain" || id == "transMix"
+            if (id == "transAttack" || id == "transSustain" || id == "transOn"
+                || id == "transGain" || id == "transMix"
                 || id == "transClipper")
                 xml->removeChildElement (xml->getChildElement (i), true);
         }
@@ -9391,22 +9383,22 @@ void testV288TransientDesigner()
                     "a pre-2.88 session parks the attack at 0 dB");
         expectNear (loaded.getApvts().getRawParameterValue ("transSustain")->load(), 0.0, 0.01,
                     "a pre-2.88 session parks the sustain at 0 dB");
-        expectNear (loaded.getApvts().getRawParameterValue ("transScHpf")->load(), 16.0, 0.1,
-                    "a pre-2.88 session parks the SC HPF at its off corner");
-        expectNear (loaded.getApvts().getRawParameterValue ("transScLpf")->load(), 24000.0, 0.1,
-                    "a pre-2.88 session parks the SC LPF at its off corner");
         expectNear (loaded.getApvts().getRawParameterValue ("transGain")->load(), 0.0, 0.01,
                     "a pre-2.88 session parks the gain at 0 dB");
         expectNear (loaded.getApvts().getRawParameterValue ("transMix")->load(), 100.0, 0.01,
                     "a pre-2.88 session parks the mix at 100 %");
         expectTrue (loaded.getApvts().getRawParameterValue ("transClipper")->load() < 0.5f,
-                    "a pre-2.88 session parks the CLIP plate dark");
+                    "a pre-2.88 session parks the CLIPPER plate dark");
+        expectTrue (loaded.getApvts().getRawParameterValue ("transOn")->load() > 0.5f,
+                    "a pre-2.88 session parks the PUNCH plate lit at its default");
     }
 
-    // ---- the layout: the engraved TRANSIENT frame carries its own
-    // section - four 84 px knobs in one centred row, their captions
-    // under their feet, the SC selectors and the CLIP plate in the
-    // slim strip at the foot ----
+    // ---- the layout (v2.89.0, Clement's restyle): the PUNCH plate
+    // rides the meters column's head, the CLIPPER plate the block's
+    // top-right corner, the IN / OUT / GR trio down the left column,
+    // and the four knobs in TWO RANKS OF TWO - Mix, Gain / Attack,
+    // Sustain - each 84 px square, each caption hugging its own
+    // knob's feet ----
     {
         CostesStrip stripForV288;
         stripForV288.prepareToPlay (48000.0, 512);
@@ -9414,47 +9406,56 @@ void testV288TransientDesigner()
         CostesStripEditor editorForV288 (stripForV288);
         editorForV288.setVisible (true);
 
-        const auto knobs     = editorForV288.getTransientKnobs();
-        const auto captions  = editorForV288.getTransientCaptions();
-        const auto sliders   = editorForV288.getStripSliders();
-        const auto clipBtn   = editorForV288.getTransClipButton();
-        const auto& frame    = editorForV288.getTransientFrame();
+        const auto knobs    = editorForV288.getTransientKnobs();
+        const auto captions = editorForV288.getTransientCaptions();
+        const auto meters   = editorForV288.getTransientMeters();
+        const auto punchBtn = editorForV288.getPunchButton();
+        const auto clipBtn  = editorForV288.getTransClipButton();
+        const auto& frame   = editorForV288.getTransientFrame();
 
-        // the knobs: ATTACK, SUSTAIN, GAIN, MIX across the row, each
-        // 84 px square at its own 108 px cell's axis
+        // the knobs: two ranks of two, MIX and GAIN over ATTACK and
+        // SUSTAIN, each 84 px square centred in its own 144 px cell
         expectTrue (knobs[0] != nullptr && knobs[1] != nullptr
                         && knobs[2] != nullptr && knobs[3] != nullptr
-                        && knobs[0]->getBounds() == juce::Rectangle<int> (270, 341, 84, 84)
-                        && knobs[1]->getBounds() == juce::Rectangle<int> (378, 341, 84, 84)
-                        && knobs[2]->getBounds() == juce::Rectangle<int> (486, 341, 84, 84)
-                        && knobs[3]->getBounds() == juce::Rectangle<int> (594, 341, 84, 84),
-                    "the four transient knobs sit in one centred row - ATTACK, SUSTAIN, GAIN, MIX, each 84 px square");
+                        && knobs[0]->getBounds() == juce::Rectangle<int> (432, 314, 84, 84)
+                        && knobs[1]->getBounds() == juce::Rectangle<int> (576, 314, 84, 84)
+                        && knobs[2]->getBounds() == juce::Rectangle<int> (432, 412, 84, 84)
+                        && knobs[3]->getBounds() == juce::Rectangle<int> (576, 412, 84, 84),
+                    "the four transient knobs sit two ranks of two - MIX, GAIN over ATTACK, SUSTAIN, each 84 px square");
 
         // the captions hug their own knobs' feet and spell their words
         expectTrue (captions[0] != nullptr && captions[1] != nullptr
                         && captions[2] != nullptr && captions[3] != nullptr
-                        && captions[0]->getBounds() == juce::Rectangle<int> (260, 425, 104, 14)
-                        && captions[1]->getBounds() == juce::Rectangle<int> (368, 425, 104, 14)
-                        && captions[2]->getBounds() == juce::Rectangle<int> (476, 425, 104, 14)
-                        && captions[3]->getBounds() == juce::Rectangle<int> (584, 425, 104, 14)
-                        && captions[0]->getText() == "ATTACK" && captions[1]->getText() == "SUSTAIN"
-                        && captions[2]->getText() == "GAIN" && captions[3]->getText() == "MIX",
-                    "the caption words hug their own knobs' feet - ATTACK, SUSTAIN, GAIN, MIX");
+                        && captions[0]->getBounds() == juce::Rectangle<int> (404, 398, 140, 14)
+                        && captions[1]->getBounds() == juce::Rectangle<int> (548, 398, 140, 14)
+                        && captions[2]->getBounds() == juce::Rectangle<int> (404, 496, 140, 14)
+                        && captions[3]->getBounds() == juce::Rectangle<int> (548, 496, 140, 14)
+                        && captions[0]->getText() == "MIX" && captions[1]->getText() == "WET GAIN"
+                        && captions[2]->getText() == "ATTACK" && captions[3]->getText() == "SUSTAIN",
+                    "the caption words hug their own knobs' feet - MIX, WET GAIN / ATTACK, SUSTAIN");
 
-        // the SC selectors and the CLIP plate in the foot strip, the
-        // same 76 x 36 geometry the two dynamics stages ride
-        expectTrue (sliders[38] != nullptr && sliders[39] != nullptr && clipBtn != nullptr
-                        && sliders[38]->getBounds() == juce::Rectangle<int> (292, 472, 76, 36)
-                        && sliders[39]->getBounds() == juce::Rectangle<int> (436, 472, 76, 36)
-                        && clipBtn->getBounds() == juce::Rectangle<int> (580, 472, 76, 36),
-                    "the SC HPF, SC LPF and the CLIP plate ride the slim strip at the foot - the dynamics stages' own 76 x 36 selector geometry");
+        // the plates: PUNCH at the meters column's head, CLIPPER at
+        // the block's top-right corner, both on the block's own top line
+        expectTrue (punchBtn != nullptr && clipBtn != nullptr
+                        && punchBtn->getBounds() == juce::Rectangle<int> (258, 294, 88, 18)
+                        && clipBtn->getBounds() == juce::Rectangle<int> (590, 294, 100, 18),
+                    "the PUNCH plate rides the meters column's head and the CLIPPER plate the block's top-right corner - both on the block's own top line");
 
-        // the whole section sits inside its engraved frame, under the
-        // TRANSIENT title band, flush inside the frame's own floor
+        // the ladders: IN, OUT and the bipolar GR down the left
+        // column - the same trio the dynamics stages wear
+        expectTrue (meters[0] != nullptr && meters[1] != nullptr && meters[2] != nullptr
+                        && meters[0]->getBounds() == juce::Rectangle<int> (260, 316, 40, 192)
+                        && meters[1]->getBounds() == juce::Rectangle<int> (304, 316, 40, 192)
+                        && meters[2]->getBounds() == juce::Rectangle<int> (348, 316, 52, 192),
+                    "the IN, OUT and GR ladders ride the left column - the same trio the dynamics stages wear");
+
+        // the whole section sits inside its engraved frame, its title
+        // band gone (v2.89.0), flush inside the frame's own floor
         expectTrue (frame == juce::Rectangle<int> (254, 292, 440, 220)
-                        && knobs[0]->getBounds().getY() >= frame.getY() + 16
-                        && clipBtn->getBounds().getBottom() <= frame.getBottom() - 2,
-                    "the transient section owns its engraved 220 px frame - under the TRANSIENT title band, flush inside the frame's floor");
+                        && punchBtn->getBounds().getY() == frame.getY() + 2
+                        && knobs[0]->getBounds().getY() >= punchBtn->getBounds().getBottom()
+                        && captions[3]->getBounds().getBottom() == frame.getBottom() - 2,
+                    "the transient section owns its engraved 220 px frame - the frame alone carries the section, flush inside the frame's floor");
     }
 }
 } // namespace

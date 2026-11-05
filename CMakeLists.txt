@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TheChannelStrip VERSION 2.88.0 LANGUAGES C CXX)
+project(TheChannelStrip VERSION 2.89.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -209,6 +209,14 @@ public:
     float getExpOutDb()  const { return expMeterOutDb.load (std::memory_order_relaxed); }
     float getCompOutDb() const { return compMeterOutDb.load (std::memory_order_relaxed); }
 
+    // v2.89.0: the transient designer's own trio - the IN and OUT
+    // ladders read the section's own one-poles (the truth even with
+    // the PUNCH plate dark), the GR ladder the smoothed envelope
+    // gain itself, signed: a boost reads positive, a cut negative
+    float getTransInDb()  const { return transMeterInDb.load (std::memory_order_relaxed); }
+    float getTransGrDb()  const { return transMeterGrDb.load (std::memory_order_relaxed); }
+    float getTransOutDb() const { return transMeterOutDb.load (std::memory_order_relaxed); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -333,14 +341,15 @@ private:
 
     // the transient designer (v2.88.0, Clement's spec, roadmap C4):
     // the attack and sustain knobs read in dB of envelope lead, the
-    // sidechain pair shares the dynamics stages' own legal corners,
-    // the gain is the wet half's own make-up, the mix the dry/wet
-    // blend in % wet, and the clip plate bounds the wet half at the
-    // rail
+    // PUNCH plate (v2.89.0) is the section's own master switch, lit
+    // by default like EXP and COMP, the gain is the wet half's own
+    // make-up, the mix the dry/wet blend in % wet, and the clip
+    // plate bounds the wet half at the rail. The SC corners are
+    // gone (v2.89.0, Clement's verdict) - the detector hears the
+    // full band, the -60 dBFS dead zone keeps it honest on its own
     std::atomic<float>* transAttack  = nullptr;  // -15 to +15 dB
     std::atomic<float>* transSustain = nullptr;  // -15 to +15 dB
-    std::atomic<float>* transScHpf   = nullptr;  // the detector's own pair
-    std::atomic<float>* transScLpf   = nullptr;
+    std::atomic<float>* transOn      = nullptr;  // v2.89.0: the PUNCH plate, lit by default
     std::atomic<float>* transGain    = nullptr;   // -18 to +18 dB, the wet half only
     std::atomic<float>* transMix     = nullptr;   // 0-100 % wet
     std::atomic<float>* transClipper = nullptr;  // 0.0 / 1.0
@@ -421,10 +430,16 @@ private:
     // detector's band
     float expInPower       = 0.0f;
     float compInPower     = 0.0f;
+    // v2.89.0: the transient's own IN and OUT ladder states - the
+    // same 10 ms RMS one-poles, fed unconditionally so the ladders
+    // tell the truth even while the PUNCH plate is dark
+    float transInPower     = 0.0f;
+    float transOutPower   = 0.0f;
 
     // the transient designer's state (v2.88.0, Clement's spec): two
-    // envelope followers ride the sidechain-filtered, stereo-linked
-    // rectified level - a FAST one (0.5 ms up / 20 ms down) that
+    // envelope followers ride the stereo-linked rectified level -
+    // full band since v2.89.0, the SC corners are gone (Clement's
+    // verdict) - a FAST one (0.5 ms up / 20 ms down) that
     // leads on the attacks, a SLOW one (30 ms up / 150 ms down) that
     // carries the body - and their dB difference IS the section's
     // control signal: positive (the fast envelope leading) an attack
@@ -458,10 +473,6 @@ private:
     float transPeakDecayFactor = 0.0f;
     float transGainCoef        = 0.0f;   // the gain one-pole, 2 ms
     static constexpr float transDetectorDeadZone = 1.0e-3f;   // -60 dBFS
-    Biquad transSidechainHp[2] = {};   // the section's own SC pair (v2.88.0)
-    Biquad transSidechainLp[2] = {};
-    float lastTransScHpf = -1.0f;
-    float lastTransScLpf = -1.0f;
 
     // the dynamics meters (v2.65.0): the per-block snapshots the four
     // SSL ladders read. The IN meters start at the detector's floor
@@ -473,6 +484,13 @@ private:
     std::atomic<float> compMeterGrDb  { 0.0f };
     std::atomic<float> expMeterOutDb  { -120.0f };   // v2.66.0
     std::atomic<float> compMeterOutDb { -120.0f };
+    // v2.89.0: the transient's own trio - the IN and OUT ladders
+    // read the section's one-poles (parked or not), the GR ladder
+    // the smoothed envelope gain itself, signed - a boost reads
+    // positive, a cut negative
+    std::atomic<float> transMeterInDb  { -120.0f };
+    std::atomic<float> transMeterGrDb  { 0.0f };
+    std::atomic<float> transMeterOutDb { -120.0f };
 
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
@@ -660,7 +678,7 @@ public:
     // transient designer's own six (v2.88.0): its ATTACK, SUSTAIN,
     // GAIN and MIX knobs as 34 to 37, its SC HPF and SC LPF
     // selectors as 38 and 39
-    std::array<CostesSlider*, 40> getStripSliders()
+    std::array<CostesSlider*, 38> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
@@ -675,8 +693,7 @@ public:
                  &compLinkSlider, &expKneeSlider,
                  &trimOutKnob,   // v2.86.0: the trim out closes the dynamics as the 34th
                  &transAttackKnob, &transSustainKnob,   // v2.88.0: the transient
-                 &transGainKnob, &transMixKnob,          // designer's own six,
-                 &transScHpfSlider, &transScLpfSlider }; // appended at the end
+                 &transGainKnob, &transMixKnob };        // designer's own four (the SC pair is gone, v2.89.0)
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob -
@@ -798,20 +815,29 @@ public:
 
     // v2.88.0 (Clement's spec, roadmap C4): the transient designer's
     // own controls, for the offline test harness - the four knobs in
-    // panel order, the four caption words, and the CLIP plate
+    // panel order (v2.89.0: Mix, Gain / Attack, Sustain, two ranks of
+    // two - Clement's layout), the four caption words, the CLIPPER
+    // plate and the PUNCH plate
     std::array<CostesSlider*, 4> getTransientKnobs()
     {
-        return { &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob };
+        return { &transMixKnob, &transGainKnob, &transAttackKnob, &transSustainKnob };
     }
 
     std::array<juce::Label*, 4> getTransientCaptions()
     {
-        return { &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel };
+        return { &transMixLabel, &transGainLabel, &transAttackLabel, &transSustainLabel };
     }
 
     juce::Button* getTransClipButton()
     {
         return &transClipButton;
+    }
+
+    // v2.89.0: the PUNCH plate - the section's own master switch, the
+    // harness reads its lit state through the toggle itself
+    juce::Button* getPunchButton()
+    {
+        return &punchOnButton;
     }
 
     // v2.70.0 (Clement's remark 1): the panel front's own grain - a
@@ -837,10 +863,18 @@ public:
     {
         enum class Mode { input, output, gainReduction };
 
-        DynamicsMeter (CostesStrip& source, Mode meterMode, bool expanderSide,
+        // v2.89.0: the ladder's stage - the expander and compressor
+        // as ever, the transient designer joining with its own trio.
+        // A transient GR ladder is BIPOLAR: it reads the smoothed
+        // gain MODIFICATION, -15 to +15 dB, zero dead centre, a boost
+        // lighting up from the middle in green, a cut down in the
+        // reduction orange
+        enum class Stage { expander, compressor, transient };
+
+        DynamicsMeter (CostesStrip& source, Mode meterMode, Stage stageSide,
                        float lowScaleDb, float highScaleDb,
                        int numLeds, float scaleMarkStep, const char* captionText)
-            : owner (source), mode (meterMode), expander (expanderSide),
+            : owner (source), mode (meterMode), stage (stageSide),
               lowDb (lowScaleDb), highDb (highScaleDb),
               leds (numLeds), markStep (scaleMarkStep), caption (captionText) {}
 
@@ -848,7 +882,7 @@ public:
 
         CostesStrip& owner;
         Mode mode;
-        bool expander;
+        Stage stage;
         float lowDb;
         float highDb;
         int leds;
@@ -923,6 +957,12 @@ public:
                  &compInMeter, &compOutMeter, &compGrMeter };
     }
 
+    // v2.89.0: the transient's own meter trio for the offline harness
+    std::array<DynamicsMeter*, 3> getTransientMeters()
+    {
+        return { &transInMeter, &transOutMeter, &transGrMeter };
+    }
+
     // v2.73.0: the dynamics plates in stable order - the expander's
     // FAST ATK and LISTEN, then the compressor's - so the offline
     // harness can pin their stacked geometry
@@ -988,10 +1028,12 @@ public:
     // three (tilt, drive with its OS plate, trim out) - for the
     // offline harness to pin their bounds, their tones and their
     // click-through
-    std::array<ZoneTile*, 10> getZoneTiles()
+    // v2.87.0: the AMEK-style zone tiles. v2.89.0 (Clement's
+    // verdict): the front end's three are gone - only the right
+    // column's seven remain
+    std::array<ZoneTile*, 7> getZoneTiles()
     {
-        return { &trimInZone, &highCutZone, &lowCutZone,
-                 &phaseZone, &balanceZone, &widthZone, &monoMakerZone,
+        return { &phaseZone, &balanceZone, &widthZone, &monoMakerZone,
                  &tiltZone, &driveZone, &trimOutZone };
     }
 
@@ -1019,9 +1061,6 @@ private:
     // the drive with its OS plate. Added first in the editor, so they
     // paint behind everything (highCut is the LPF, lowCut the HPF -
     // the knobs' own names)
-    ZoneTile trimInZone;
-    ZoneTile highCutZone;
-    ZoneTile lowCutZone;
     ZoneTile phaseZone;
     ZoneTile balanceZone;
     ZoneTile widthZone;
@@ -1102,10 +1141,12 @@ private:
     // controls - the ATTACK, SUSTAIN, GAIN and MIX knobs with their
     // four caption words, and the section's own SC HPF / SC LPF
     // selectors (the same legal-corner selectors the two dynamics
-    // stages ride)
+    // stages ride). v2.89.0: the SC pair is gone (Clement's verdict -
+    // a bad idea); the detector hears the full band. The PUNCH plate
+    // (the section's master switch) joins the CLIPPER plate at the
+    // top of the block
     CostesSlider transAttackKnob, transSustainKnob;
     CostesSlider transGainKnob, transMixKnob;
-    CostesSlider transScHpfSlider, transScLpfSlider;
     juce::Label transAttackLabel, transSustainLabel;
     juce::Label transGainLabel, transMixLabel;
 
@@ -1146,6 +1187,7 @@ private:
     PlateToggle oversampleButton;
     PlateToggle eqOnButton;   // v2.61.0
     PlateToggle transClipButton;   // v2.88.0: the transient's CLIP plate
+    PlateToggle punchOnButton;   // v2.89.0: the PUNCH plate, lit by default
 
 public:
     // the band-1/4 shape switch (v2.61.0): lit "BELL" or dark "SHELF",
@@ -1245,17 +1287,26 @@ private:
     // v2.74.0 (Clement's remark 3): the shared scale engraves EVERY
     // ten dB (step 10, was 20) - 0 down to the -70 floor
     DynamicsMeter expInMeter  { owner, DynamicsMeter::Mode::input,
-                                true, -70.0f, 0.0f, 14, 10.0f, "IN" };
+                                DynamicsMeter::Stage::expander, -70.0f, 0.0f, 14, 10.0f, "IN" };
     DynamicsMeter expOutMeter { owner, DynamicsMeter::Mode::output,
-                                true, -70.0f, 0.0f, 14, 10.0f, "OUT" };
+                                DynamicsMeter::Stage::expander, -70.0f, 0.0f, 14, 10.0f, "OUT" };
     DynamicsMeter expGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
-                                true, -36.0f, 0.0f, 36, 1.0f, "GR" };
+                                DynamicsMeter::Stage::expander, -36.0f, 0.0f, 36, 1.0f, "GR" };
     DynamicsMeter compInMeter { owner, DynamicsMeter::Mode::input,
-                                false, -70.0f, 0.0f, 14, 10.0f, "IN" };
+                                DynamicsMeter::Stage::compressor, -70.0f, 0.0f, 14, 10.0f, "IN" };
     DynamicsMeter compOutMeter { owner, DynamicsMeter::Mode::output,
-                                false, -70.0f, 0.0f, 14, 10.0f, "OUT" };
+                                DynamicsMeter::Stage::compressor, -70.0f, 0.0f, 14, 10.0f, "OUT" };
     DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
-                                false, -18.0f, 0.0f, 18, 1.0f, "GR" };
+                                DynamicsMeter::Stage::compressor, -18.0f, 0.0f, 18, 1.0f, "GR" };
+    // v2.89.0: the transient's own trio - the IN and OUT ladders in
+    // the section's colours, the GR ladder BIPOLAR, -15 to +15 dB
+    // of gain modification at one dB per division, zero dead centre
+    DynamicsMeter transInMeter  { owner, DynamicsMeter::Mode::input,
+                                  DynamicsMeter::Stage::transient, -70.0f, 0.0f, 14, 10.0f, "IN" };
+    DynamicsMeter transOutMeter { owner, DynamicsMeter::Mode::output,
+                                  DynamicsMeter::Stage::transient, -70.0f, 0.0f, 14, 10.0f, "OUT" };
+    DynamicsMeter transGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
+                                  DynamicsMeter::Stage::transient, -15.0f, 15.0f, 30, 5.0f, "GR" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimOutAttachment;   // v2.86.0
@@ -1319,9 +1370,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transSustainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transGainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transMixAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transScHpfAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transScLpfAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transClipAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> punchAttachment;   // v2.89.0
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position

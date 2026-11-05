@@ -392,10 +392,9 @@ CostesStrip::CostesStrip()
     compListen    = apvts.getRawParameterValue ("compListen");
     compLink      = apvts.getRawParameterValue ("compLink");
 
+    transOn      = apvts.getRawParameterValue ("transOn");
     transAttack  = apvts.getRawParameterValue ("transAttack");
     transSustain = apvts.getRawParameterValue ("transSustain");
-    transScHpf   = apvts.getRawParameterValue ("transScHpf");
-    transScLpf   = apvts.getRawParameterValue ("transScLpf");
     transGain    = apvts.getRawParameterValue ("transGain");
     transMix     = apvts.getRawParameterValue ("transMix");
     transClipper = apvts.getRawParameterValue ("transClipper");
@@ -422,8 +421,8 @@ CostesStrip::CostesStrip()
              && compGain != nullptr && compMix != nullptr && compHpf != nullptr
              && compScLpf != nullptr && compListen != nullptr
              && compLink != nullptr
+             && transOn != nullptr
              && transAttack != nullptr && transSustain != nullptr
-             && transScHpf != nullptr && transScLpf != nullptr
              && transGain != nullptr && transMix != nullptr
              && transClipper != nullptr);
 }
@@ -1493,13 +1492,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
 
     // ------------------------------------------------------------------
     // the TRANSIENT DESIGNER (v2.88.0, Clement's spec, roadmap C4):
-    // seven parameters appended at the very end - every session and
+    // the parameters appended at the very end - every session and
     // every automation index born before v2.88 keeps its own order.
     // The ATTACK and SUSTAIN knobs span -15 to +15 dB of envelope
-    // lead, the section's SC pair shares the dynamics stages' own
-    // legal-corner selectors, the GAIN is the wet half's own make-up
-    // (-18 to +18 dB), the MIX the dry/wet blend, and the CLIP plate
-    // bounds the wet half at the rail
+    // lead, the WET GAIN is the wet half's own make-up (-18 to
+    // +18 dB), the MIX the dry/wet blend, and the CLIPPER plate
+    // bounds the wet half at the rail. v2.89.0: the PUNCH plate is
+    // the section's master switch (default lit, EXP and COMP's own
+    // grammar), and the SC corners are GONE (Clement's verdict: a
+    // bad idea) - the detector hears the full band, the -60 dBFS
+    // dead zone already keeps the section honest
     // ------------------------------------------------------------------
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "transAttack", 1 }, "Transient Attack",
@@ -1515,19 +1517,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
 
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "transScHpf", 1 }, "Transient SC HPF",
-        makeScCornerRange (16.0f, 1600.0f, scHpfCorners, numScHpfCorners, false), 16.0f,
-        juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (scHpfText)
-            .withValueFromStringFunction (scHpfParse)));
-
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "transScLpf", 1 }, "Transient SC LPF",
-        makeScCornerRange (100.0f, 24000.0f, scLpfCorners, numScLpfCorners, true), 24000.0f,
-        juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (scLpfText)
-            .withValueFromStringFunction (scLpfParse)));
+    // v2.89.0 (Clement's spec): the section's own master plate - PUNCH
+    // ON / PUNCH OFF, the same grammar as EXP and COMP (both default
+    // lit). The plate rides at the section's top-left over its meter
+    // column, and a dark plate parks the whole section wherever its
+    // knobs stand. The SC HPF / SC LPF corners are GONE (Clement's
+    // verdict: a bad idea) - the detector hears the full band, the
+    // -60 dBFS dead zone already keeps the section honest
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "transOn", 1 }, "Punch On", true,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction (onOffText)
+            .withValueFromStringFunction (onOffParse)));
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "transGain", 1 }, "Transient Gain",
@@ -1682,6 +1683,15 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     transPeakDecayFactor = std::exp (-1.0f / (0.020f * (float) currentSampleRate));
     transGainCoef        = 1.0f - std::exp (-1.0f / (0.002f * (float) currentSampleRate));
 
+    // v2.89.0: the section's own meters start from silence like every
+    // other ladder - an empty IN and OUT, a GR reading unity - and
+    // their one-poles join the honest IN states from silence
+    transMeterInDb.store  (-120.0f, std::memory_order_relaxed);
+    transMeterGrDb.store  (0.0f,    std::memory_order_relaxed);
+    transMeterOutDb.store (-120.0f, std::memory_order_relaxed);
+    transInPower   = 0.0f;
+    transOutPower = 0.0f;
+
     for (auto& section : compSidechain)
         section.reset();
 
@@ -1694,20 +1704,10 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto& section : expSidechainLp)
         section.reset();
 
-    // v2.88.0: the transient's own sidechain pair starts from silence
-    // with its corner caches forced to rebuild
-    for (auto& section : transSidechainHp)
-        section.reset();
-
-    for (auto& section : transSidechainLp)
-        section.reset();
-
     lastCompHpf   = -1.0f;
     lastCompScLpf = -1.0f;
     lastExpScHpf  = -1.0f;
     lastExpScLpf  = -1.0f;
-    lastTransScHpf = -1.0f;
-    lastTransScLpf = -1.0f;
 
     // the oversampler is built here, never on the audio thread. A
     // generous maximum (any sane host block, then some) lets the whole
@@ -2125,24 +2125,32 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                                      juce::roundToInt (compLink->load()))];
 
     // ------------------------------------------------------------------
-    // the transient designer (v2.88.0, Clement's spec, roadmap C4):
-    // the section's per-block constants. The attack and sustain knobs
-    // span -15 to +15 dB of envelope lead, the gain -18 to +18 dB of
-    // wet make-up, and the section is hard-bypassed at rest - every
-    // knob parked and the plate dark touches not a single sample, so
-    // the parked strip is bit-for-bit the strip of v2.87 (the mix
-    // knob only speaks once a wet half exists, so it joins no gate)
+    // the transient designer (v2.88.0, Clement's spec, roadmap C4;
+    // v2.89.0, Clement's rework): the section's per-block constants.
+    // The PUNCH plate is the section's own master switch (v2.89.0) -
+    // lit by default like EXP and COMP, a dark plate parks the
+    // section wherever its knobs stand. The attack and sustain knobs
+    // span -15 to +15 dB of envelope lead, the WET GAIN -18 to +18 dB
+    // of wet make-up, and the section is hard-bypassed at rest - the
+    // plate lit and every knob parked still touches not a single
+    // sample (the wet rides at unity, the blend at mix 100 is the
+    // exact identity), so the parked strip is bit-for-bit the strip
+    // of v2.87. The SC corners are gone (v2.89.0, Clement's verdict:
+    // a bad idea) - the detector hears the full band, the -60 dBFS
+    // dead zone keeps the section honest on its own
     // ------------------------------------------------------------------
+    const bool  transPunchOn   = transOn->load() > 0.5f;
     const float transAttackDb   = juce::jlimit (-15.0f, 15.0f, transAttack->load());
     const float transSustainDb  = juce::jlimit (-15.0f, 15.0f, transSustain->load());
     const float transGainDbParam = juce::jlimit (-18.0f, 18.0f, transGain->load());
     const float transMakeupGain = juce::Decibels::decibelsToGain (transGainDbParam);
     const float transMixNorm    = juce::jlimit (0.0f, 100.0f, transMix->load()) * 0.01f;
     const bool  transClipOn     = transClipper->load() > 0.5f;
-    const bool  transActive     = std::abs (transAttackDb) > 0.049f
-                                  || std::abs (transSustainDb) > 0.049f
-                                  || std::abs (transGainDbParam) > 0.049f
-                                  || transClipOn;
+    const bool  transActive     = transPunchOn
+                                  && (std::abs (transAttackDb) > 0.049f
+                                      || std::abs (transSustainDb) > 0.049f
+                                      || std::abs (transGainDbParam) > 0.049f
+                                      || transClipOn);
 
     // the sidechain corners ride the same per-block cache discipline as
     // the cuts: the biquad coefficients rebuild only when a knob moves,
@@ -2219,29 +2227,6 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         rebuildSidechain (expSidechainLp, expScLpfHz, lastExpScLpf, false);
     else
         restSidechain (expSidechainLp, lastExpScLpf);
-
-    // v2.88.0: the transient designer's own pair rides the same cache
-    // discipline - but the section owns no meters, so the detectors
-    // only listen while the section works: a parked section rests its
-    // biquads every block, and a lit one rebuilds on its corners
-    const float transScHpfHz = juce::jlimit (16.0f, 1600.0f, transScHpf->load());
-    const bool  transScHpfOn = transScHpfHz > 16.5f;
-    const float transScLpfHz = juce::jlimit (100.0f, 24000.0f, transScLpf->load());
-    const bool  transScLpfOn = transScLpfHz < 23999.5f
-                              && transScLpfHz < 0.45f * (float) currentSampleRate;
-
-    if (transActive)
-    {
-        if (transScHpfOn)
-            rebuildSidechain (transSidechainHp, transScHpfHz, lastTransScHpf, true);
-        else
-            restSidechain (transSidechainHp, lastTransScHpf);
-
-        if (transScLpfOn)
-            rebuildSidechain (transSidechainLp, transScLpfHz, lastTransScLpf, false);
-        else
-            restSidechain (transSidechainLp, lastTransScLpf);
-    }
 
     // the LISTEN plates, evaluated once per block like every other knob
     // (the monitor itself is written per sample, in the stage loops)
@@ -2482,111 +2467,127 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // roadmap C4): the reserved slot's own voice, between the two
         // dynamics stages exactly where the panel draws it. The
         // stereo-linked detector (the louder channel, like the
-        // expander's) rides the section's own sidechain pair, and two
-        // envelope followers read it - a FAST one that leads on the
-        // attacks, a SLOW one that carries the body. Their dB
-        // difference is the whole control signal: the ATTACK knob
-        // scales the positive half (the fast envelope leading - a
-        // transient is landing), the SUSTAIN knob the negative half
-        // (the fast envelope fallen behind - the body rings on), the
-        // GAIN rides the wet half alone so the mix stays honest, and
-        // the CLIP plate bounds that wet half at the rail. The same
-        // NaN discipline as the detectors: a NaN fails the compares
-        // and leaves the envelopes untouched
-        if (transActive)
+        // expander's) hears the FULL band since v2.89.0 (the SC
+        // corners are gone, Clement's verdict), and two envelope
+        // followers read it - a FAST one that leads on the attacks, a
+        // SLOW one that carries the body. Their dB difference is the
+        // whole control signal: the ATTACK knob scales the positive
+        // half (the fast envelope leading - a transient is landing),
+        // the SUSTAIN knob the negative half (the fast envelope fallen
+        // behind - the body rings on), the WET GAIN rides the wet half
+        // alone so the mix stays honest, and the CLIPPER plate bounds
+        // that wet half at the rail. The same NaN discipline as the
+        // detectors: a NaN fails the compares and leaves the
+        // envelopes untouched. v2.89.0: the section owns its meters
+        // now - the IN and OUT ladders ride their own one-poles on
+        // the level the stage receives and the level it leaves, so
+        // they tell the truth even while the PUNCH plate is dark, and
+        // the GR ladder reads the smoothed envelope gain itself
         {
-            float rectified = 0.0f;
+            float transRawIn = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
+                transRawIn = juce::jmax (transRawIn, std::abs (channels[ch][i]));
+
+            transInPower += (transRawIn * transRawIn - transInPower)
+                * detectorCoef;
+
+            if (transActive)
             {
-                float sc = channels[ch][i];
+                float rectified = 0.0f;
 
-                if (transScHpfOn)
-                    sc = transSidechainHp[ch].processSample (sc);
+                for (int ch = 0; ch < numChannels; ++ch)
+                    rectified = juce::jmax (rectified, std::abs (channels[ch][i]));
 
-                if (transScLpfOn)
-                    sc = transSidechainLp[ch].processSample (sc);
+                // the peak-hold pre-envelope (v2.88.0 build 2): the hold
+                // re-latches at every wave peak and decays at 20 ms, so
+                // a steady tone feeds BOTH followers the same held peak
+                // and the lead settles at zero. Without it the fast
+                // follower rode the rectified wave's own peaks while
+                // the slow one smoothed to its mean, and every held note
+                // read as a false +3.5 dB attack. A NaN sample fails
+                // the jmax compare and leaves the held peak untouched
+                transPeakHold = juce::jmax (transPeakHold * transPeakDecayFactor,
+                                           rectified);
 
-                rectified = juce::jmax (rectified, std::abs (sc));
+                // the -60 dBFS dead zone, the section's own honesty: the
+                // envelope lead is scale-invariant, so without a floor a
+                // sidechain corner that lifts a band out of the detector
+                // would leave a scaled-down ghost behind that drives the
+                // section just as hard. A whisper the detector cannot
+                // trust reads as silence - a corner that lifts a band out
+                // really lifts it out
+                rectified = juce::jmax (0.0f, transPeakHold - transDetectorDeadZone);
+
+                transEnvFast += (rectified - transEnvFast)
+                    * ((rectified > transEnvFast) ? transFastAttackCoef
+                                                   : transFastReleaseCoef);
+                transEnvSlow += (rectified - transEnvSlow)
+                    * ((rectified > transEnvSlow) ? transSlowAttackCoef
+                                                   : transSlowReleaseCoef);
+
+                // the control signal: the fast envelope's lead in dB
+                // (positive - an attack landing; negative - the body
+                // ringing on past it), floored at the detector's own
+                // -120 dB so the logarithm never sees a zero
+                const float leadDb = 20.0f * std::log10 (juce::jmax (transEnvFast, 1.0e-6f))
+                                  - 20.0f * std::log10 (juce::jmax (transEnvSlow, 1.0e-6f));
+
+                // 10 dB of envelope lead (or lag) reads as the full
+                // effect - the knobs' whole sweep spans the honest range
+                // of the control signal, and a gentle lead stays a
+                // gentle boost
+                const float attackShape   = juce::jlimit (0.0f, 1.0f, leadDb * 0.1f);
+                const float sustainShape  = juce::jlimit (0.0f, 1.0f, -leadDb * 0.1f);
+
+                // the dead zone owns the last word: while the detector
+                // reads silence - the held peak under the zone, a band a
+                // corner lifted out, a note faded under -60 dBFS - the
+                // section targets unity. Without this gate the slow
+                // envelope would hold the note's dying echo for another
+                // 150 ms after the fast one fell silent, and the lead's
+                // collapse would read as a phantom sustain
+                const float targetDb = (rectified > 0.0f)
+                    ? transAttackDb * attackShape + transSustainDb * sustainShape
+                    : 0.0f;
+
+                transGainDb += (targetDb - transGainDb) * transGainCoef;
+
+                const float wetGain = transMakeupGain
+                    * juce::Decibels::decibelsToGain (transGainDb);
+
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const float dry = channels[ch][i];
+                    float wet = dry * wetGain;
+
+                    if (transClipOn)
+                        wet = juce::jlimit (-1.0f, 1.0f, wet);
+
+                    channels[ch][i] = dry + transMixNorm * (wet - dry);
+                }
+            }
+            else
+            {
+                // a parked section leaves no stale state behind - the
+                // held peak, the envelopes and the gain park at their
+                // floor so the next onset lands on a clean detector
+                transPeakHold = 0.0f;
+                transEnvFast = 0.0f;
+                transEnvSlow = 0.0f;
+                transGainDb  = 0.0f;
             }
 
-            // the peak-hold pre-envelope (v2.88.0 build 2): the hold
-            // re-latches at every wave peak and decays at 20 ms, so
-            // a steady tone feeds BOTH followers the same held peak
-            // and the lead settles at zero. Without it the fast
-            // follower rode the rectified wave's own peaks while
-            // the slow one smoothed to its mean, and every held note
-            // read as a false +3.5 dB attack. A NaN sample fails
-            // the jmax compare and leaves the held peak untouched
-            transPeakHold = juce::jmax (transPeakHold * transPeakDecayFactor,
-                                       rectified);
-
-            // the -60 dBFS dead zone, the section's own honesty: the
-            // envelope lead is scale-invariant, so without a floor a
-            // sidechain corner that lifts a band out of the detector
-            // would leave a scaled-down ghost behind that drives the
-            // section just as hard. A whisper the detector cannot
-            // trust reads as silence - a corner that lifts a band out
-            // really lifts it out
-            rectified = juce::jmax (0.0f, transPeakHold - transDetectorDeadZone);
-
-            transEnvFast += (rectified - transEnvFast)
-                * ((rectified > transEnvFast) ? transFastAttackCoef
-                                               : transFastReleaseCoef);
-            transEnvSlow += (rectified - transEnvSlow)
-                * ((rectified > transEnvSlow) ? transSlowAttackCoef
-                                               : transSlowReleaseCoef);
-
-            // the control signal: the fast envelope's lead in dB
-            // (positive - an attack landing; negative - the body
-            // ringing on past it), floored at the detector's own
-            // -120 dB so the logarithm never sees a zero
-            const float leadDb = 20.0f * std::log10 (juce::jmax (transEnvFast, 1.0e-6f))
-                              - 20.0f * std::log10 (juce::jmax (transEnvSlow, 1.0e-6f));
-
-            // 10 dB of envelope lead (or lag) reads as the full
-            // effect - the knobs' whole sweep spans the honest range
-            // of the control signal, and a gentle lead stays a
-            // gentle boost
-            const float attackShape   = juce::jlimit (0.0f, 1.0f, leadDb * 0.1f);
-            const float sustainShape  = juce::jlimit (0.0f, 1.0f, -leadDb * 0.1f);
-
-            // the dead zone owns the last word: while the detector
-            // reads silence - the held peak under the zone, a band a
-            // corner lifted out, a note faded under -60 dBFS - the
-            // section targets unity. Without this gate the slow
-            // envelope would hold the note's dying echo for another
-            // 150 ms after the fast one fell silent, and the lead's
-            // collapse would read as a phantom sustain
-            const float targetDb = (rectified > 0.0f)
-                ? transAttackDb * attackShape + transSustainDb * sustainShape
-                : 0.0f;
-
-            transGainDb += (targetDb - transGainDb) * transGainCoef;
-
-            const float wetGain = transMakeupGain
-                * juce::Decibels::decibelsToGain (transGainDb);
+            // the OUT ladder's own honest level - the sample this
+            // stage leaves behind, whatever the PUNCH plate says
+            float transOutLevel = 0.0f;
 
             for (int ch = 0; ch < numChannels; ++ch)
-            {
-                const float dry = channels[ch][i];
-                float wet = dry * wetGain;
+                transOutLevel = juce::jmax (transOutLevel,
+                                           std::abs (channels[ch][i]));
 
-                if (transClipOn)
-                    wet = juce::jlimit (-1.0f, 1.0f, wet);
-
-                channels[ch][i] = dry + transMixNorm * (wet - dry);
-            }
-        }
-        else
-        {
-            // a parked section leaves no stale state behind - the
-            // held peak, the envelopes and the gain park at their
-            // floor so the next onset lands on a clean detector
-            transPeakHold = 0.0f;
-            transEnvFast = 0.0f;
-            transEnvSlow = 0.0f;
-            transGainDb  = 0.0f;
+            transOutPower += (transOutLevel * transOutLevel - transOutPower)
+                * detectorCoef;
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -2802,6 +2803,18 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                              juce::jmax (compOutPower, detectorFloorPower)),
                          std::memory_order_relaxed);
 
+    // v2.89.0: the transient's own trio - the IN and OUT ladders read
+    // the section's own one-poles (fed every sample, parked or not),
+    // the GR ladder the smoothed envelope gain itself, signed: a
+    // boost reads positive, a cut negative, unity reads dead centre
+    transMeterInDb.store (10.0f * std::log10 (
+                             juce::jmax (transInPower, detectorFloorPower)),
+                         std::memory_order_relaxed);
+    transMeterGrDb.store (transGainDb, std::memory_order_relaxed);
+    transMeterOutDb.store (10.0f * std::log10 (
+                              juce::jmax (transOutPower, detectorFloorPower)),
+                          std::memory_order_relaxed);
+
     // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
     // signal rides on its way out. The drive stage keeps its own
     // early-out discipline (the blend term vanishes at drive 0, so a
@@ -2934,17 +2947,16 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setLookAndFeel (&look);
 
     // v2.87.0 (Clement's remark 4, the AMEK 9099's pastel zones): the
-    // ten LOCAL background tiles, added FIRST so they paint behind
-    // every knob, plate and word. Tone A - a broken white - wears the
-    // TRIM IN, the phase plate, the stereo width, the tilt and the
-    // trim out; tone B - a honey beige - wears the two cuts, the
-    // stereo balance, the mono maker and the drive with its OS plate.
-    // Every tile carries the panel's own grain and never intercepts a
-    // click, so the streets stay empty and the knobs keep their drag
-    // (highCut is the LPF, lowCut the HPF - the knobs' own names)
-    trimInZone.tint = zoneTileA;
-    highCutZone.tint = zoneTileB;
-    lowCutZone.tint = zoneTileB;
+    // LOCAL background tiles, added FIRST so they paint behind
+    // every knob, plate and word. Tone A - a broken white - wears
+    // the phase plate, the stereo width and the trim out; tone B -
+    // a honey beige - wears the stereo balance, the mono maker and
+    // the drive with its OS plate. v2.89.0 (Clement's verdict): the
+    // front end's three tiles are GONE - the trim, the HPF and the
+    // LPF stand bare on the cream ("c'est mieux avec rien ici").
+    // Every tile carries the panel's own grain and never intercepts
+    // a click, so the streets stay empty and the knobs keep their
+    // drag (highCut is the LPF, lowCut the HPF - the knobs' own names)
     phaseZone.tint = zoneTileA;
     balanceZone.tint = zoneTileB;
     widthZone.tint = zoneTileA;
@@ -3180,14 +3192,17 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (compMixKnob, &compMixLabel,      "MIX",     100.0f, compKnobDisc);
 
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
-    // four knobs - ATTACK, SUSTAIN, GAIN, MIX - wearing the console's
+    // four knobs - ATTACK, SUSTAIN, WET GAIN, MIX - wearing the console's
     // own black aluminium caps, the section's identity at a glance
     // between the expander's ivory and the compressor's blue.
     // Double-click and command-click park every one at its neutral
-    // default (0 dB on the three dB knobs, 100 % on the mix)
+    // default (0 dB on the three dB knobs, 100 % on the mix).
+    // v2.89.0 (Clement's layout): the captions read in panel order
+    // Mix, Gain / Attack, Sustain, and the GAIN caption says what it
+    // really rides - the wet half alone - as "WET GAIN"
     setUpKnob (transAttackKnob,  &transAttackLabel,  "ATTACK",    0.0f, knobDisc);
     setUpKnob (transSustainKnob, &transSustainLabel, "SUSTAIN",   0.0f, knobDisc);
-    setUpKnob (transGainKnob,    &transGainLabel,    "GAIN",      0.0f, knobDisc);
+    setUpKnob (transGainKnob,    &transGainLabel,    "WET GAIN",  0.0f, knobDisc);
     setUpKnob (transMixKnob,     &transMixLabel,     "MIX",     100.0f, knobDisc);
 
     // the sidechain pair of each stage rides the cuts' own horizontal
@@ -3225,22 +3240,6 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpSlope (compScLpfSlider, 24000.0f);
     setUpSlope (expScHpfSlider, 16.0f);
     setUpSlope (expScLpfSlider, 24000.0f);
-
-    // v2.88.0: the transient designer's own SC pair - the same
-    // selectors, the same glyphs, the same rest positions, so the
-    // third stage of the column speaks the two dynamics stages' own
-    // language. The sliders carry `look` themselves - the v2.81.0
-    // lesson: a parentless slider answers the DEFAULT factory at
-    // setTextBoxStyle time, and the glyph is born from ours
-    transScHpfSlider.setLookAndFeel (&look);
-    transScLpfSlider.setLookAndFeel (&look);
-    transScHpfSlider.readoutGlyph     = SectionIcon::Icon::lowCut;
-    transScHpfSlider.hasReadoutGlyph  = true;
-    transScLpfSlider.readoutGlyph     = SectionIcon::Icon::highCut;
-    transScLpfSlider.hasReadoutGlyph  = true;
-
-    setUpSlope (transScHpfSlider, 16.0f);
-    setUpSlope (transScLpfSlider, 24000.0f);
 
     // v2.72.0 (Clement's request): the compressor's LINK selector - a
     // four-position horizontal slider (dual / 50% link / 80% link /
@@ -3327,13 +3326,18 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     compOnButton.caption = "COMP";
     addAndMakeVisible (compOnButton);
 
-    // v2.88.0 (Clement's spec): the transient designer's CLIP plate -
-    // lit amber "CLIP ON" while the wet half is bounded at the rail,
-    // dark "CLIP OFF" while it plays through, the same plate language
-    // as the EXP and COMP switches, riding the section's own foot
-    // strip beside the SC selectors
-    transClipButton.caption = "CLIP";
+    // v2.88.0 (Clement's spec): the transient designer's CLIPPER
+    // plate - lit amber "CLIPPER ON" while the wet half is bounded
+    // at the rail, dark "CLIPPER OFF" while it plays through, the
+    // same plate language as the EXP and COMP switches. v2.89.0
+    // (Clement's request): the caption says the whole word - the
+    // plate grew a touch wider to carry it - and the PUNCH plate
+    // joins at the block's head, the section's own master switch,
+    // lit by default like EXP and COMP
+    transClipButton.caption = "CLIPPER";
     addAndMakeVisible (transClipButton);
+    punchOnButton.caption = "PUNCH";
+    addAndMakeVisible (punchOnButton);
 
     addAndMakeVisible (compFastAttackButton);
     addAndMakeVisible (expFastAttackButton);
@@ -3352,6 +3356,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (compInMeter);
     addAndMakeVisible (compOutMeter);
     addAndMakeVisible (compGrMeter);
+
+    // v2.89.0: the transient's own trio - the same ladder language,
+    // the GR one bipolar (the smoothed gain modification, -15 to
+    // +15 dB, unity engraved dead centre)
+    addAndMakeVisible (transInMeter);
+    addAndMakeVisible (transOutMeter);
+    addAndMakeVisible (transGrMeter);
 
     // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar - each
     // IN ladder carries its stage's own threshold corner as a red
@@ -3481,12 +3492,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "transGain", transGainKnob);
     transMixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "transMix", transMixKnob);
-    transScHpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        owner.getApvts(), "transScHpf", transScHpfSlider);
-    transScLpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        owner.getApvts(), "transScLpf", transScLpfSlider);
     transClipAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "transClipper", transClipButton);
+    punchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "transOn", punchOnButton);   // v2.89.0: the PUNCH plate
 
     // v2.70.0 (Clement's remark 1): the console front's own grain - a
     // 96 x 96 speckle tile baked ONCE, from a fixed xorshift seed so
@@ -3616,9 +3625,8 @@ CostesStripEditor::~CostesStripEditor()
     transSustainAttachment.reset();
     transGainAttachment.reset();
     transMixAttachment.reset();
-    transScHpfAttachment.reset();
-    transScLpfAttachment.reset();
     transClipAttachment.reset();
+    punchAttachment.reset();   // v2.89.0
 
     setLookAndFeel (nullptr);
 }
@@ -3800,18 +3808,13 @@ void CostesStripEditor::paint (juce::Graphics& g)
         }
 
         // v2.88.0 (Clement's spec, roadmap C4): the engraved TRANSIENT
-        // frame stays - the title band rides at its top and the
-        // section's own controls lay out under it (see resized)
+        // frame stays. v2.89.0 (Clement's request): the title band is
+        // GONE - the frame alone carries the section, its controls
+        // lay out inside it (see resized)
         auto transientSlot = transientFrame.reduced (4, 2);
 
         if (transientSlot.getWidth() >= 12 && transientSlot.getHeight() >= 12)
-        {
             g.drawRect (transientSlot, 1);
-            g.drawText ("TRANSIENT",
-                        juce::Rectangle<int> (transientSlot.getX(), transientSlot.getY(),
-                                              transientSlot.getWidth(), 16),
-                        juce::Justification::centred);
-        }
     }
 
     // the four corner screws of the module front
@@ -3838,6 +3841,9 @@ void CostesStripEditor::timerCallback()
     compInMeter.repaint();
     compOutMeter.repaint();
     compGrMeter.repaint();
+    transInMeter.repaint();   // v2.89.0: the transient's own trio
+    transOutMeter.repaint();
+    transGrMeter.repaint();
 
     // v2.81.0 (Clement's remark 4): the outer bands' glyphs repaint
     // here too - they FOLLOW their BELL/SHELF plates (the shape is
@@ -3933,16 +3939,17 @@ void CostesStripEditor::resized()
     trimInLabel.setBounds (trimUnitX + 16, trimCaptionBounds.getY(),
                            trimTextWidth + 8, 18);
 
-    // the cuts' own band, under a breath: the LPF at the LEFT edge,
-    // the HPF at the RIGHT, both wearing the 83 x 101 square - and
+    // the cuts' own band, under a breath: the HPF at the LEFT edge,
+    // the LPF at the RIGHT (v2.89.0, Clement's swap), both wearing
+    // the 83 x 101 square - and
     // the middle street between them FREE now (v2.86.0: the phase
     // plate lives in the IMAGE block at the head of the output
     // column; the process order itself never moves - the phase stays
     // folded into the input gain's own sign)
     line.removeFromTop (8);
     auto cutKnobStrip = line.removeFromTop (101);
-    highCutKnob.setBounds (cutKnobStrip.removeFromLeft (83));    // the LPF, bottom left
-    lowCutKnob.setBounds (cutKnobStrip.removeFromRight (83));    // the HPF, bottom right
+    lowCutKnob.setBounds (cutKnobStrip.removeFromLeft (83));    // the HPF, bottom left (v2.89.0, Clement's swap)
+    highCutKnob.setBounds (cutKnobStrip.removeFromRight (83));   // the LPF, bottom right
 
     // under each cut knob, its own stack: the merged plate centred
     // on the knob's own axis, DIRECTLY under its feet, and the slope
@@ -3953,11 +3960,11 @@ void CostesStripEditor::resized()
     line.removeFromTop (2);
     auto slopeBand = line.removeFromTop (38);
 
-    highCutOnButton.setBounds (plateBand.removeFromLeft (83).withSizeKeepingCentre (56, 18));
-    highCutSlope.setBounds (slopeBand.removeFromLeft (83).withSizeKeepingCentre (52, 38));
+    lowCutOnButton.setBounds (plateBand.removeFromLeft (83).withSizeKeepingCentre (56, 18));
+    lowCutSlope.setBounds (slopeBand.removeFromLeft (83).withSizeKeepingCentre (52, 38));
 
-    lowCutOnButton.setBounds (plateBand.removeFromRight (83).withSizeKeepingCentre (56, 18));
-    lowCutSlope.setBounds (slopeBand.removeFromRight (83).withSizeKeepingCentre (52, 38));
+    highCutOnButton.setBounds (plateBand.removeFromRight (83).withSizeKeepingCentre (56, 18));
+    highCutSlope.setBounds (slopeBand.removeFromRight (83).withSizeKeepingCentre (52, 38));
 
     // and the cut glyphs, inside their knobs' own value strips (the
     // 76 x 18 readout box every knob carries), at the Hz value's left
@@ -3979,22 +3986,11 @@ void CostesStripEditor::resized()
     cutGlyph (highCutKnob, highCutIcon);
     cutGlyph (lowCutKnob, lowCutIcon);
 
-    // v2.87.0 (Clement's remark 4): the front end's own zone tiles -
-    // tone A behind the trim's whole row (the word's street and the
-    // knob), tone B behind each cut's whole stack (knob, plate and
-    // slope) - flush with the block's frame at the outer edges, grown
-    // 6 px into the streets between them, flush with their zone's
-    // own top and floor (highCut is the LPF, lowCut the HPF)
-    trimInZone.setBounds (juce::Rectangle<int> (line.getX(), trimStrip.getY(),
-                                                trimInKnob.getRight() + 6 - line.getX(),
-                                                trimStrip.getHeight()));
-    highCutZone.setBounds (juce::Rectangle<int> (line.getX(), cutKnobStrip.getY(),
-                                                 83 + 6,
-                                                 slopeBand.getBottom() - cutKnobStrip.getY()));
-    lowCutZone.setBounds (juce::Rectangle<int> (lowCutKnob.getX() - 6,
-                                                cutKnobStrip.getY(),
-                                                83 + 6,
-                                                slopeBand.getBottom() - cutKnobStrip.getY()));
+    // v2.87.0 (Clement's remark 4): the front end's own zone tiles.
+    // v2.89.0 (Clement's verdict): the front end wears NOTHING any
+    // more - the trim's row and the two cuts' stacks stand bare on
+    // the cream ("c'est mieux avec rien ici"); only the right
+    // column's seven tiles remain
 
     // v2.79.0 (Clement's remark 1): a real breath between the end of
     // the filters and the start of the EQ - the merged block's last
@@ -4118,8 +4114,9 @@ void CostesStripEditor::resized()
     // v2.74 height, and the TRANSIENT slot keeps its own engraved
     // 220 px - centred between the two stages, the free air split
     // evenly above and below it. v2.88.0 (Clement's spec, roadmap
-    // C4): the slot carries its section now - the engraved frame and
-    // its TRANSIENT title stay, and the section lays out inside
+    // C4): the slot carries its section now - the engraved frame
+    // stays and the section lays out inside it (its title band is
+    // gone since v2.89.0, the frame alone carries the section)
     transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 220);
 
     // one layout for both stages: the same control set in the same
@@ -4306,54 +4303,69 @@ void CostesStripEditor::resized()
     }
 
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
-    // own layout inside its engraved 220 px frame - the TRANSIENT
-    // title keeps its 16 px band at the top, the four knobs ride one
-    // centred row under it (ATTACK, SUSTAIN, GAIN, MIX, each caption
-    // hugging its own knob's feet), and the SC HPF / SC LPF
-    // selectors and the CLIP plate share the slim 39 px strip at the
-    // foot - the same 76 x 36 selector geometry the two dynamics
-    // stages ride
+    // own layout inside its engraved 220 px frame. v2.89.0
+    // (Clement's restyle): the title band is gone and the SC pair
+    // with it - the PUNCH plate (the section's own master switch,
+    // lit by default) rides the meters column's own top line like
+    // EXP and COMP, the CLIPPER plate rides the block's top-right
+    // corner (100 px - the whole word "CLIPPER ON" beside its LED),
+    // the trio of ladders owns the left column (IN, OUT and the
+    // bipolar GR), and the four knobs sit TWO RANKS OF TWO - Mix,
+    // Gain / Attack, Sustain, each caption hugging its own knob's
+    // feet - the same 84 px squares the dynamics stages ride
     {
         auto block = transientFrame.reduced (4, 2);
-        block.removeFromTop (16);   // the engraved TRANSIENT title's own band
 
-        auto scStrip = block.removeFromBottom (39);
+        // the plates ride the block's own top line: PUNCH at the
+        // meters column's head (88 px, the EXP and COMP plates' own
+        // width), CLIPPER at the top-right corner
+        punchOnButton.setBounds (block.getX(), block.getY(), 88, 18);
+        transClipButton.setBounds (block.getRight() - 100, block.getY(), 100, 18);
 
-        // the knob row, centred in the room the title left: four
-        // 84 px knobs at their own 108 px cells' axes
-        const int rowH = 84 + 14;
-        auto knobRow = block.withSizeKeepingCentre (block.getWidth(), rowH);
+        // the three ladders: IN, OUT and the bipolar GR, the same
+        // column and the same cells the dynamics stages give theirs
+        auto meterColumn = block.removeFromLeft (144);
+        meterColumn.removeFromTop (20);
+        transInMeter.setBounds (meterColumn.removeFromLeft (44).reduced (2, 2));
+        transOutMeter.setBounds (meterColumn.removeFromLeft (44).reduced (2, 2));
+        transGrMeter.setBounds (meterColumn.removeFromLeft (56).reduced (2, 2));
 
-        const int knobW = knobRow.getWidth() / 4;
+        // the knob field: the plates' own line out of the room, then
+        // two ranks of two cells, every caption at its cell's feet
+        block.removeFromTop (20);
+
+        const auto captionCell = [] (juce::Rectangle<int> cell, juce::Label& caption)
+        {
+            caption.setBounds (cell.removeFromBottom (14));
+            return cell;
+        };
+
+        const int cellH = block.getHeight() / 2;
+        const int knobW = block.getWidth() / 2;
 
         CostesSlider* transKnobs[4] =
         {
-            &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob
+            &transMixKnob, &transGainKnob, &transAttackKnob, &transSustainKnob
         };
         juce::Label* transCaptions[4] =
         {
-            &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel
+            &transMixLabel, &transGainLabel, &transAttackLabel, &transSustainLabel
         };
 
-        for (int i = 0; i < 4; ++i)
+        for (int rank = 0; rank < 2; ++rank)
         {
-            auto cell = knobRow.removeFromLeft (knobW).reduced (2, 0);
-            transCaptions[(size_t) i]->setBounds (cell.removeFromBottom (14));
-            transKnobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
-                juce::jmin (cell.getWidth(), 84),
-                juce::jmin (cell.getHeight(), 84)));
+            auto knobRow = block.removeFromTop (cellH);
+
+            for (int col = 0; col < 2; ++col)
+            {
+                auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
+                                         *transCaptions[(size_t) (rank * 2 + col)]);
+                transKnobs[(size_t) (rank * 2 + col)]
+                    ->setBounds (cell.withSizeKeepingCentre (
+                        juce::jmin (cell.getWidth(), 84),
+                        juce::jmin (cell.getHeight(), 84)));
+            }
         }
-
-        // the foot strip: the SC pair and the CLIP plate, the same
-        // cells the dynamics stages give their selectors
-        const int scW = scStrip.getWidth() / 3;
-
-        transScHpfSlider.setBounds (scStrip.removeFromLeft (scW).reduced (2, 0)
-                                        .withSizeKeepingCentre (76, 36));
-        transScLpfSlider.setBounds (scStrip.removeFromLeft (scW).reduced (2, 0)
-                                        .withSizeKeepingCentre (76, 36));
-        transClipButton.setBounds (scStrip.reduced (2, 0)
-                                       .withSizeKeepingCentre (76, 36));
     }
 
     // ---- column 3: the output chain ----
@@ -4506,6 +4518,11 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // at 36 now), the compressor 0-3, 3-9, 9-18 (v2.73.0, Clement's
     // remark 4), each tier owning
     // exactly a THIRD of the ladder, one dB per division as ever.
+    // v2.89.0: the transient designer joins with its own trio, its
+    // GR ladder BIPOLAR - the smoothed gain modification, -15 to
+    // +15 dB at one dB per division, unity engraved dead centre, a
+    // boost lighting up from the middle in green, a cut down in
+    // the reduction orange.
     // The component holds no state of its
     // own: every paint reads the truth, and a degenerate resize
     // paints nothing but the caption - there is no size small enough
@@ -4543,15 +4560,27 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     // the reading: the detector's RMS level for an IN ladder, the
     // level the stage leaves behind for an OUT ladder, the applied
-    // gain (sign-flipped into its reduction) for a GR ladder
+    // gain (sign-flipped into its reduction) for a GR ladder.
+    // v2.89.0: the transient designer joins with its own trio, and
+    // its GR ladder is BIPOLAR - it reads the smoothed gain
+    // modification itself, -15 to +15 dB, unity dead centre, a boost
+    // lighting up from the middle in green, a cut down in the
+    // reduction orange
+    const bool bipolar = (stage == Stage::transient && mode == Mode::gainReduction);
     float reading = 0.0f;
 
     if (mode == Mode::input)
-        reading = expander ? owner.getExpInDb() : owner.getCompInDb();
+        reading = (stage == Stage::expander)    ? owner.getExpInDb()
+                : (stage == Stage::compressor)   ? owner.getCompInDb()
+                                                : owner.getTransInDb();
     else if (mode == Mode::output)
-        reading = expander ? owner.getExpOutDb() : owner.getCompOutDb();
+        reading = (stage == Stage::expander)    ? owner.getExpOutDb()
+                : (stage == Stage::compressor)  ? owner.getCompOutDb()
+                                               : owner.getTransOutDb();
     else
-        reading = expander ? owner.getExpGrDb() : owner.getCompGrDb();
+        reading = (stage == Stage::expander)   ? owner.getExpGrDb()
+                : (stage == Stage::compressor) ? owner.getCompGrDb()
+                                              : owner.getTransGrDb();
 
     // v2.67.0 (Clement's remark): the peak hold - the ladder remembers
     // the reading's own extreme (the loudest level on an IN or OUT
@@ -4566,8 +4595,10 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
         holdLastMs = nowMs;
 
-        const bool newPeak = (mode == Mode::gainReduction)
-            ? (reading <= holdReading) : (reading >= holdReading);
+        const bool newPeak = bipolar
+            ? (std::abs (reading) >= std::abs (holdReading))
+            : (mode == Mode::gainReduction)
+                ? (reading <= holdReading) : (reading >= holdReading);
 
         if (! holdSet)
         {
@@ -4584,7 +4615,16 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         {
             const float glide = 20.0f * (float) dt;
 
-            if (mode == Mode::gainReduction)
+            if (bipolar)
+            {
+                // the bipolar ladder glides towards the live reading
+                // signed - the held extreme walks home at 20 dB/s
+                if (holdReading < reading)
+                    holdReading = juce::jmin (reading, holdReading + glide);
+                else
+                    holdReading = juce::jmax (reading, holdReading - glide);
+            }
+            else if (mode == Mode::gainReduction)
                 holdReading = juce::jmin (reading, holdReading + glide);
             else
                 holdReading = juce::jmax (reading, holdReading - glide);
@@ -4602,8 +4642,8 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // boundaries - the expander 0-6-18-36, the compressor 0-3-9-18
     // (v2.73.0, Clement's remark 4: the compressor's full-scale
     // reduction is 18 dB now)
-    const float grTier1Db = expander ? 6.0f : 3.0f;
-    const float grTier2Db = expander ? 18.0f : 9.0f;
+    const float grTier1Db = (stage == Stage::expander) ? 6.0f : 3.0f;
+    const float grTier2Db = (stage == Stage::expander) ? 18.0f : 9.0f;
 
     // the LEDs: LED 0 is the lowest on an IN or OUT ladder, the
     // highest on a GR ladder - all three light towards the reading,
@@ -4617,7 +4657,21 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         bool lit = false;
         juce::Colour colour (meterGreen);
 
-        if (mode == Mode::gainReduction)
+        if (bipolar)
+        {
+            // v2.89.0: the transient's bipolar GR ladder - each
+            // division lights when the reading's sweep from unity
+            // crosses it, green above the centre line (a boost),
+            // the reduction orange below it (a cut)
+            const float ledLowDb  = lowDb + (float) j * step;
+            const float ledHighDb = lowDb + (float) (j + 1) * step;
+
+            y = bottom - (ledHighDb - lowDb) / span * height;
+            lit = (ledLowDb <= juce::jmax (0.0f, reading))
+               && (ledHighDb >= juce::jmin (0.0f, reading));
+            colour = (ledLowDb + ledHighDb > 0.0f) ? meterGreen : meterGrOrange;
+        }
+        else if (mode == Mode::gainReduction)
         {
             // v2.72.0: the rung boundaries ride the three-tier scale -
             // the border stays one dB per LED, exactly as in v2.70.0
@@ -4658,6 +4712,17 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         }
     }
 
+    // v2.89.0: the bipolar ladder's engraved UNITY line - a faint
+    // hairline dead centre, the boost lighting above it, the cut
+    // below, so zero reads at a glance even on a dark plate
+    if (bipolar)
+    {
+        const float y0 = bottom - (0.0f - lowDb) / span * height;
+
+        g.setColour (engravingDim.withAlpha (0.8f));
+        g.drawLine (lx, y0, lx + lw, y0, 1.0f);
+    }
+
     // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar on an IN
     // ladder - the stage's own threshold corner drawn as a red bar,
     // the same weight and style the GR ladder's peak-hold bar
@@ -4682,7 +4747,15 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     {
         float markerY = top;
 
-        if (mode == Mode::gainReduction)
+        if (bipolar)
+        {
+            // v2.89.0: the bipolar ladder's held extreme rides its
+            // SIGNED value - the bar sits wherever the reading's own
+            // magnitude peaked, boost above the line, cut below
+            const float v = juce::jlimit (lowDb, highDb, holdReading);
+            markerY = bottom - (v - lowDb) / span * height;
+        }
+        else if (mode == Mode::gainReduction)
         {
             const float v = juce::jlimit (0.0f, span, -holdReading);
             markerY = top + grFractionForDb (v, span, grTier1Db, grTier2Db) * height;
@@ -4727,10 +4800,31 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     const float scaleRight = (float) body.getX() + 2.0f;
 
-    if (mode == Mode::gainReduction)
+    if (bipolar)
     {
-        const int* marks = expander ? expGrMarks : compGrMarks;
-        const int numMarks = expander ? 7 : 6;
+        // v2.89.0: the bipolar ladder's own series - +15 down to -15
+        // every five dB, signed, unity at the centre line
+        for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
+        {
+            const float value = highDb - (float) m * markStep;
+            const float y = top + (float) m * markStep / span * height;
+
+            g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
+
+            const juce::String text = (value > 0.25f)
+                ? "+" + juce::String (juce::roundToInt (value))
+                : juce::String (juce::roundToInt (value));
+
+            g.drawText (text,
+                        juce::Rectangle<int> ((int) ((float) body.getX()), (int) (y - 5.0f),
+                                              juce::jmax (1, body.getWidth()), 10),
+                        juce::Justification::centredLeft);
+        }
+    }
+    else if (mode == Mode::gainReduction)
+    {
+        const int* marks = (stage == Stage::expander) ? expGrMarks : compGrMarks;
+        const int numMarks = (stage == Stage::expander) ? 7 : 6;
 
         for (int m = 0; m < numMarks; ++m)
         {

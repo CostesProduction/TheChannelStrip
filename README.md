@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.88.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.89.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,37 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.89.0** — *The transient designer restyled, the PUNCH plate, the
+  section's own ladders, and the front end bare.*
+  - **The transient designer (Clement's restyle).** The SC HPF / SC
+    LPF corners are GONE (Clement's verdict: a bad idea) - the
+    detector hears the full band and the -60 dBFS dead zone keeps
+    the section honest on its own. The transScHpf / transScLpf
+    parameters leave with them; a v2.88 session that carries the
+    old corners loads clean. The GAIN caption says what it really
+    rides - "WET GAIN" - and the CLIP plate spells the whole word
+    as "CLIPPER ON / OFF".
+  - **The PUNCH plate.** transOn, the section's own master switch,
+    lit by default like EXP and COMP - a dark plate parks the whole
+    section wherever its knobs stand. The engraved TRANSIENT title
+    band is gone; the frame alone carries the section.
+  - **The section's own ladders.** An IN, an OUT and a GR ladder
+    join the left column, the same trio the dynamics stages wear.
+    The GR one is BIPOLAR: it reads the smoothed gain modification
+    itself, -15 to +15 dB at one dB per division, unity engraved
+    dead centre - a boost lights up from the middle in green, a cut
+    down in the reduction orange. Their one-poles feed every
+    sample, so the ladders tell the truth even while the plate is
+    dark.
+  - **The panel.** The four knobs sit two ranks of two - MIX, WET
+    GAIN / ATTACK, SUSTAIN, each 84 px square, each caption hugging
+    its own knob's feet; the PUNCH plate rides the meters column's
+    head, the CLIPPER plate the block's top-right corner.
+  - **The front end.** The HPF moved to the bottom left and the LPF
+    to the bottom right (Clement's swap), and the three zone tiles
+    are gone - the trim, the HPF and the LPF stand bare on the
+    cream, only the right column's seven tiles remain.
 
 - **2.88.0** — *The transient designer: the reserved slot finally
   carries its own section - the ATTACK, SUSTAIN, GAIN and MIX knobs,
