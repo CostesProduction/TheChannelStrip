@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.87.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.88.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,33 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.88.0** — *The transient designer: the reserved slot finally
+  carries its own section - the ATTACK, SUSTAIN, GAIN and MIX knobs,
+  the SC HPF / SC LPF selectors, and the CLIP plate on the wet.*
+  - **The transient designer (roadmap C4).** The engraved TRANSIENT
+    frame between the expander and the compressor is a real section
+    now, and the signal flows through it in the panel's own order:
+    expander, transient designer, compressor. Two envelope followers
+    read the sidechain-filtered, stereo-linked detector - a fast one
+    (0.5 ms up / 20 ms down) that leads on the attacks, a slow one
+    (30 ms up / 150 ms down) that carries the body - and their dB
+    difference is the whole control signal.
+  - **Seven new parameters, appended at the end.** transAttack and
+    transSustain (-15 to +15 dB) scale the envelope lead's two
+    halves, transScHpf / transScLpf share the dynamics stages' own
+    legal-corner selectors, transGain (-18 to +18 dB) rides the wet
+    half alone so the mix stays honest, transMix blends dry and wet,
+    and transClipper bounds the wet half at the rail. A -60 dBFS
+    dead zone on the detector keeps a sidechain corner that lifts a
+    band out really lifted out. A parked section (every knob at
+    rest, the plate dark) touches not a single sample, and pre-2.88
+    sessions load with the seven knobs at their defaults.
+  - **The panel.** Four 84 px knobs in one centred row under the
+    engraved title - ATTACK, SUSTAIN, GAIN, MIX in the console's own
+    black aluminium caps, their captions hugging their feet - and the
+    SC HPF / SC LPF selectors beside the CLIP plate in the slim strip
+    at the foot, the same 76 x 36 geometry the dynamics stages ride.
 
 - **2.87.0** — *The caption glyphs ride at a breath from their words,
   every caption word hugs its own knob, and the AMEK-style zone tiles

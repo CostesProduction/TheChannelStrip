@@ -392,6 +392,14 @@ CostesStrip::CostesStrip()
     compListen    = apvts.getRawParameterValue ("compListen");
     compLink      = apvts.getRawParameterValue ("compLink");
 
+    transAttack  = apvts.getRawParameterValue ("transAttack");
+    transSustain = apvts.getRawParameterValue ("transSustain");
+    transScHpf   = apvts.getRawParameterValue ("transScHpf");
+    transScLpf   = apvts.getRawParameterValue ("transScLpf");
+    transGain    = apvts.getRawParameterValue ("transGain");
+    transMix     = apvts.getRawParameterValue ("transMix");
+    transClipper = apvts.getRawParameterValue ("transClipper");
+
     jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
              && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
              && highCutOn != nullptr && tiltDb != nullptr && driveDb != nullptr
@@ -413,7 +421,11 @@ CostesStrip::CostesStrip()
              && compRelease != nullptr && compFastAttack != nullptr
              && compGain != nullptr && compMix != nullptr && compHpf != nullptr
              && compScLpf != nullptr && compListen != nullptr
-             && compLink != nullptr);
+             && compLink != nullptr
+             && transAttack != nullptr && transSustain != nullptr
+             && transScHpf != nullptr && transScLpf != nullptr
+             && transGain != nullptr && transMix != nullptr
+             && transClipper != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
@@ -1479,6 +1491,64 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
 
+    // ------------------------------------------------------------------
+    // the TRANSIENT DESIGNER (v2.88.0, Clement's spec, roadmap C4):
+    // seven parameters appended at the very end - every session and
+    // every automation index born before v2.88 keeps its own order.
+    // The ATTACK and SUSTAIN knobs span -15 to +15 dB of envelope
+    // lead, the section's SC pair shares the dynamics stages' own
+    // legal-corner selectors, the GAIN is the wet half's own make-up
+    // (-18 to +18 dB), the MIX the dry/wet blend, and the CLIP plate
+    // bounds the wet half at the rail
+    // ------------------------------------------------------------------
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transAttack", 1 }, "Transient Attack",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transSustain", 1 }, "Transient Sustain",
+        juce::NormalisableRange<float> (-15.0f, 15.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transScHpf", 1 }, "Transient SC HPF",
+        makeScCornerRange (16.0f, 1600.0f, scHpfCorners, numScHpfCorners, false), 16.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (scHpfText)
+            .withValueFromStringFunction (scHpfParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transScLpf", 1 }, "Transient SC LPF",
+        makeScCornerRange (100.0f, 24000.0f, scLpfCorners, numScLpfCorners, true), 24000.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (scLpfText)
+            .withValueFromStringFunction (scLpfParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transGain", 1 }, "Transient Gain",
+        juce::NormalisableRange<float> (-18.0f, 18.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (dbText)
+            .withValueFromStringFunction (dbParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "transMix", 1 }, "Transient Mix",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (mixText)
+            .withValueFromStringFunction (mixParse)));
+
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "transClipper", 1 }, "Transient Clipper", false,
+        juce::AudioParameterBoolAttributes()
+            .withStringFromValueFunction (onOffText)
+            .withValueFromStringFunction (onOffParse)));
+
     return layout;
 }
 
@@ -1591,6 +1661,27 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     expInPower  = 0.0f;
     compInPower = 0.0f;
 
+    // the transient designer's states (v2.88.0): both envelope
+    // followers start from silence and the smoothed gain parks at
+    // unity, so a fresh strip never breathes on its first block; the
+    // ballistics are fixed time constants, so the six one-poles are
+    // built here like the detector's own 10 ms coefficient
+    transEnvFast = 0.0f;
+    transEnvSlow = 0.0f;
+    transGainDb  = 0.0f;
+    transPeakHold = 0.0f;
+    transFastAttackCoef  = 1.0f - std::exp (-1.0f / (0.0005f * (float) currentSampleRate));
+    transFastReleaseCoef = 1.0f - std::exp (-1.0f / (0.020f * (float) currentSampleRate));
+    transSlowAttackCoef  = 1.0f - std::exp (-1.0f / (0.030f * (float) currentSampleRate));
+    transSlowReleaseCoef = 1.0f - std::exp (-1.0f / (0.150f * (float) currentSampleRate));
+    // the hold's own retention FACTOR - the per-sample MULTIPLIER the
+    // held peak decays by (NOT an update coefficient like the five
+    // above: processBlock multiplies the hold by it directly, so
+    // 1 - exp here would collapse the hold to a thousandth of itself
+    // every sample and hold nothing at all)
+    transPeakDecayFactor = std::exp (-1.0f / (0.020f * (float) currentSampleRate));
+    transGainCoef        = 1.0f - std::exp (-1.0f / (0.002f * (float) currentSampleRate));
+
     for (auto& section : compSidechain)
         section.reset();
 
@@ -1603,10 +1694,20 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto& section : expSidechainLp)
         section.reset();
 
+    // v2.88.0: the transient's own sidechain pair starts from silence
+    // with its corner caches forced to rebuild
+    for (auto& section : transSidechainHp)
+        section.reset();
+
+    for (auto& section : transSidechainLp)
+        section.reset();
+
     lastCompHpf   = -1.0f;
     lastCompScLpf = -1.0f;
     lastExpScHpf  = -1.0f;
     lastExpScLpf  = -1.0f;
+    lastTransScHpf = -1.0f;
+    lastTransScLpf = -1.0f;
 
     // the oversampler is built here, never on the audio thread. A
     // generous maximum (any sane host block, then some) lets the whole
@@ -2023,6 +2124,26 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const float compLinkWeight  = compLinkWeights[juce::jlimit (0, 3,
                                      juce::roundToInt (compLink->load()))];
 
+    // ------------------------------------------------------------------
+    // the transient designer (v2.88.0, Clement's spec, roadmap C4):
+    // the section's per-block constants. The attack and sustain knobs
+    // span -15 to +15 dB of envelope lead, the gain -18 to +18 dB of
+    // wet make-up, and the section is hard-bypassed at rest - every
+    // knob parked and the plate dark touches not a single sample, so
+    // the parked strip is bit-for-bit the strip of v2.87 (the mix
+    // knob only speaks once a wet half exists, so it joins no gate)
+    // ------------------------------------------------------------------
+    const float transAttackDb   = juce::jlimit (-15.0f, 15.0f, transAttack->load());
+    const float transSustainDb  = juce::jlimit (-15.0f, 15.0f, transSustain->load());
+    const float transGainDbParam = juce::jlimit (-18.0f, 18.0f, transGain->load());
+    const float transMakeupGain = juce::Decibels::decibelsToGain (transGainDbParam);
+    const float transMixNorm    = juce::jlimit (0.0f, 100.0f, transMix->load()) * 0.01f;
+    const bool  transClipOn     = transClipper->load() > 0.5f;
+    const bool  transActive     = std::abs (transAttackDb) > 0.049f
+                                  || std::abs (transSustainDb) > 0.049f
+                                  || std::abs (transGainDbParam) > 0.049f
+                                  || transClipOn;
+
     // the sidechain corners ride the same per-block cache discipline as
     // the cuts: the biquad coefficients rebuild only when a knob moves,
     // and a section standing on its rest position is hard-bypassed - a
@@ -2098,6 +2219,29 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         rebuildSidechain (expSidechainLp, expScLpfHz, lastExpScLpf, false);
     else
         restSidechain (expSidechainLp, lastExpScLpf);
+
+    // v2.88.0: the transient designer's own pair rides the same cache
+    // discipline - but the section owns no meters, so the detectors
+    // only listen while the section works: a parked section rests its
+    // biquads every block, and a lit one rebuilds on its corners
+    const float transScHpfHz = juce::jlimit (16.0f, 1600.0f, transScHpf->load());
+    const bool  transScHpfOn = transScHpfHz > 16.5f;
+    const float transScLpfHz = juce::jlimit (100.0f, 24000.0f, transScLpf->load());
+    const bool  transScLpfOn = transScLpfHz < 23999.5f
+                              && transScLpfHz < 0.45f * (float) currentSampleRate;
+
+    if (transActive)
+    {
+        if (transScHpfOn)
+            rebuildSidechain (transSidechainHp, transScHpfHz, lastTransScHpf, true);
+        else
+            restSidechain (transSidechainHp, lastTransScHpf);
+
+        if (transScLpfOn)
+            rebuildSidechain (transSidechainLp, transScLpfHz, lastTransScLpf, false);
+        else
+            restSidechain (transSidechainLp, lastTransScLpf);
+    }
 
     // the LISTEN plates, evaluated once per block like every other knob
     // (the monitor itself is written per sample, in the stage loops)
@@ -2332,6 +2476,117 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 expOutLevel = juce::jmax (expOutLevel, std::abs (channels[ch][i]));
 
             expOutPower += (expOutLevel * expOutLevel - expOutPower) * detectorCoef;
+        }
+
+        // stage 2, the TRANSIENT DESIGNER (v2.88.0, Clement's spec,
+        // roadmap C4): the reserved slot's own voice, between the two
+        // dynamics stages exactly where the panel draws it. The
+        // stereo-linked detector (the louder channel, like the
+        // expander's) rides the section's own sidechain pair, and two
+        // envelope followers read it - a FAST one that leads on the
+        // attacks, a SLOW one that carries the body. Their dB
+        // difference is the whole control signal: the ATTACK knob
+        // scales the positive half (the fast envelope leading - a
+        // transient is landing), the SUSTAIN knob the negative half
+        // (the fast envelope fallen behind - the body rings on), the
+        // GAIN rides the wet half alone so the mix stays honest, and
+        // the CLIP plate bounds that wet half at the rail. The same
+        // NaN discipline as the detectors: a NaN fails the compares
+        // and leaves the envelopes untouched
+        if (transActive)
+        {
+            float rectified = 0.0f;
+
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                float sc = channels[ch][i];
+
+                if (transScHpfOn)
+                    sc = transSidechainHp[ch].processSample (sc);
+
+                if (transScLpfOn)
+                    sc = transSidechainLp[ch].processSample (sc);
+
+                rectified = juce::jmax (rectified, std::abs (sc));
+            }
+
+            // the peak-hold pre-envelope (v2.88.0 build 2): the hold
+            // re-latches at every wave peak and decays at 20 ms, so
+            // a steady tone feeds BOTH followers the same held peak
+            // and the lead settles at zero. Without it the fast
+            // follower rode the rectified wave's own peaks while
+            // the slow one smoothed to its mean, and every held note
+            // read as a false +3.5 dB attack. A NaN sample fails
+            // the jmax compare and leaves the held peak untouched
+            transPeakHold = juce::jmax (transPeakHold * transPeakDecayFactor,
+                                       rectified);
+
+            // the -60 dBFS dead zone, the section's own honesty: the
+            // envelope lead is scale-invariant, so without a floor a
+            // sidechain corner that lifts a band out of the detector
+            // would leave a scaled-down ghost behind that drives the
+            // section just as hard. A whisper the detector cannot
+            // trust reads as silence - a corner that lifts a band out
+            // really lifts it out
+            rectified = juce::jmax (0.0f, transPeakHold - transDetectorDeadZone);
+
+            transEnvFast += (rectified - transEnvFast)
+                * ((rectified > transEnvFast) ? transFastAttackCoef
+                                               : transFastReleaseCoef);
+            transEnvSlow += (rectified - transEnvSlow)
+                * ((rectified > transEnvSlow) ? transSlowAttackCoef
+                                               : transSlowReleaseCoef);
+
+            // the control signal: the fast envelope's lead in dB
+            // (positive - an attack landing; negative - the body
+            // ringing on past it), floored at the detector's own
+            // -120 dB so the logarithm never sees a zero
+            const float leadDb = 20.0f * std::log10 (juce::jmax (transEnvFast, 1.0e-6f))
+                              - 20.0f * std::log10 (juce::jmax (transEnvSlow, 1.0e-6f));
+
+            // 10 dB of envelope lead (or lag) reads as the full
+            // effect - the knobs' whole sweep spans the honest range
+            // of the control signal, and a gentle lead stays a
+            // gentle boost
+            const float attackShape   = juce::jlimit (0.0f, 1.0f, leadDb * 0.1f);
+            const float sustainShape  = juce::jlimit (0.0f, 1.0f, -leadDb * 0.1f);
+
+            // the dead zone owns the last word: while the detector
+            // reads silence - the held peak under the zone, a band a
+            // corner lifted out, a note faded under -60 dBFS - the
+            // section targets unity. Without this gate the slow
+            // envelope would hold the note's dying echo for another
+            // 150 ms after the fast one fell silent, and the lead's
+            // collapse would read as a phantom sustain
+            const float targetDb = (rectified > 0.0f)
+                ? transAttackDb * attackShape + transSustainDb * sustainShape
+                : 0.0f;
+
+            transGainDb += (targetDb - transGainDb) * transGainCoef;
+
+            const float wetGain = transMakeupGain
+                * juce::Decibels::decibelsToGain (transGainDb);
+
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                const float dry = channels[ch][i];
+                float wet = dry * wetGain;
+
+                if (transClipOn)
+                    wet = juce::jlimit (-1.0f, 1.0f, wet);
+
+                channels[ch][i] = dry + transMixNorm * (wet - dry);
+            }
+        }
+        else
+        {
+            // a parked section leaves no stale state behind - the
+            // held peak, the envelopes and the gain park at their
+            // floor so the next onset lands on a clean detector
+            transPeakHold = 0.0f;
+            transEnvFast = 0.0f;
+            transEnvSlow = 0.0f;
+            transGainDb  = 0.0f;
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -2924,6 +3179,17 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpKnob (compGainKnob, &compGainLabel,      "GAIN",    0.0f, compKnobDisc);
     setUpKnob (compMixKnob, &compMixLabel,      "MIX",     100.0f, compKnobDisc);
 
+    // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
+    // four knobs - ATTACK, SUSTAIN, GAIN, MIX - wearing the console's
+    // own black aluminium caps, the section's identity at a glance
+    // between the expander's ivory and the compressor's blue.
+    // Double-click and command-click park every one at its neutral
+    // default (0 dB on the three dB knobs, 100 % on the mix)
+    setUpKnob (transAttackKnob,  &transAttackLabel,  "ATTACK",    0.0f, knobDisc);
+    setUpKnob (transSustainKnob, &transSustainLabel, "SUSTAIN",   0.0f, knobDisc);
+    setUpKnob (transGainKnob,    &transGainLabel,    "GAIN",      0.0f, knobDisc);
+    setUpKnob (transMixKnob,     &transMixLabel,     "MIX",     100.0f, knobDisc);
+
     // the sidechain pair of each stage rides the cuts' own horizontal
     // selector - the SC HPF parks at 16 Hz, the SC LPF at 24000 Hz,
     // and both rest positions leave the detector a flat band.
@@ -2959,6 +3225,22 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     setUpSlope (compScLpfSlider, 24000.0f);
     setUpSlope (expScHpfSlider, 16.0f);
     setUpSlope (expScLpfSlider, 24000.0f);
+
+    // v2.88.0: the transient designer's own SC pair - the same
+    // selectors, the same glyphs, the same rest positions, so the
+    // third stage of the column speaks the two dynamics stages' own
+    // language. The sliders carry `look` themselves - the v2.81.0
+    // lesson: a parentless slider answers the DEFAULT factory at
+    // setTextBoxStyle time, and the glyph is born from ours
+    transScHpfSlider.setLookAndFeel (&look);
+    transScLpfSlider.setLookAndFeel (&look);
+    transScHpfSlider.readoutGlyph     = SectionIcon::Icon::lowCut;
+    transScHpfSlider.hasReadoutGlyph  = true;
+    transScLpfSlider.readoutGlyph     = SectionIcon::Icon::highCut;
+    transScLpfSlider.hasReadoutGlyph  = true;
+
+    setUpSlope (transScHpfSlider, 16.0f);
+    setUpSlope (transScLpfSlider, 24000.0f);
 
     // v2.72.0 (Clement's request): the compressor's LINK selector - a
     // four-position horizontal slider (dual / 50% link / 80% link /
@@ -3044,6 +3326,15 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (expOnButton);
     compOnButton.caption = "COMP";
     addAndMakeVisible (compOnButton);
+
+    // v2.88.0 (Clement's spec): the transient designer's CLIP plate -
+    // lit amber "CLIP ON" while the wet half is bounded at the rail,
+    // dark "CLIP OFF" while it plays through, the same plate language
+    // as the EXP and COMP switches, riding the section's own foot
+    // strip beside the SC selectors
+    transClipButton.caption = "CLIP";
+    addAndMakeVisible (transClipButton);
+
     addAndMakeVisible (compFastAttackButton);
     addAndMakeVisible (expFastAttackButton);
 
@@ -3180,6 +3471,23 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     compListenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         owner.getApvts(), "compListen", compListenButton);
 
+    // the transient designer's attachments (v2.88.0): the four knobs,
+    // the SC pair and the CLIP plate wired to the APVTS
+    transAttackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transAttack", transAttackKnob);
+    transSustainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transSustain", transSustainKnob);
+    transGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transGain", transGainKnob);
+    transMixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transMix", transMixKnob);
+    transScHpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transScHpf", transScHpfSlider);
+    transScLpfAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        owner.getApvts(), "transScLpf", transScLpfSlider);
+    transClipAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        owner.getApvts(), "transClipper", transClipButton);
+
     // v2.70.0 (Clement's remark 1): the console front's own grain - a
     // 96 x 96 speckle tile baked ONCE, from a fixed xorshift seed so
     // the texture is the same pixels every launch. One dark speckle
@@ -3302,6 +3610,15 @@ CostesStripEditor::~CostesStripEditor()
     compHpfAttachment.reset();
     compScLpfAttachment.reset();
     compListenAttachment.reset();
+
+    // the transient designer's attachments (v2.88.0)
+    transAttackAttachment.reset();
+    transSustainAttachment.reset();
+    transGainAttachment.reset();
+    transMixAttachment.reset();
+    transScHpfAttachment.reset();
+    transScLpfAttachment.reset();
+    transClipAttachment.reset();
 
     setLookAndFeel (nullptr);
 }
@@ -3482,6 +3799,9 @@ void CostesStripEditor::paint (juce::Graphics& g)
                         juce::Justification::centred);
         }
 
+        // v2.88.0 (Clement's spec, roadmap C4): the engraved TRANSIENT
+        // frame stays - the title band rides at its top and the
+        // section's own controls lay out under it (see resized)
         auto transientSlot = transientFrame.reduced (4, 2);
 
         if (transientSlot.getWidth() >= 12 && transientSlot.getHeight() >= 12)
@@ -3779,25 +4099,27 @@ void CostesStripEditor::resized()
     // ---- the dynamics (v2.68.0, re-cut in v2.70.0, stacked in
     // v2.75.0): the two stages read as two stacked stages down the
     // console's middle column - the EXPANDER at the top, the
-    // COMPRESSOR under it, the reserved TRANSIENT frame between them
-    // exactly where the sound will one day flow. Each stage is one
-    // horizontal block: the IN, OUT and GR ladders together at its
-    // left edge (v2.72.0, Clement's request), and a three-by-three
-    // control grid beside them - MIX, THRESH and RELEASE across the
-    // top, RANGE (GAIN on the compressor) and RATIO across the middle
-    // with the FAST ATK plate beside them, the SC HPF and SC LPF
-    // selectors and the LISTEN push across the bottom. The knobs sit
-    // smaller than the row-1 and EQ columns - the SSL 500-series
-    // density. v2.70.0 (remark 6): the ATTACK and LISTEN captions are
-    // gone - the plates say FAST ATK / SLOW ATK and LISTEN on their
-    // own, so their cells stand full height
+    // COMPRESSOR under it, and since v2.88.0 the TRANSIENT DESIGNER's
+    // own section between them, exactly where the sound flows. Each
+    // stage is one horizontal block: the IN, OUT and GR ladders
+    // together at its left edge (v2.72.0, Clement's request), and a
+    // three-by-three control grid beside them - MIX, THRESH and
+    // RELEASE across the top, RANGE (GAIN on the compressor) and
+    // RATIO across the middle with the FAST ATK plate beside them,
+    // the SC HPF and SC LPF selectors and the LISTEN push across the
+    // bottom. The knobs sit smaller than the row-1 and EQ columns -
+    // the SSL 500-series density. v2.70.0 (remark 6): the ATTACK and
+    // LISTEN captions are gone - the plates say FAST ATK / SLOW ATK
+    // and LISTEN on their own, so their cells stand full height
     auto expBlock = column2.removeFromTop (245);
     auto compBlock = column2.removeFromBottom (245);
 
     // v2.76.0 (Clement's remarks): the stages returned to their
     // v2.74 height, and the TRANSIENT slot keeps its own engraved
     // 220 px - centred between the two stages, the free air split
-    // evenly above and below it
+    // evenly above and below it. v2.88.0 (Clement's spec, roadmap
+    // C4): the slot carries its section now - the engraved frame and
+    // its TRANSIENT title stay, and the section lays out inside
     transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 220);
 
     // one layout for both stages: the same control set in the same
@@ -3981,6 +4303,57 @@ void CostesStripEditor::resized()
                         compScLpfSlider,
                         compListenButton,
                         compLinkSlider);
+    }
+
+    // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
+    // own layout inside its engraved 220 px frame - the TRANSIENT
+    // title keeps its 16 px band at the top, the four knobs ride one
+    // centred row under it (ATTACK, SUSTAIN, GAIN, MIX, each caption
+    // hugging its own knob's feet), and the SC HPF / SC LPF
+    // selectors and the CLIP plate share the slim 39 px strip at the
+    // foot - the same 76 x 36 selector geometry the two dynamics
+    // stages ride
+    {
+        auto block = transientFrame.reduced (4, 2);
+        block.removeFromTop (16);   // the engraved TRANSIENT title's own band
+
+        auto scStrip = block.removeFromBottom (39);
+
+        // the knob row, centred in the room the title left: four
+        // 84 px knobs at their own 108 px cells' axes
+        const int rowH = 84 + 14;
+        auto knobRow = block.withSizeKeepingCentre (block.getWidth(), rowH);
+
+        const int knobW = knobRow.getWidth() / 4;
+
+        CostesSlider* transKnobs[4] =
+        {
+            &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob
+        };
+        juce::Label* transCaptions[4] =
+        {
+            &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel
+        };
+
+        for (int i = 0; i < 4; ++i)
+        {
+            auto cell = knobRow.removeFromLeft (knobW).reduced (2, 0);
+            transCaptions[(size_t) i]->setBounds (cell.removeFromBottom (14));
+            transKnobs[(size_t) i]->setBounds (cell.withSizeKeepingCentre (
+                juce::jmin (cell.getWidth(), 84),
+                juce::jmin (cell.getHeight(), 84)));
+        }
+
+        // the foot strip: the SC pair and the CLIP plate, the same
+        // cells the dynamics stages give their selectors
+        const int scW = scStrip.getWidth() / 3;
+
+        transScHpfSlider.setBounds (scStrip.removeFromLeft (scW).reduced (2, 0)
+                                        .withSizeKeepingCentre (76, 36));
+        transScLpfSlider.setBounds (scStrip.removeFromLeft (scW).reduced (2, 0)
+                                        .withSizeKeepingCentre (76, 36));
+        transClipButton.setBounds (scStrip.reduced (2, 0)
+                                       .withSizeKeepingCentre (76, 36));
     }
 
     // ---- column 3: the output chain ----

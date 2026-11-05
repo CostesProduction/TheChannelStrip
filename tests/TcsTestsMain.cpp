@@ -4567,12 +4567,12 @@ void testCostesStripBasics()
                 "the internal ident is published");
     expectTrue (proc.isCostesStripActive(),
                 "the shell reports the internal strip as active");
-    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 50,
-                "the strip's fifty parameters are relayed");
+    expectTrue (proc.getHostedStrip().getRelayedParameterCount() == 57,
+                "the strip's fifty-seven parameters are relayed");
     expectTrue (proc.getHostedStrip().getReportedLatency() == 0,
                 "the strip reports zero latency");
-    expectTrue (hosted != nullptr && hosted->getParameters().size() == 50,
-                "the strip exposes exactly fifty parameters");
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 57,
+                "the strip exposes exactly fifty-seven parameters");
 
     // the parked defaults (trim at 0 dB, cuts at 16 Hz / 24 kHz, order 2,
     // drive at 0 dB, the EQ's four bands at 0 dB) are unity: run past the
@@ -5109,8 +5109,8 @@ void testCostesStripSession()
                     "the compressor mix restores");
     }
 
-    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 50,
-                "the restored strip's fifty parameters are relayed");
+    expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 57,
+                "the restored strip's fifty-seven parameters are relayed");
 }
 
 void testCostesStripMigration()
@@ -5248,8 +5248,8 @@ void testCostesStripSessionDeep()
                         "the expander range restores (the reported knob)");
         }
 
-        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 50,
-                    "the restored strip's fifty parameters are relayed");
+        expectTrue (restored.getHostedStrip().getRelayedParameterCount() >= 57,
+                    "the restored strip's fifty-seven parameters are relayed");
 
         // a host can restore twice (Studio One's launch sequence does):
         // the second pass re-hosts a fresh strip and re-applies the
@@ -6206,10 +6206,12 @@ void testCostesStripKnobDefaultsAndCaps()
     // attack knob became a FAST/SLOW plate; v2.72.0: the compressor's
     // LINK selector joins as the 32nd control; v2.73.0: the expander's
     // KNEE selector closes the dynamics; v2.86.0: the TRIM OUT knob
-    // joins as the 34th, the SHAPE OUT block's last)
+    // joins as the 34th, the SHAPE OUT block's last; v2.88.0: the
+    // transient designer's own six join at the end - its ATTACK,
+    // SUSTAIN, GAIN and MIX knobs then its SC HPF / SC LPF selectors)
     const auto sliders = editor.getStripSliders();
 
-    const char* paramIds[34] =
+    const char* paramIds[40] =
     {
         "trimInDb", "lowCutHz", "highCutHz", "tiltDb", "driveDb",
         "lowCutOrder", "highCutOrder",
@@ -6219,10 +6221,12 @@ void testCostesStripKnobDefaultsAndCaps()
         "compThreshold", "compRatio", "compRelease", "compGain", "compMix",
         "compHpf", "compScLpf", "expScHpf", "expScLpf",
         "compLink", "expKnee",
-        "trimOutDb"
+        "trimOutDb",
+        "transAttack", "transSustain", "transGain", "transMix",
+        "transScHpf", "transScLpf"
     };
 
-    const float expectedDefaults[34] =
+    const float expectedDefaults[40] =
     {
         0.0f, 16.0f, 24000.0f, 0.0f, 0.0f,
         2.0f, 2.0f,
@@ -6232,12 +6236,14 @@ void testCostesStripKnobDefaultsAndCaps()
         0.0f, 2.0f, 0.25f, 0.0f, 100.0f, 16.0f,
         24000.0f, 16.0f, 24000.0f,
         3.0f, 0.0f,
-        0.0f
+        0.0f,
+        0.0f, 0.0f, 0.0f, 100.0f,
+        16.0f, 24000.0f
     };
 
     // a legal non-default position per control, so the restore below is
     // never a no-op
-    const float perturbed[34] =
+    const float perturbed[40] =
     {
         3.3f, 120.0f, 8000.0f, 2.5f, 6.0f,
         6.0f, 3.0f,
@@ -6247,13 +6253,15 @@ void testCostesStripKnobDefaultsAndCaps()
         -18.5f, 9.0f, 0.8f, 11.0f, 60.0f, 320.0f,
         2500.0f, 400.0f, 2500.0f,
         0.0f, 16.0f,
-        4.5f
+        4.5f,
+        7.5f, -4.0f, -3.0f, 62.0f,
+        90.0f, 800.0f
     };
 
     // ---- the command-click default (Clement's remark 2): every control
     // knows its default, and the exact path the mouse takes - through
     // the attachment, into the parameter tree - lands it there ----
-    for (int i = 0; i < 34; ++i)
+    for (int i = 0; i < 40; ++i)
     {
         expectNear (sliders[(size_t) i]->cmdClickDefault, expectedDefaults[i], 0.0001,
                     "every knob and slider carries its command-click default");
@@ -6266,7 +6274,7 @@ void testCostesStripKnobDefaultsAndCaps()
                     "a command-click restores the parameter's default through the attachment");
     }
 
-    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 24
+    // ---- the cap colours (remark 4 + v2.62.0 + v2.68.0): the 28
     // rotary knobs carry their band's colour on the
     // backgroundColourId - the row-1 caps stay black EXCEPT the pastel
     // red high cut, the LPF now (v2.63.0), the EQ bands speak the SSL
@@ -6275,13 +6283,18 @@ void testCostesStripKnobDefaultsAndCaps()
     // off-white, the compressor the LMF band's pastel blue - the
     // two stages echo the EQ's own palette. The expander's attack
     // knob became a FAST/SLOW plate in v2.66.0, so one rotary cap left the
-    // loop. The eight linear selectors draw no cap, so they are not in
-    // the loop ----
-    const int knobIndex[24] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
+    // loop. The ten linear selectors (the two cut slopes, the two
+    // octave sweeps, the four SC corners, the LINK and the KNEE) draw
+    // no cap, so they are not in the loop. v2.88.0: the transient
+    // designer's four knobs wear the console's own black aluminium,
+    // the section's own identity between the expander's ivory and the
+    // compressor's blue ----
+    const int knobIndex[28] = { 0, 1, 2, 3, 4, 7, 8, 9, 10, 12, 13, 15, 16,
                                17, 18, 19, 20, 21,
                                22, 23, 24, 25, 26,
-                               33 };
-    const unsigned int knobCap[24] =
+                               33,
+                               34, 35, 36, 37 };
+    const unsigned int knobCap[28] =
     {
         0xff23232au, 0xff23232au, 0xffcd7f6du, 0xff23232au, 0xff23232au,
         0xff23232au, 0xff23232au,
@@ -6292,13 +6305,14 @@ void testCostesStripKnobDefaultsAndCaps()
         0xffefe0bcu, 0xffefe0bcu,
         0xffcd7f6du, 0xff6f9fd4u, 0xff6f9fd4u,
         0xff6f9fd4u, 0xff6f9fd4u,
-        0xff23232au
+        0xff23232au,
+        0xff23232au, 0xff23232au, 0xff23232au, 0xff23232au
     };
 
-    for (int k = 0; k < 24; ++k)
+    for (int k = 0; k < 28; ++k)
         expectTrue (sliders[(size_t) knobIndex[k]]->findColour (juce::Slider::backgroundColourId, true)
                         == juce::Colour (knobCap[k]),
-                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor, both THRESH knobs the console's own red since v2.80.0, and the new trim out the console's own black)");
+                    "each rotary knob wears its band's cap colour (LPF and HF saturated red, LMF saturated blue, HMF saturated ivory, saturated ivory expander, saturated blue compressor, both THRESH knobs the console's own red since v2.80.0, the trim out and the transient designer's four knobs the console's own black)");
 
     // v2.75.0 (Clement's spec): the front end is the console's first
     // column - the trim knob at its head, the EQ's first band under
@@ -9053,6 +9067,396 @@ void testV287ZoneTilesAndCaptionBreath()
                     && tiles[9]->getBounds().getBottom() <= reserved[1].getBottom(),
                 "the tiles never cover the streets and never steal a click - the blocks keep their height, the panel never grew");
 }
+
+// ---------------------------------------------------------------------------
+// v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER - the
+// reserved slot's own section between the two dynamics stages. Four
+// knobs (ATTACK, SUSTAIN, GAIN, MIX), the SC HPF / SC LPF selectors
+// the expander and compressor already speak, and a CLIP plate that
+// bounds the wet half at the rail. Two envelope followers read the
+// sidechain-filtered stereo-linked detector - a fast one that leads on
+// the attacks, a slow one that carries the body - and their dB
+// difference drives the whole section
+// ---------------------------------------------------------------------------
+void testV288TransientDesigner()
+{
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the SC corners, makeup, mix, and the CLIP plate on the wet");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // the strip's own cuts ride ON at their rest corners by default
+    // (the 16 Hz HPF and the 24 kHz LPF), and the LPF's second-order
+    // section rings a hard burst by a solid two percent - fine in the
+    // mix, but this test measures the transient against the RAW
+    // signal, so the two cuts stand aside for the whole run
+    setParam ("lowCutOn", false);
+    setParam ("highCutOn", false);
+
+    // a settled lock-in amplitude at 1 kHz, the harness way: 240 blocks
+    // of settle, then the coherent lock-in on the block the strip
+    // leaves behind, read straight in dB
+    auto measureSteadyDb = [&] (double amplitude) -> double
+    {
+        SineSource src (1000.0, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        const double probeOmega = juce::MathConstants<double>::twoPi * 1000.0 / 48000.0;
+        const double phase0 = probeOmega * (double) (240 * 480);
+        double c = 0.0, s = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+        {
+            const double phase = phase0 + probeOmega * (double) i;
+            const double sample = block.getSample (0, i);
+            c += sample * std::cos (phase);
+            s += sample * std::sin (phase);
+        }
+
+        return juce::Decibels::gainToDecibels (2.0 * std::sqrt (c * c + s * s) / 480.0);
+    };
+
+    // an onset peak: 120 blocks of genuine silence park the
+    // envelopes at their floor, then one burst block lands - the
+    // largest sample it leaves. The silence is REFILLED every block:
+    // processBlock writes the buffer in place, so feeding the
+    // previous block's output back in would let an active section
+    // amplify its own tail block over block (the parked strip is an
+    // identity, but the transient's wet gain would run away with it)
+    auto measureOnsetPeak = [&] (double frequencyHz, double amplitude) -> double
+    {
+        SineSource src (frequencyHz, 48000.0, (float) amplitude);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 120; ++i)
+        {
+            block.clear();
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double peak = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            peak = std::max (peak, (double) std::abs (block.getSample (0, i)));
+
+        return peak;
+    };
+
+    // a settled steady-tone peak (the CLIP plate's own probe)
+    auto measureSteadyPeak = [&]() -> double
+    {
+        SineSource src (1000.0, 48000.0, 0.2f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        src.fill (block);
+        proc.processBlock (block, noMidi);
+
+        double peak = 0.0;
+
+        for (int i = 0; i < 480; ++i)
+            peak = std::max (peak, (double) std::abs (block.getSample (0, i)));
+
+        return peak;
+    };
+
+    // ---- the parked section is the identity: every knob at rest, the
+    // section is skipped wholesale and nothing moves a sample ----
+    expectNear (measureSteadyDb (0.25) - juce::Decibels::gainToDecibels (0.25), 0.0, 0.1,
+                "the parked transient designer is a true bypass (attack 0, sustain 0, gain 0, the plate dark)");
+
+    // ---- the GAIN rides the wet half: +6 dB on a steady tone, the
+    // mix parked at 100 % ----
+    setParam ("transGain", 6.0f);
+    expectNear (measureSteadyDb (0.1) - juce::Decibels::gainToDecibels (0.1), 6.0, 0.15,
+                "the GAIN knob rides the wet half - a steady tone reads +6 dB");
+
+    // ---- the MIX blends: half wet reads half the boost ----
+    setParam ("transMix", 50.0f);
+    expectNear (measureSteadyDb (0.1) - juce::Decibels::gainToDecibels (0.1), 20.0 * std::log10 (1.5), 0.15,
+                "a 50 % mix halves the +6 dB gain in the blend (the sim says +3.52 dB)");
+    setParam ("transMix", 100.0f);
+    setParam ("transGain", 0.0f);
+
+    // ---- the ATTACK boosts the onset: after silence a burst block's
+    // peak reads well above its parked reference, and a steady tone
+    // stays at unity once the fast envelope has caught up ----
+    const double parkedOnset = measureOnsetPeak (1000.0, 0.2);
+    expectNear (parkedOnset, 0.2, 0.001,
+                "the parked onset block rides at its own raw peak");
+
+    setParam ("transAttack", 15.0f);
+    const double boostedOnset = measureOnsetPeak (1000.0, 0.2);
+    expectTrue (boostedOnset > parkedOnset * 2.0,
+                "the ATTACK knob boosts the burst's onset - the fast envelope leads the slow one and the wet half opens up");
+    expectNear (measureSteadyDb (0.2) - juce::Decibels::gainToDecibels (0.2), 0.0, 0.3,
+                "a steady tone rides at unity under ATTACK +15 - the envelope lead settles at zero");
+
+    // ---- the SUSTAIN lifts the body: an exponentially decaying tone,
+    // its tail reads louder with the knob up ----
+    setParam ("transAttack", 0.0f);
+
+    auto tailRmsDb = [&] (double frequencyHz, double sustainDb) -> double
+    {
+        setParam ("transSustain", (float) sustainDb);
+
+        const double omega = juce::MathConstants<double>::twoPi * frequencyHz / 48000.0;
+        const double tau = 0.12 * 48000.0;   // a 120 ms decay
+        double phase = 0.0;
+        double sumSq = 0.0;
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 48; ++i)
+        {
+            for (int j = 0; j < 480; ++j)
+            {
+                const double env = 0.3 * std::exp (-((double) (i * 480 + j)) / tau);
+                const float sample = (float) (env * std::sin (phase));
+                block.setSample (0, j, sample);
+                block.setSample (1, j, sample);
+                phase += omega;
+            }
+
+            proc.processBlock (block, noMidi);
+
+            if (i >= 36)   // the last 120 ms
+                for (int j = 0; j < 480; ++j)
+                {
+                    const double out = block.getSample (0, j);
+                    sumSq += out * out;
+                }
+        }
+
+        return 10.0 * std::log10 (sumSq / (12.0 * 480.0));
+    };
+
+    const double quietTail = tailRmsDb (1000.0, 0.0);
+    const double liftedTail = tailRmsDb (1000.0, 15.0);
+    expectTrue (liftedTail > quietTail + 6.0,
+                "the SUSTAIN knob lifts the decaying body - the tail reads louder than the parked reference");
+    setParam ("transSustain", 0.0f);
+
+    // ---- the SC corners gate the detector: a 1600 Hz SC HPF lifts a
+    // 100 Hz body out of the detector and a 100 Hz SC LPF lifts a
+    // 4 kHz body the same way - the sustain boost dies and the raw
+    // tail rides through untouched (the -60 dBFS dead zone keeps a
+    // lifted band really lifted out: the corner leaves only a
+    // -60 dB ghost behind, far under the zone). The body's own
+    // onset click the corner lets through lands on the attack half
+    // of the control signal - and with the attack knob parked it
+    // breathes nothing, so the check rides the sustain half, where
+    // the click cannot lie ----
+    const double bassRaw = tailRmsDb (100.0, 0.0);
+    const double bassOpen = tailRmsDb (100.0, 15.0);
+    setParam ("transScHpf", 1600.0f);
+    const double bassFiltered = tailRmsDb (100.0, 15.0);
+    expectTrue (bassOpen > bassRaw + 6.0 && std::abs (bassFiltered - bassRaw) < 0.5,
+                "a 1600 Hz SC HPF lifts the 100 Hz body out of the detector - the sustain boost is gone, the raw tail rides through");
+    setParam ("transScHpf", 16.0f);
+
+    const double trebleRaw = tailRmsDb (4000.0, 0.0);
+    const double trebleOpen = tailRmsDb (4000.0, 15.0);
+    setParam ("transScLpf", 100.0f);
+    const double trebleFiltered = tailRmsDb (4000.0, 15.0);
+    expectTrue (trebleOpen > trebleRaw + 6.0 && std::abs (trebleFiltered - trebleRaw) < 0.5,
+                "a 100 Hz SC LPF lifts the 4 kHz body out of the detector - the sustain boost is gone, the raw tail rides through");
+    setParam ("transScLpf", 24000.0f);
+    setParam ("transSustain", 0.0f);
+
+    // ---- the CLIP plate bounds the WET half at the rail: a +18 dB
+    // make-up on a 0.2 tone pushes the wet past the rail, the plate
+    // catches it, and the dry half rides untouched through the blend.
+    // The tolerance is the strip's own float32 floor, not slack: the
+    // identity EQ and tilt cascades that sit downstream of the clipper
+    // integrate their deterministic rounding pattern through their
+    // near-DC poles (the 27.95 Hz tilt shelf's DC error gain alone is
+    // ~1 / 37000), which leaves a DC offset of a few 1e-4 on the
+    // output - invisible to every coherent (lock-in) measurement in
+    // this suite and present since the tilt's own v2.57.0, but real in
+    // an absolute peak read at the crest. A broken clipper reads
+    // 1.5887 here - a thousand times past the pin, so the plate is
+    // still pinned hard ----
+    setParam ("transAttack", 0.0f);
+    setParam ("transGain", 18.0f);
+
+    const double peakOpen = measureSteadyPeak();
+    setParam ("transClipper", true);
+    const double peakClipped = measureSteadyPeak();
+
+    expectTrue (peakOpen > 1.2 && peakClipped <= 1.0 + 1.0e-3,
+                "the CLIP plate bounds the wet half at the rail - +18 dB of make-up clips at exactly 1.0");
+
+    setParam ("transMix", 50.0f);
+    expectNear (measureSteadyPeak(), 0.6, 0.02,
+                "the dry half rides untouched through the blend - the clipper takes only the WET (0.2 + 0.5 x (1.0 - 0.2) = 0.6)");
+    setParam ("transMix", 100.0f);
+    setParam ("transGain", 0.0f);
+    setParam ("transClipper", false);
+
+    // ---- the seven parameters ride the shell's own blob ----
+    setParam ("transAttack", 7.5f);
+    setParam ("transSustain", -4.2f);
+    setParam ("transScHpf", 90.0f);
+    setParam ("transScLpf", 800.0f);
+    setParam ("transGain", -3.0f);
+    setParam ("transMix", 62.0f);
+    setParam ("transClipper", true);
+
+    juce::MemoryBlock state;
+    proc.getStateInformation (state);
+    expectTrue (state.getSize() > 0, "the session state is non-empty");
+
+    TheChannelStripAudioProcessor restored;
+    restored.prepareToPlay (48000.0, 512);
+    restored.setStateInformation (state.getData(), (int) state.getSize());
+
+    auto* rehosted = dynamic_cast<CostesStrip*> (restored.getHostedStrip().getActivePlugin());
+    expectTrue (rehosted != nullptr, "the restore re-hosts the internal strip");
+
+    if (rehosted != nullptr)
+    {
+        expectNear (rehosted->getApvts().getRawParameterValue ("transAttack")->load(), 7.5, 0.01,
+                    "the transient attack restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("transSustain")->load(), -4.2, 0.01,
+                    "the transient sustain restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("transScHpf")->load(), 90.0, 0.1,
+                    "the transient SC HPF corner restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("transScLpf")->load(), 800.0, 0.1,
+                    "the transient SC LPF corner restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("transGain")->load(), -3.0, 0.01,
+                    "the transient gain restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("transMix")->load(), 62.0, 0.01,
+                    "the transient mix restores");
+        expectTrue (rehosted->getApvts().getRawParameterValue ("transClipper")->load() > 0.5f,
+                    "the CLIP plate's lit state restores");
+    }
+
+    // ---- and a pre-2.88 session - the seven children gone from the
+    // tree - parks them all at their defaults ----
+    auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+    expectTrue (xml != nullptr, "the strip state parses as XML");
+
+    if (xml != nullptr)
+    {
+        for (int i = xml->getNumChildElements() - 1; i >= 0; --i)
+        {
+            const auto id = xml->getChildElement (i)->getStringAttribute ("id");
+
+            if (id == "transAttack" || id == "transSustain" || id == "transScHpf"
+                || id == "transScLpf" || id == "transGain" || id == "transMix"
+                || id == "transClipper")
+                xml->removeChildElement (xml->getChildElement (i), true);
+        }
+
+        juce::MemoryBlock aged;
+        juce::AudioProcessor::copyXmlToBinary (*xml, aged);
+
+        CostesStrip loaded;
+        loaded.prepareToPlay (48000.0, 512);
+        loaded.setStateInformation (aged.getData(), (int) aged.getSize());
+
+        expectNear (loaded.getApvts().getRawParameterValue ("transAttack")->load(), 0.0, 0.01,
+                    "a pre-2.88 session parks the attack at 0 dB");
+        expectNear (loaded.getApvts().getRawParameterValue ("transSustain")->load(), 0.0, 0.01,
+                    "a pre-2.88 session parks the sustain at 0 dB");
+        expectNear (loaded.getApvts().getRawParameterValue ("transScHpf")->load(), 16.0, 0.1,
+                    "a pre-2.88 session parks the SC HPF at its off corner");
+        expectNear (loaded.getApvts().getRawParameterValue ("transScLpf")->load(), 24000.0, 0.1,
+                    "a pre-2.88 session parks the SC LPF at its off corner");
+        expectNear (loaded.getApvts().getRawParameterValue ("transGain")->load(), 0.0, 0.01,
+                    "a pre-2.88 session parks the gain at 0 dB");
+        expectNear (loaded.getApvts().getRawParameterValue ("transMix")->load(), 100.0, 0.01,
+                    "a pre-2.88 session parks the mix at 100 %");
+        expectTrue (loaded.getApvts().getRawParameterValue ("transClipper")->load() < 0.5f,
+                    "a pre-2.88 session parks the CLIP plate dark");
+    }
+
+    // ---- the layout: the engraved TRANSIENT frame carries its own
+    // section - four 84 px knobs in one centred row, their captions
+    // under their feet, the SC selectors and the CLIP plate in the
+    // slim strip at the foot ----
+    {
+        CostesStrip stripForV288;
+        stripForV288.prepareToPlay (48000.0, 512);
+
+        CostesStripEditor editorForV288 (stripForV288);
+        editorForV288.setVisible (true);
+
+        const auto knobs     = editorForV288.getTransientKnobs();
+        const auto captions  = editorForV288.getTransientCaptions();
+        const auto sliders   = editorForV288.getStripSliders();
+        const auto clipBtn   = editorForV288.getTransClipButton();
+        const auto& frame    = editorForV288.getTransientFrame();
+
+        // the knobs: ATTACK, SUSTAIN, GAIN, MIX across the row, each
+        // 84 px square at its own 108 px cell's axis
+        expectTrue (knobs[0] != nullptr && knobs[1] != nullptr
+                        && knobs[2] != nullptr && knobs[3] != nullptr
+                        && knobs[0]->getBounds() == juce::Rectangle<int> (270, 341, 84, 84)
+                        && knobs[1]->getBounds() == juce::Rectangle<int> (378, 341, 84, 84)
+                        && knobs[2]->getBounds() == juce::Rectangle<int> (486, 341, 84, 84)
+                        && knobs[3]->getBounds() == juce::Rectangle<int> (594, 341, 84, 84),
+                    "the four transient knobs sit in one centred row - ATTACK, SUSTAIN, GAIN, MIX, each 84 px square");
+
+        // the captions hug their own knobs' feet and spell their words
+        expectTrue (captions[0] != nullptr && captions[1] != nullptr
+                        && captions[2] != nullptr && captions[3] != nullptr
+                        && captions[0]->getBounds() == juce::Rectangle<int> (260, 425, 104, 14)
+                        && captions[1]->getBounds() == juce::Rectangle<int> (368, 425, 104, 14)
+                        && captions[2]->getBounds() == juce::Rectangle<int> (476, 425, 104, 14)
+                        && captions[3]->getBounds() == juce::Rectangle<int> (584, 425, 104, 14)
+                        && captions[0]->getText() == "ATTACK" && captions[1]->getText() == "SUSTAIN"
+                        && captions[2]->getText() == "GAIN" && captions[3]->getText() == "MIX",
+                    "the caption words hug their own knobs' feet - ATTACK, SUSTAIN, GAIN, MIX");
+
+        // the SC selectors and the CLIP plate in the foot strip, the
+        // same 76 x 36 geometry the two dynamics stages ride
+        expectTrue (sliders[38] != nullptr && sliders[39] != nullptr && clipBtn != nullptr
+                        && sliders[38]->getBounds() == juce::Rectangle<int> (292, 472, 76, 36)
+                        && sliders[39]->getBounds() == juce::Rectangle<int> (436, 472, 76, 36)
+                        && clipBtn->getBounds() == juce::Rectangle<int> (580, 472, 76, 36),
+                    "the SC HPF, SC LPF and the CLIP plate ride the slim strip at the foot - the dynamics stages' own 76 x 36 selector geometry");
+
+        // the whole section sits inside its engraved frame, under the
+        // TRANSIENT title band, flush inside the frame's own floor
+        expectTrue (frame == juce::Rectangle<int> (254, 292, 440, 220)
+                        && knobs[0]->getBounds().getY() >= frame.getY() + 16
+                        && clipBtn->getBounds().getBottom() <= frame.getBottom() - 2,
+                    "the transient section owns its engraved 220 px frame - under the TRANSIENT title band, flush inside the frame's floor");
+    }
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -9136,6 +9540,7 @@ int main (int argc, char* argv[])
     testV285InterlockedFrontEnd();
     testV286ImageAndShapeBlocks();
     testV287ZoneTilesAndCaptionBreath();
+    testV288TransientDesigner();
 
     if (integration)
         testIntegrationRealConsole();

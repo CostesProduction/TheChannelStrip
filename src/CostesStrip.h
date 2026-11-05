@@ -141,7 +141,7 @@
 // plug-in cannot report: the strip stays at zero reported latency (and
 // the harness asserts it).
 //
-// Roadmap: C4 will add a transient designer.
+// Roadmap: C4 (v2.88.0) added the transient designer.
 // ---------------------------------------------------------------------------
 
 #pragma once
@@ -331,6 +331,20 @@ private:
     std::atomic<float>* compListen    = nullptr;  // 0.0 / 1.0 (v2.66.0)
     std::atomic<float>* compLink      = nullptr;  // 0-3: dual/50/80/link (v2.72.0)
 
+    // the transient designer (v2.88.0, Clement's spec, roadmap C4):
+    // the attack and sustain knobs read in dB of envelope lead, the
+    // sidechain pair shares the dynamics stages' own legal corners,
+    // the gain is the wet half's own make-up, the mix the dry/wet
+    // blend in % wet, and the clip plate bounds the wet half at the
+    // rail
+    std::atomic<float>* transAttack  = nullptr;  // -15 to +15 dB
+    std::atomic<float>* transSustain = nullptr;  // -15 to +15 dB
+    std::atomic<float>* transScHpf   = nullptr;  // the detector's own pair
+    std::atomic<float>* transScLpf   = nullptr;
+    std::atomic<float>* transGain    = nullptr;   // -18 to +18 dB, the wet half only
+    std::atomic<float>* transMix     = nullptr;   // 0-100 % wet
+    std::atomic<float>* transClipper = nullptr;  // 0.0 / 1.0
+
     double currentSampleRate = 48000.0;
 
     // the trim moves as a smoothed linear gain (20 ms); the cut corners
@@ -407,6 +421,47 @@ private:
     // detector's band
     float expInPower       = 0.0f;
     float compInPower     = 0.0f;
+
+    // the transient designer's state (v2.88.0, Clement's spec): two
+    // envelope followers ride the sidechain-filtered, stereo-linked
+    // rectified level - a FAST one (0.5 ms up / 20 ms down) that
+    // leads on the attacks, a SLOW one (30 ms up / 150 ms down) that
+    // carries the body - and their dB difference IS the section's
+    // control signal: positive (the fast envelope leading) an attack
+    // is landing, negative (the fast envelope fallen behind) the
+    // body sustains. The attack and sustain knobs scale each half of
+    // that difference, the smoothed dB gain tracks it at 2 ms, and a
+    // -60 dBFS dead zone on the detector's input keeps a sidechain
+    // corner that lifts a band out really lifted out - the envelope
+    // lead is scale-invariant, so without the dead zone a
+    // filtered-away note would drive the section just as hard.
+    // v2.88.0 build 2: a PEAK-HOLD pre-envelope (the rectified peak
+    // held on a 20 ms decay) feeds the dead zone and BOTH followers
+    // - without it the fast follower rode the rectified wave's own
+    // peaks while the slow one smoothed to its mean (2/pi), and
+    // every steady tone read as a false +3.5 dB attack; the hold
+    // re-latches at every wave peak, so on a steady tone both
+    // followers settle on the same held peak and the lead reads
+    // zero. A NaN sample fails the jmax compare and leaves the held
+    // peak untouched
+    float transPeakHold         = 0.0f;   // the held detector peak
+    float transEnvFast = 0.0f;
+    float transEnvSlow = 0.0f;
+    float transGainDb  = 0.0f;    // the smoothed dB gain, 0 = unity
+    float transFastAttackCoef  = 0.0f;   // the fast envelope, 0.5 ms up
+    float transFastReleaseCoef = 0.0f;   // the fast envelope, 20 ms down
+    float transSlowAttackCoef  = 0.0f;   // the slow envelope, 30 ms up
+    float transSlowReleaseCoef = 0.0f;   // the slow envelope, 150 ms down
+    // the peak hold's 20 ms decay as its per-sample retention
+    // MULTIPLIER (NOT an update coefficient - processBlock multiplies
+    // the held peak by it directly)
+    float transPeakDecayFactor = 0.0f;
+    float transGainCoef        = 0.0f;   // the gain one-pole, 2 ms
+    static constexpr float transDetectorDeadZone = 1.0e-3f;   // -60 dBFS
+    Biquad transSidechainHp[2] = {};   // the section's own SC pair (v2.88.0)
+    Biquad transSidechainLp[2] = {};
+    float lastTransScHpf = -1.0f;
+    float lastTransScLpf = -1.0f;
 
     // the dynamics meters (v2.65.0): the per-block snapshots the four
     // SSL ladders read. The IN meters start at the detector's floor
@@ -600,9 +655,12 @@ public:
     // plates are buttons, not sliders, since v2.66.0), the four
     // sidechain selectors - the compressor's SC HPF and SC LPF, the
     // expander's own pair - the compressor's LINK selector (v2.72.0)
-    // as index 31, and the expander's KNEE selector (v2.73.0) as
-    // index 32
-    std::array<CostesSlider*, 34> getStripSliders()
+    // as index 31, the expander's KNEE selector (v2.73.0) as
+    // index 32, the trim out (v2.86.0) as index 33, then the
+    // transient designer's own six (v2.88.0): its ATTACK, SUSTAIN,
+    // GAIN and MIX knobs as 34 to 37, its SC HPF and SC LPF
+    // selectors as 38 and 39
+    std::array<CostesSlider*, 40> getStripSliders()
     {
         return { &trimInKnob, &lowCutKnob, &highCutKnob, &tiltKnob, &driveKnob,
                  &lowCutSlope, &highCutSlope,
@@ -615,7 +673,10 @@ public:
                  &compHpfSlider, &compScLpfSlider,
                  &expScHpfSlider, &expScLpfSlider,
                  &compLinkSlider, &expKneeSlider,
-                 &trimOutKnob };   // v2.86.0: the trim out closes the array as the 34th
+                 &trimOutKnob,   // v2.86.0: the trim out closes the dynamics as the 34th
+                 &transAttackKnob, &transSustainKnob,   // v2.88.0: the transient
+                 &transGainKnob, &transMixKnob,          // designer's own six,
+                 &transScHpfSlider, &transScLpfSlider }; // appended at the end
     }
 
     // v2.60.0 (Clement's remark): one clean vector glyph per knob -
@@ -734,6 +795,24 @@ public:
     // it
     const juce::Rectangle<int>& getTransientFrame() const { return transientFrame; }
     const std::array<juce::Rectangle<int>, 2>& getReservedFrames() const { return reservedFrames; }
+
+    // v2.88.0 (Clement's spec, roadmap C4): the transient designer's
+    // own controls, for the offline test harness - the four knobs in
+    // panel order, the four caption words, and the CLIP plate
+    std::array<CostesSlider*, 4> getTransientKnobs()
+    {
+        return { &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob };
+    }
+
+    std::array<juce::Label*, 4> getTransientCaptions()
+    {
+        return { &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel };
+    }
+
+    juce::Button* getTransClipButton()
+    {
+        return &transClipButton;
+    }
 
     // v2.70.0 (Clement's remark 1): the panel front's own grain - a
     // 96 x 96 deterministic speckle tile baked once at construction
@@ -1019,6 +1098,17 @@ private:
     // expander's SC LPF at its left
     CostesSlider expKneeSlider;
 
+    // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
+    // controls - the ATTACK, SUSTAIN, GAIN and MIX knobs with their
+    // four caption words, and the section's own SC HPF / SC LPF
+    // selectors (the same legal-corner selectors the two dynamics
+    // stages ride)
+    CostesSlider transAttackKnob, transSustainKnob;
+    CostesSlider transGainKnob, transMixKnob;
+    CostesSlider transScHpfSlider, transScLpfSlider;
+    juce::Label transAttackLabel, transSustainLabel;
+    juce::Label transGainLabel, transMixLabel;
+
     juce::Label expThresholdLabel, expRangeLabel;
     juce::Label expReleaseLabel,   expRatioLabel,  expMixLabel;
     juce::Label compThresholdLabel, compRatioLabel, compReleaseLabel;
@@ -1055,6 +1145,7 @@ private:
 
     PlateToggle oversampleButton;
     PlateToggle eqOnButton;   // v2.61.0
+    PlateToggle transClipButton;   // v2.88.0: the transient's CLIP plate
 
 public:
     // the band-1/4 shape switch (v2.61.0): lit "BELL" or dark "SHELF",
@@ -1221,6 +1312,16 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> compListenAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compLinkAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> expKneeAttachment;
+
+    // the transient designer's attachments (v2.88.0): six sliders and
+    // the CLIP plate wired to the APVTS
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transAttackAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transSustainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transGainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transMixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transScHpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transScLpfAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> transClipAttachment;
 
     // SSL-style knobs: cream bezel, dark disc, white pointer line, tick
     // marks around the cap and a warm value arc that shows the position
