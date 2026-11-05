@@ -1038,10 +1038,11 @@ public:
     };
 
     // v2.93.0 (Clement's request): the compressor's ADD face - the
-    // stage's own OUT-minus-IN delta engraved just right of the COMP
-    // ON plate, level with it on the plates' line, in the same
-    // 1 Hz-latched discipline as the PUNCH side's own ADD face.
-    // Public so the offline harness can pin its bounds
+    // stage's own OUT-minus-IN delta, shown as the ACTION to take
+    // (v2.93.1: the digits carry the balance's negation), engraved
+    // just right of the COMP ON plate, level with it on the plates'
+    // line, in the same 1 Hz-latched discipline as the PUNCH side's
+    // own ADD face. Public so the offline harness can pin its bounds
     struct CompAddFace : public juce::Component
     {
         explicit CompAddFace (CostesStrip& source) : owner (source) {}

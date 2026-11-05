@@ -2843,9 +2843,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // v2.93.0 (Clement's request): the compressor's ADD readout - the
     // stage's own level delta, OUT minus IN, both one-poles floored
     // at the detector's silence so a parked or silent stage reads a
-    // clean 0.0. The editor engraves the reading beside the COMP ON
-    // plate, level with it on the plates' line - the same discipline
-    // as the PUNCH side's own ADD face
+    // clean 0.0. The editor engraves the reading's negation - the
+    // action to take - beside the COMP ON plate, level with it on
+    // the plates' line, the same discipline as the PUNCH side's own
+    // ADD face
     compBalanceDb.store (10.0f * std::log10 (
                              juce::jmax (compOutPower, detectorFloorPower))
                              - 10.0f * std::log10 (
@@ -4954,12 +4955,21 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
             balLatch = balEma;
         }
 
+        // v2.93.1 (Clement's remark): the digits speak the ACTION,
+        // not the balance - the face says how much to ADD to level
+        // the section out (a section running 3.1 dB over reads
+        // ADD -3.1 dB, take 3.1 off; 3.1 under reads ADD +3.1 dB),
+        // so the number the digits carry is the balance's own
+        // NEGATION, while the orange BALANCE bar below keeps
+        // reading the balance itself, out minus in
+        const float addLatch = -balLatch;
+
         juce::String balText;
 
-        if (balLatch >= 0.5f)
-            balText = "ADD +" + juce::String (balLatch, 1) + " dB";
-        else if (balLatch <= -0.5f)
-            balText = "ADD " + juce::String (balLatch, 1) + " dB";
+        if (addLatch >= 0.5f)
+            balText = "ADD +" + juce::String (addLatch, 1) + " dB";
+        else if (addLatch <= -0.5f)
+            balText = "ADD " + juce::String (addLatch, 1) + " dB";
         else
             balText = "ADD 0.0 dB";
 
@@ -5130,8 +5140,11 @@ void CostesStripEditor::CompAddFace::paint (juce::Graphics& g)
     // side's own ADD face carries the same discipline: a ~1.5 s EMA
     // off the processor's per-block snapshot, LATCHED once a second
     // (1 Hz), so the digits stand still instead of dancing. Green
-    // within half a dB of unity, amber beyond - the compressor ADDs
-    // loudness or takes it away, the face reads which
+    // within half a dB of unity, amber beyond - and v2.93.1
+    // (Clement's remark): the digits speak the ACTION, not the
+    // balance, the balance's own negation (a compressor 3.1 dB
+    // under unity reads ADD +3.1 dB, its make-up ask; 3.1 over
+    // reads ADD -3.1 dB, take 3.1 off)
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
     const float raw = juce::jlimit (-30.0f, 30.0f, owner.getCompBalanceDb());
 
@@ -5143,12 +5156,14 @@ void CostesStripEditor::CompAddFace::paint (juce::Graphics& g)
         balLatch = balEma;
     }
 
+    const float addLatch = -balLatch;
+
     juce::String addText;
 
-    if (balLatch >= 0.5f)
-        addText = "ADD +" + juce::String (balLatch, 1) + " dB";
-    else if (balLatch <= -0.5f)
-        addText = "ADD " + juce::String (balLatch, 1) + " dB";
+    if (addLatch >= 0.5f)
+        addText = "ADD +" + juce::String (addLatch, 1) + " dB";
+    else if (addLatch <= -0.5f)
+        addText = "ADD " + juce::String (addLatch, 1) + " dB";
     else
         addText = "ADD 0.0 dB";
 

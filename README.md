@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.93.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.93.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,13 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.93.1** — *The ADD digits speak the action.*
+  - **ADD, inverted (Clement's remark).** The ADD faces read the
+    levelling ACTION, not the balance: a section running 3.1 dB over
+    its input reads **ADD -3.1 dB** (take 3.1 off), 3.1 dB under
+    reads **ADD +3.1 dB** (add 3.1 to level it - the compressor's
+    make-up ask). The orange BALANCE bar keeps reading the balance
+    itself, out minus in.
 - **2.93.0** — *The ADD faces and the reordered clipper.*
   - **ADD, beside the plates (Clement's request).** The PUNCH
     section's delta readout is renamed **ADD** - it reads what the
