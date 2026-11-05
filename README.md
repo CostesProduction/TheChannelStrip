@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.89.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.90.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,30 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.90.0** — *The transient designer slimmed, the CLIPPER's LED,
+  and taller dynamics ladders.*
+  - **One GR bar instead of three ladders (Clement's call).** The
+    section's IN and OUT ladders were structural duplicates - the
+    chain runs expander, transient, compressor, so the transient's
+    IN is the expander's OUT and its OUT the compressor's IN, sample
+    for sample. They leave with their one-poles; the bipolar GR
+    reading stays and owns the full width as ONE HORIZONTAL bar
+    under the plates' line: a boost fills right of centre in green,
+    a cut left in the reduction orange, the scale engraved below
+    (+15 down to -15, unity on a hairline), and the ladders' own
+    peak-hold mark riding the track (3 s hold, 20 dB/s glide home).
+  - **The CLIPPER's LED.** The plate's dot burns saturated red with
+    a red glow for a second after the wet half touches the rail -
+    a clip reads at a glance even after the moment has passed -
+    then returns to the steady amber.
+  - **One rank of four, character first.** ATTACK, SUSTAIN, then
+    WET GAIN, MIX - the four 84 px knobs in a single rank, the
+    captions hugging their feet.
+  - **The 50 px the section gave up went to the dynamics.** The
+    expander and compressor blocks grew from 245 to 270 px and
+    their ladders stretch with them - the scales breathe at the
+    height the transient section lost.
 
 - **2.89.0** — *The transient designer restyled, the PUNCH plate, the
   section's own ladders, and the front end bare.*

@@ -209,13 +209,22 @@ public:
     float getExpOutDb()  const { return expMeterOutDb.load (std::memory_order_relaxed); }
     float getCompOutDb() const { return compMeterOutDb.load (std::memory_order_relaxed); }
 
-    // v2.89.0: the transient designer's own trio - the IN and OUT
-    // ladders read the section's own one-poles (the truth even with
-    // the PUNCH plate dark), the GR ladder the smoothed envelope
-    // gain itself, signed: a boost reads positive, a cut negative
-    float getTransInDb()  const { return transMeterInDb.load (std::memory_order_relaxed); }
-    float getTransGrDb()  const { return transMeterGrDb.load (std::memory_order_relaxed); }
-    float getTransOutDb() const { return transMeterOutDb.load (std::memory_order_relaxed); }
+    // v2.90.0: the transient designer's meters are slimmed down to a
+    // single bipolar GR bar - the old IN and OUT ladders read the
+    // same samples the expander's OUT and the compressor's IN
+    // ladders already show (the chain runs expander -> transient ->
+    // compressor), so they were structural duplicates.  The GR bar
+    // reads the smoothed envelope gain itself, signed: a boost
+    // reads positive (filling right), a cut negative (filling left)
+    float getTransGrDb() const { return transMeterGrDb.load (std::memory_order_relaxed); }
+
+    // v2.90.0: the CLIPPER plate's LED - true while the wet signal
+    // has touched the rail within the last second (peak-hold
+    // window), so the LED stays lit long enough to be seen
+    bool getTransClipActive() const
+    {
+        return juce::Time::getMillisecondCounterHiRes() - transClipLastMs.load (std::memory_order_relaxed) < 1000.0;
+    }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -430,11 +439,6 @@ private:
     // detector's band
     float expInPower       = 0.0f;
     float compInPower     = 0.0f;
-    // v2.89.0: the transient's own IN and OUT ladder states - the
-    // same 10 ms RMS one-poles, fed unconditionally so the ladders
-    // tell the truth even while the PUNCH plate is dark
-    float transInPower     = 0.0f;
-    float transOutPower   = 0.0f;
 
     // the transient designer's state (v2.88.0, Clement's spec): two
     // envelope followers ride the stereo-linked rectified level -
@@ -484,13 +488,16 @@ private:
     std::atomic<float> compMeterGrDb  { 0.0f };
     std::atomic<float> expMeterOutDb  { -120.0f };   // v2.66.0
     std::atomic<float> compMeterOutDb { -120.0f };
-    // v2.89.0: the transient's own trio - the IN and OUT ladders
-    // read the section's one-poles (parked or not), the GR ladder
-    // the smoothed envelope gain itself, signed - a boost reads
-    // positive, a cut negative
-    std::atomic<float> transMeterInDb  { -120.0f };
-    std::atomic<float> transMeterGrDb  { 0.0f };
-    std::atomic<float> transMeterOutDb { -120.0f };
+    // v2.90.0: the transient designer keeps only the bipolar GR
+    // reading - the smoothed envelope gain itself, signed, shown
+    // on the section's horizontal GR bar.  The IN and OUT ladders
+    // are gone with their one-poles (the neighbouring sections
+    // already meter those samples)
+    std::atomic<float> transMeterGrDb { 0.0f };
+    // v2.90.0: last wall-clock moment the wet signal touched the
+    // CLIPPER's rail (-1e12 = never); the plate's LED peak-holds
+    // for one second from this timestamp
+    std::atomic<double> transClipLastMs { -1.0e12 };
 
     float lastLowCutHz   = -1.0f;
     float lastHighCutHz  = -1.0f;
@@ -815,17 +822,17 @@ public:
 
     // v2.88.0 (Clement's spec, roadmap C4): the transient designer's
     // own controls, for the offline test harness - the four knobs in
-    // panel order (v2.89.0: Mix, Gain / Attack, Sustain, two ranks of
-    // two - Clement's layout), the four caption words, the CLIPPER
-    // plate and the PUNCH plate
+    // panel order (v2.90.0: ATTACK, SUSTAIN then WET GAIN, MIX, one
+    // rank of four - character first, dosage after, Clement's call),
+    // the four caption words, the CLIPPER plate and the PUNCH plate
     std::array<CostesSlider*, 4> getTransientKnobs()
     {
-        return { &transMixKnob, &transGainKnob, &transAttackKnob, &transSustainKnob };
+        return { &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob };
     }
 
     std::array<juce::Label*, 4> getTransientCaptions()
     {
-        return { &transMixLabel, &transGainLabel, &transAttackLabel, &transSustainLabel };
+        return { &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel };
     }
 
     juce::Button* getTransClipButton()
@@ -863,13 +870,11 @@ public:
     {
         enum class Mode { input, output, gainReduction };
 
-        // v2.89.0: the ladder's stage - the expander and compressor
-        // as ever, the transient designer joining with its own trio.
-        // A transient GR ladder is BIPOLAR: it reads the smoothed
-        // gain MODIFICATION, -15 to +15 dB, zero dead centre, a boost
-        // lighting up from the middle in green, a cut down in the
-        // reduction orange
-        enum class Stage { expander, compressor, transient };
+        // the ladder's stage - the expander and the compressor.
+        // v2.90.0: the transient designer has left the ladder family:
+        // its old BIPOLAR GR ladder lives on as the section's own
+        // horizontal GrBarMeter, and the IN/OUT duplicates are gone
+        enum class Stage { expander, compressor };
 
         DynamicsMeter (CostesStrip& source, Mode meterMode, Stage stageSide,
                        float lowScaleDb, float highScaleDb,
@@ -949,6 +954,39 @@ public:
         bool holdSet = false;
     };
 
+    // v2.90.0 (Clement's request): the transient designer's own
+    // HORIZONTAL bipolar GR bar.  The section's IN and OUT ladders
+    // are gone - the chain runs expander -> transient -> compressor,
+    // so the neighbours already meter those samples - and the one
+    // reading that belongs to the section alone, the signed gain
+    // MODIFICATION, now owns the full width: a boost fills RIGHT of
+    // centre in the meter green, a cut fills LEFT in the reduction
+    // orange, the engraved scale runs -15 / +15 dB at five dB a
+    // mark with zero dead centre, and a peak-hold mark rides the
+    // track with the ladders' own discipline (3 s hold, 20 dB/s
+    // glide back).  The component polls the processor in its paint,
+    // so it holds only the peak-hold state - a fresh paint is
+    // always the truth.  Public so the offline harness can pin its
+    // bounds
+    struct GrBarMeter : public juce::Component
+    {
+        explicit GrBarMeter (CostesStrip& source) : owner (source) {}
+
+        void paint (juce::Graphics& g) override;
+
+        CostesStrip& owner;
+
+        // the peak-hold mark's state: the mark holds its magnitude
+        // for three seconds from holdStampMs, then glides back
+        // towards the live reading at 20 dB/s - the editor repaints
+        // at 30 Hz, so the state lives here and the paint itself
+        // advances it
+        float holdReading = 0.0f;
+        double holdStampMs = 0.0;
+        double holdLastMs = 0.0;
+        bool holdSet = false;
+    };
+
     // the six ladders in stage order - the expander's IN/OUT/GR trio
     // then the compressor's - for the offline test harness
     std::array<DynamicsMeter*, 6> getDynMeters()
@@ -957,11 +995,8 @@ public:
                  &compInMeter, &compOutMeter, &compGrMeter };
     }
 
-    // v2.89.0: the transient's own meter trio for the offline harness
-    std::array<DynamicsMeter*, 3> getTransientMeters()
-    {
-        return { &transInMeter, &transOutMeter, &transGrMeter };
-    }
+    // v2.90.0: the transient's horizontal GR bar for the offline harness
+    GrBarMeter* getTransientGrBar()  { return &transGrBar; }
 
     // v2.73.0: the dynamics plates in stable order - the expander's
     // FAST ATK and LISTEN, then the compressor's - so the offline
@@ -1181,6 +1216,12 @@ private:
     {
         juce::String caption;
 
+        // v2.90.0: an optional clip flag for the plate's LED - when
+        // the plate is ON and the flag returns true the LED burns
+        // saturated red with a red glow (the CLIPPER plate's one
+        // second peak-hold) instead of the steady amber
+        std::function<bool()> clipSignal;
+
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
     };
 
@@ -1298,15 +1339,9 @@ private:
                                 DynamicsMeter::Stage::compressor, -70.0f, 0.0f, 14, 10.0f, "OUT" };
     DynamicsMeter compGrMeter { owner, DynamicsMeter::Mode::gainReduction,
                                 DynamicsMeter::Stage::compressor, -18.0f, 0.0f, 18, 1.0f, "GR" };
-    // v2.89.0: the transient's own trio - the IN and OUT ladders in
-    // the section's colours, the GR ladder BIPOLAR, -15 to +15 dB
-    // of gain modification at one dB per division, zero dead centre
-    DynamicsMeter transInMeter  { owner, DynamicsMeter::Mode::input,
-                                  DynamicsMeter::Stage::transient, -70.0f, 0.0f, 14, 10.0f, "IN" };
-    DynamicsMeter transOutMeter { owner, DynamicsMeter::Mode::output,
-                                  DynamicsMeter::Stage::transient, -70.0f, 0.0f, 14, 10.0f, "OUT" };
-    DynamicsMeter transGrMeter  { owner, DynamicsMeter::Mode::gainReduction,
-                                  DynamicsMeter::Stage::transient, -15.0f, 15.0f, 30, 5.0f, "GR" };
+    // v2.90.0: the transient designer's single meter - the
+    // horizontal bipolar GR bar replacing the v2.89 trio
+    GrBarMeter transGrBar { owner };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimOutAttachment;   // v2.86.0

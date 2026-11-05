@@ -1683,14 +1683,11 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     transPeakDecayFactor = std::exp (-1.0f / (0.020f * (float) currentSampleRate));
     transGainCoef        = 1.0f - std::exp (-1.0f / (0.002f * (float) currentSampleRate));
 
-    // v2.89.0: the section's own meters start from silence like every
-    // other ladder - an empty IN and OUT, a GR reading unity - and
-    // their one-poles join the honest IN states from silence
-    transMeterInDb.store  (-120.0f, std::memory_order_relaxed);
-    transMeterGrDb.store  (0.0f,    std::memory_order_relaxed);
-    transMeterOutDb.store (-120.0f, std::memory_order_relaxed);
-    transInPower   = 0.0f;
-    transOutPower = 0.0f;
+    // v2.90.0: the section's own meter is the GR bar alone now - it
+    // starts from unity - and the CLIPPER's peak-hold timestamp is
+    // armed to "never clipped yet"
+    transMeterGrDb.store (0.0f, std::memory_order_relaxed);
+    transClipLastMs.store (-1.0e12, std::memory_order_relaxed);
 
     for (auto& section : compSidechain)
         section.reset();
@@ -2478,20 +2475,13 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // alone so the mix stays honest, and the CLIPPER plate bounds
         // that wet half at the rail. The same NaN discipline as the
         // detectors: a NaN fails the compares and leaves the
-        // envelopes untouched. v2.89.0: the section owns its meters
-        // now - the IN and OUT ladders ride their own one-poles on
-        // the level the stage receives and the level it leaves, so
-        // they tell the truth even while the PUNCH plate is dark, and
-        // the GR ladder reads the smoothed envelope gain itself
+        // envelopes untouched. v2.90.0: the IN and OUT one-poles are
+        // gone with their ladders (the expander's OUT and the
+        // compressor's IN already meter those samples), the smoothed
+        // envelope gain feeds the section's horizontal GR bar, and
+        // the CLIPPER stamps the moment the wet half touches the rail
+        // so its plate's LED peak-holds for a second
         {
-            float transRawIn = 0.0f;
-
-            for (int ch = 0; ch < numChannels; ++ch)
-                transRawIn = juce::jmax (transRawIn, std::abs (channels[ch][i]));
-
-            transInPower += (transRawIn * transRawIn - transInPower)
-                * detectorCoef;
-
             if (transActive)
             {
                 float rectified = 0.0f;
@@ -2561,8 +2551,17 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                     const float dry = channels[ch][i];
                     float wet = dry * wetGain;
 
+                    // v2.90.0: the CLIPPER stamps the wall-clock moment
+                    // the wet half touches the rail - the plate's LED
+                    // peak-holds for one second from that timestamp -
+                    // then bounds the wet half exactly as before
                     if (transClipOn)
+                    {
+                        if (wet > 1.0f || wet < -1.0f)
+                            transClipLastMs.store (juce::Time::getMillisecondCounterHiRes(),
+                                                   std::memory_order_relaxed);
                         wet = juce::jlimit (-1.0f, 1.0f, wet);
+                    }
 
                     channels[ch][i] = dry + transMixNorm * (wet - dry);
                 }
@@ -2577,17 +2576,6 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 transEnvSlow = 0.0f;
                 transGainDb  = 0.0f;
             }
-
-            // the OUT ladder's own honest level - the sample this
-            // stage leaves behind, whatever the PUNCH plate says
-            float transOutLevel = 0.0f;
-
-            for (int ch = 0; ch < numChannels; ++ch)
-                transOutLevel = juce::jmax (transOutLevel,
-                                           std::abs (channels[ch][i]));
-
-            transOutPower += (transOutLevel * transOutLevel - transOutPower)
-                * detectorCoef;
         }
 
         // stage 2, the COMPRESSOR: the same RMS ballistics on the
@@ -2803,17 +2791,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                              juce::jmax (compOutPower, detectorFloorPower)),
                          std::memory_order_relaxed);
 
-    // v2.89.0: the transient's own trio - the IN and OUT ladders read
-    // the section's own one-poles (fed every sample, parked or not),
-    // the GR ladder the smoothed envelope gain itself, signed: a
-    // boost reads positive, a cut negative, unity reads dead centre
-    transMeterInDb.store (10.0f * std::log10 (
-                             juce::jmax (transInPower, detectorFloorPower)),
-                         std::memory_order_relaxed);
+    // v2.90.0: the transient's single meter reading - the smoothed
+    // envelope gain itself, signed: a boost reads positive (the GR
+    // bar fills right of centre), a cut negative (fills left),
+    // unity reads dead centre
     transMeterGrDb.store (transGainDb, std::memory_order_relaxed);
-    transMeterOutDb.store (10.0f * std::log10 (
-                              juce::jmax (transOutPower, detectorFloorPower)),
-                          std::memory_order_relaxed);
 
     // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
     // signal rides on its way out. The drive stage keeps its own
@@ -3357,12 +3339,13 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     addAndMakeVisible (compOutMeter);
     addAndMakeVisible (compGrMeter);
 
-    // v2.89.0: the transient's own trio - the same ladder language,
-    // the GR one bipolar (the smoothed gain modification, -15 to
-    // +15 dB, unity engraved dead centre)
-    addAndMakeVisible (transInMeter);
-    addAndMakeVisible (transOutMeter);
-    addAndMakeVisible (transGrMeter);
+    // v2.90.0: the transient's single meter - the horizontal bipolar
+    // GR bar (the IN and OUT ladders are gone, the neighbouring
+    // stages already meter those samples), and the CLIPPER plate's
+    // LED fed by the processor's one second peak-hold flag
+    addAndMakeVisible (transGrBar);
+
+    transClipButton.clipSignal = [this] { return owner.getTransClipActive(); };
 
     // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar - each
     // IN ladder carries its stage's own threshold corner as a red
@@ -3841,9 +3824,7 @@ void CostesStripEditor::timerCallback()
     compInMeter.repaint();
     compOutMeter.repaint();
     compGrMeter.repaint();
-    transInMeter.repaint();   // v2.89.0: the transient's own trio
-    transOutMeter.repaint();
-    transGrMeter.repaint();
+    transGrBar.repaint();     // v2.90.0: the transient's horizontal GR bar
 
     // v2.81.0 (Clement's remark 4): the outer bands' glyphs repaint
     // here too - they FOLLOW their BELL/SHELF plates (the shape is
@@ -4107,17 +4088,23 @@ void CostesStripEditor::resized()
     // the SSL 500-series density. v2.70.0 (remark 6): the ATTACK and
     // LISTEN captions are gone - the plates say FAST ATK / SLOW ATK
     // and LISTEN on their own, so their cells stand full height
-    auto expBlock = column2.removeFromTop (245);
-    auto compBlock = column2.removeFromBottom (245);
+    // v2.90.0 (Clement's request): the two dynamics stages grew to
+    // 270 px - the 50 px the transient section gave up went to their
+    // ladders, so the meters' scales breathe at the height the
+    // section lost
+    auto expBlock = column2.removeFromTop (270);
+    auto compBlock = column2.removeFromBottom (270);
 
     // v2.76.0 (Clement's remarks): the stages returned to their
-    // v2.74 height, and the TRANSIENT slot keeps its own engraved
-    // 220 px - centred between the two stages, the free air split
+    // v2.74 height, and the TRANSIENT slot kept its own engraved
+    // height, centred between the two stages, the free air split
     // evenly above and below it. v2.88.0 (Clement's spec, roadmap
-    // C4): the slot carries its section now - the engraved frame
-    // stays and the section lays out inside it (its title band is
-    // gone since v2.89.0, the frame alone carries the section)
-    transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 220);
+    // C4): the slot carries its section now. v2.90.0 (Clement's
+    // request): the section slimmed to 170 px - the IN and OUT
+    // ladders are gone (their GR bar is one horizontal strip, the
+    // four knobs one rank), the engraved frame stays and the
+    // section lays out inside it
+    transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 170);
 
     // one layout for both stages: the same control set in the same
     // order, the same ladders, so the two halves read as one design.
@@ -4303,16 +4290,19 @@ void CostesStripEditor::resized()
     }
 
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
-    // own layout inside its engraved 220 px frame. v2.89.0
+    // own layout inside its engraved frame. v2.89.0
     // (Clement's restyle): the title band is gone and the SC pair
     // with it - the PUNCH plate (the section's own master switch,
     // lit by default) rides the meters column's own top line like
     // EXP and COMP, the CLIPPER plate rides the block's top-right
-    // corner (100 px - the whole word "CLIPPER ON" beside its LED),
-    // the trio of ladders owns the left column (IN, OUT and the
-    // bipolar GR), and the four knobs sit TWO RANKS OF TWO - Mix,
-    // Gain / Attack, Sustain, each caption hugging its own knob's
-    // feet - the same 84 px squares the dynamics stages ride
+    // corner (100 px - the whole word "CLIPPER ON" beside its LED).
+    // v2.90.0 (Clement's request): the section slimmed down - the
+    // IN and OUT ladders are gone (their samples are the expander's
+    // OUT and the compressor's IN), the bipolar GR reads as ONE
+    // HORIZONTAL bar under the plates' line, and the four knobs sit
+    // ONE RANK of four - ATTACK, SUSTAIN, then WET GAIN, MIX:
+    // character first, dosage after - the same 84 px squares, every
+    // caption hugging its own knob's feet
     {
         auto block = transientFrame.reduced (4, 2);
 
@@ -4322,17 +4312,17 @@ void CostesStripEditor::resized()
         punchOnButton.setBounds (block.getX(), block.getY(), 88, 18);
         transClipButton.setBounds (block.getRight() - 100, block.getY(), 100, 18);
 
-        // the three ladders: IN, OUT and the bipolar GR, the same
-        // column and the same cells the dynamics stages give theirs
-        auto meterColumn = block.removeFromLeft (144);
-        meterColumn.removeFromTop (20);
-        transInMeter.setBounds (meterColumn.removeFromLeft (44).reduced (2, 2));
-        transOutMeter.setBounds (meterColumn.removeFromLeft (44).reduced (2, 2));
-        transGrMeter.setBounds (meterColumn.removeFromLeft (56).reduced (2, 2));
+        // the plates' own line out of the room
+        block.removeFromTop (18);
 
-        // the knob field: the plates' own line out of the room, then
-        // two ranks of two cells, every caption at its cell's feet
-        block.removeFromTop (20);
+        // the GR bar: one horizontal strip under the plates' line,
+        // the full block width - the section's single meter
+        block.removeFromTop (4);
+        transGrBar.setBounds (block.removeFromTop (40));
+
+        // the knob field: one rank of four cells, the caption at
+        // every cell's feet
+        block.removeFromTop (6);
 
         const auto captionCell = [] (juce::Rectangle<int> cell, juce::Label& caption)
         {
@@ -4340,31 +4330,25 @@ void CostesStripEditor::resized()
             return cell;
         };
 
-        const int cellH = block.getHeight() / 2;
-        const int knobW = block.getWidth() / 2;
-
         CostesSlider* transKnobs[4] =
         {
-            &transMixKnob, &transGainKnob, &transAttackKnob, &transSustainKnob
+            &transAttackKnob, &transSustainKnob, &transGainKnob, &transMixKnob
         };
         juce::Label* transCaptions[4] =
         {
-            &transMixLabel, &transGainLabel, &transAttackLabel, &transSustainLabel
+            &transAttackLabel, &transSustainLabel, &transGainLabel, &transMixLabel
         };
 
-        for (int rank = 0; rank < 2; ++rank)
-        {
-            auto knobRow = block.removeFromTop (cellH);
+        const int cellW = block.getWidth() / 4;
 
-            for (int col = 0; col < 2; ++col)
-            {
-                auto cell = captionCell (knobRow.removeFromLeft (knobW).reduced (2, 0),
-                                         *transCaptions[(size_t) (rank * 2 + col)]);
-                transKnobs[(size_t) (rank * 2 + col)]
-                    ->setBounds (cell.withSizeKeepingCentre (
-                        juce::jmin (cell.getWidth(), 84),
-                        juce::jmin (cell.getHeight(), 84)));
-            }
+        for (int col = 0; col < 4; ++col)
+        {
+            auto cell = captionCell (block.removeFromLeft (cellW).reduced (2, 0),
+                                     *transCaptions[(size_t) col]);
+            transKnobs[(size_t) col]
+                ->setBounds (cell.withSizeKeepingCentre (
+                    juce::jmin (cell.getWidth(), 84),
+                    juce::jmin (cell.getHeight(), 84)));
         }
     }
 
@@ -4518,11 +4502,9 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     // at 36 now), the compressor 0-3, 3-9, 9-18 (v2.73.0, Clement's
     // remark 4), each tier owning
     // exactly a THIRD of the ladder, one dB per division as ever.
-    // v2.89.0: the transient designer joins with its own trio, its
-    // GR ladder BIPOLAR - the smoothed gain modification, -15 to
-    // +15 dB at one dB per division, unity engraved dead centre, a
-    // boost lighting up from the middle in green, a cut down in
-    // the reduction orange.
+    // v2.90.0: the transient designer left the ladder family - its
+    // bipolar GR reading lives on the section's own horizontal
+    // GrBarMeter, and the IN and OUT duplicates are gone
     // The component holds no state of its
     // own: every paint reads the truth, and a degenerate resize
     // paints nothing but the caption - there is no size small enough
@@ -4560,27 +4542,18 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     // the reading: the detector's RMS level for an IN ladder, the
     // level the stage leaves behind for an OUT ladder, the applied
-    // gain (sign-flipped into its reduction) for a GR ladder.
-    // v2.89.0: the transient designer joins with its own trio, and
-    // its GR ladder is BIPOLAR - it reads the smoothed gain
-    // modification itself, -15 to +15 dB, unity dead centre, a boost
-    // lighting up from the middle in green, a cut down in the
-    // reduction orange
-    const bool bipolar = (stage == Stage::transient && mode == Mode::gainReduction);
+    // gain (sign-flipped into its reduction) for a GR ladder
     float reading = 0.0f;
 
     if (mode == Mode::input)
         reading = (stage == Stage::expander)    ? owner.getExpInDb()
-                : (stage == Stage::compressor)   ? owner.getCompInDb()
-                                                : owner.getTransInDb();
+                : owner.getCompInDb();
     else if (mode == Mode::output)
         reading = (stage == Stage::expander)    ? owner.getExpOutDb()
-                : (stage == Stage::compressor)  ? owner.getCompOutDb()
-                                               : owner.getTransOutDb();
+                : owner.getCompOutDb();
     else
         reading = (stage == Stage::expander)   ? owner.getExpGrDb()
-                : (stage == Stage::compressor) ? owner.getCompGrDb()
-                                              : owner.getTransGrDb();
+                : owner.getCompGrDb();
 
     // v2.67.0 (Clement's remark): the peak hold - the ladder remembers
     // the reading's own extreme (the loudest level on an IN or OUT
@@ -4595,10 +4568,8 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
         holdLastMs = nowMs;
 
-        const bool newPeak = bipolar
-            ? (std::abs (reading) >= std::abs (holdReading))
-            : (mode == Mode::gainReduction)
-                ? (reading <= holdReading) : (reading >= holdReading);
+        const bool newPeak = (mode == Mode::gainReduction)
+            ? (reading <= holdReading) : (reading >= holdReading);
 
         if (! holdSet)
         {
@@ -4615,16 +4586,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         {
             const float glide = 20.0f * (float) dt;
 
-            if (bipolar)
-            {
-                // the bipolar ladder glides towards the live reading
-                // signed - the held extreme walks home at 20 dB/s
-                if (holdReading < reading)
-                    holdReading = juce::jmin (reading, holdReading + glide);
-                else
-                    holdReading = juce::jmax (reading, holdReading - glide);
-            }
-            else if (mode == Mode::gainReduction)
+            if (mode == Mode::gainReduction)
                 holdReading = juce::jmin (reading, holdReading + glide);
             else
                 holdReading = juce::jmax (reading, holdReading - glide);
@@ -4657,21 +4619,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         bool lit = false;
         juce::Colour colour (meterGreen);
 
-        if (bipolar)
-        {
-            // v2.89.0: the transient's bipolar GR ladder - each
-            // division lights when the reading's sweep from unity
-            // crosses it, green above the centre line (a boost),
-            // the reduction orange below it (a cut)
-            const float ledLowDb  = lowDb + (float) j * step;
-            const float ledHighDb = lowDb + (float) (j + 1) * step;
-
-            y = bottom - (ledHighDb - lowDb) / span * height;
-            lit = (ledLowDb <= juce::jmax (0.0f, reading))
-               && (ledHighDb >= juce::jmin (0.0f, reading));
-            colour = (ledLowDb + ledHighDb > 0.0f) ? meterGreen : meterGrOrange;
-        }
-        else if (mode == Mode::gainReduction)
+        if (mode == Mode::gainReduction)
         {
             // v2.72.0: the rung boundaries ride the three-tier scale -
             // the border stays one dB per LED, exactly as in v2.70.0
@@ -4712,17 +4660,6 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
         }
     }
 
-    // v2.89.0: the bipolar ladder's engraved UNITY line - a faint
-    // hairline dead centre, the boost lighting above it, the cut
-    // below, so zero reads at a glance even on a dark plate
-    if (bipolar)
-    {
-        const float y0 = bottom - (0.0f - lowDb) / span * height;
-
-        g.setColour (engravingDim.withAlpha (0.8f));
-        g.drawLine (lx, y0, lx + lw, y0, 1.0f);
-    }
-
     // v2.80.0 (Clement's remarks 4 and 5): the THRESHOLD bar on an IN
     // ladder - the stage's own threshold corner drawn as a red bar,
     // the same weight and style the GR ladder's peak-hold bar
@@ -4747,15 +4684,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     {
         float markerY = top;
 
-        if (bipolar)
-        {
-            // v2.89.0: the bipolar ladder's held extreme rides its
-            // SIGNED value - the bar sits wherever the reading's own
-            // magnitude peaked, boost above the line, cut below
-            const float v = juce::jlimit (lowDb, highDb, holdReading);
-            markerY = bottom - (v - lowDb) / span * height;
-        }
-        else if (mode == Mode::gainReduction)
+        if (mode == Mode::gainReduction)
         {
             const float v = juce::jlimit (0.0f, span, -holdReading);
             markerY = top + grFractionForDb (v, span, grTier1Db, grTier2Db) * height;
@@ -4800,28 +4729,7 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 
     const float scaleRight = (float) body.getX() + 2.0f;
 
-    if (bipolar)
-    {
-        // v2.89.0: the bipolar ladder's own series - +15 down to -15
-        // every five dB, signed, unity at the centre line
-        for (int m = 0; (float) m * markStep <= span + 0.25f * markStep; ++m)
-        {
-            const float value = highDb - (float) m * markStep;
-            const float y = top + (float) m * markStep / span * height;
-
-            g.drawLine (lx + lw, y, lx + lw + 3.0f, y, 1.0f);
-
-            const juce::String text = (value > 0.25f)
-                ? "+" + juce::String (juce::roundToInt (value))
-                : juce::String (juce::roundToInt (value));
-
-            g.drawText (text,
-                        juce::Rectangle<int> ((int) ((float) body.getX()), (int) (y - 5.0f),
-                                              juce::jmax (1, body.getWidth()), 10),
-                        juce::Justification::centredLeft);
-        }
-    }
-    else if (mode == Mode::gainReduction)
+    if (mode == Mode::gainReduction)
     {
         const int* marks = (stage == Stage::expander) ? expGrMarks : compGrMarks;
         const int numMarks = (stage == Stage::expander) ? 7 : 6;
@@ -4868,6 +4776,132 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     }
 }
 
+void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
+{
+    // v2.90.0 (Clement's request): the transient designer's HORIZONTAL
+    // bipolar GR bar - the section's single meter. The smoothed
+    // envelope gain reads SIGNED: a boost fills RIGHT of centre in
+    // the meter green, a cut fills LEFT in the reduction orange, the
+    // scale is engraved below (+15 down to -15, five dB a mark, unity
+    // dead centre on a hairline), and a peak-hold mark rides the
+    // track with the ladders' own discipline - three seconds of
+    // hold, then a 20 dB/s glide home. The paint reads the truth
+    // every frame; only the hold state lives here. A degenerate
+    // resize paints the caption and returns - there is no size
+    // small enough to divide by
+    auto b = getLocalBounds();
+
+    // the caption reads centred above the bar it names
+    auto captionStrip = b.removeFromTop (12);
+    g.setColour (engraving);
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.drawText ("GR", captionStrip, juce::Justification::centred);
+
+    // the track: the full width under its caption
+    auto trackStrip = b.removeFromTop (14);
+    const auto track = trackStrip.reduced (6, 1);
+
+    if (track.getWidth() < 8 || track.getHeight() < 4)
+        return;   // a degenerate resize never divides by anything
+
+    const float tx = (float) track.getX();
+    const float tw = (float) track.getWidth();
+    const float ty = (float) track.getY();
+    const float th = (float) track.getHeight();
+    const float cx = tx + tw * 0.5f;   // unity, dead centre
+
+    // the meter window's own socket and engraved frame
+    g.setColour (juce::Colour (0xff17150f));
+    g.fillRect (track.toFloat());
+    g.setColour (engravingDim.withAlpha (0.7f));
+    g.drawRect (track.toFloat(), 1.0f);
+
+    // the engraved UNITY hairline - zero reads at a glance
+    g.setColour (engravingDim.withAlpha (0.8f));
+    g.drawLine (cx, ty, cx, ty + th, 1.0f);
+
+    // the reading: the smoothed gain modification itself, bounded by
+    // the engraved scale
+    const float reading = juce::jlimit (-15.0f, 15.0f, owner.getTransGrDb());
+
+    // the fill: a boost lights up from the middle in green, a cut
+    // down in the reduction orange - the bipolar ladder's own
+    // language, laid flat
+    if (reading > 0.0f)
+    {
+        const float w = juce::jmin (tw * 0.5f, reading / 30.0f * tw);
+        g.setColour (meterGreen);
+        g.fillRect (juce::Rectangle<float> (cx, ty + 1.0f, w, th - 2.0f));
+    }
+    else if (reading < 0.0f)
+    {
+        const float w = juce::jmin (tw * 0.5f, -reading / 30.0f * tw);
+        g.setColour (meterGrOrange);
+        g.fillRect (juce::Rectangle<float> (cx - w, ty + 1.0f, w, th - 2.0f));
+    }
+
+    // the peak-hold mark (the ladders' own discipline): the bar
+    // remembers the reading's SIGNED extreme for 3 s, then walks
+    // home at 20 dB/s
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = (holdLastMs > 0.0)
+            ? juce::jmin (0.2, (nowMs - holdLastMs) * 0.001) : 0.0;
+
+        holdLastMs = nowMs;
+
+        const bool newPeak = std::abs (reading) >= std::abs (holdReading);
+
+        if (! holdSet)
+        {
+            holdReading = reading;
+            holdStampMs = nowMs;
+            holdSet = true;
+        }
+        else if (newPeak)
+        {
+            holdReading = reading;
+            holdStampMs = nowMs;
+        }
+        else if (nowMs - holdStampMs > 3000.0)
+        {
+            const float glide = 20.0f * (float) dt;
+
+            if (holdReading < reading)
+                holdReading = juce::jmin (reading, holdReading + glide);
+            else
+                holdReading = juce::jmax (reading, holdReading - glide);
+
+            if (holdReading == reading)
+                holdStampMs = nowMs;
+        }
+
+        const float holdDb = juce::jlimit (-15.0f, 15.0f, holdReading);
+        const float mx = cx + holdDb / 30.0f * tw;
+
+        // the same thick pastel-blue bar the GR ladders carry
+        g.setColour (compKnobDisc);
+        g.drawLine (mx, ty - 1.0f, mx, ty + th + 1.0f, 4.6f);
+    }
+
+    // the engraved scale below the track: +15 / +10 / +5 / 0 /
+    // -5 / -10 / -15, every mark under its own station
+    g.setColour (engravingDim);
+    g.setFont (juce::Font (juce::FontOptions (8.0f)));
+
+    for (int v = 15; v >= -15; v -= 5)
+    {
+        const float x = cx + (float) v / 30.0f * tw;
+        const juce::String text = (v > 0) ? "+" + juce::String (v)
+                                          : juce::String (v);
+
+        g.drawText (text,
+                    juce::Rectangle<int> (juce::roundToInt (x - 10.0f), b.getY(),
+                                          20, 10),
+                    juce::Justification::centred);
+    }
+}
+
 void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
                                                   bool highlighted,
                                                   bool /*down*/)
@@ -4887,11 +4921,24 @@ void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
     g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
 
     // the LED: a lit amber dot with a soft glow when on, a dark socket
-    // sunk into the plate when off
+    // sunk into the plate when off. v2.90.0 (Clement's request): the
+    // CLIPPER plate's own peak-hold - when the plate is on and its
+    // clipSignal says the wet half touched the rail within the last
+    // second, the LED burns the HF band's saturated red with a red
+    // glow instead of the steady amber, so a clip is seen even after
+    // the moment has passed
+    const bool clipping = on && clipSignal && clipSignal();
     const auto ledArea = bounds.removeFromLeft (24.0f);
     const auto led = ledArea.withSizeKeepingCentre (9.0f, 9.0f);
 
-    if (on)
+    if (clipping)
+    {
+        g.setColour (eqHfDisc.withMultipliedAlpha (0.45f));
+        g.fillEllipse (led.expanded (3.0f));
+        g.setColour (eqHfDisc);
+        g.fillEllipse (led);
+    }
+    else if (on)
     {
         g.setColour (valueArc.withMultipliedAlpha (0.40f));
         g.fillEllipse (led.expanded (3.0f));

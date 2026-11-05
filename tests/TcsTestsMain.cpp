@@ -5957,12 +5957,13 @@ void testCostesStripSectionIcons()
                 "the expander's stage sits at the top of the middle column, the compressor's under it - two stacked stages");
 
     // v2.76.0 (Clement's remark): the dynamics stages returned to
-    // their v2.74 height - the ladders stand 211 px tall again, the
-    // 500-series density of the one-row band
+    // their v2.74 height. v2.90.0 (Clement's request): the 50 px the
+    // transient section gave up went to the two stages - the
+    // ladders stand 236 px tall now
     expectTrue (meters[0] != nullptr && meters[3] != nullptr
-                    && meters[0]->getHeight() == 211
-                    && meters[3]->getHeight() == 211,
-                "the dynamics stages stand at their v2.74 height again - the ladders 211 px tall");
+                    && meters[0]->getHeight() == 236
+                    && meters[3]->getHeight() == 236,
+                "the dynamics stages grew with the transient's 50 px - the ladders 236 px tall");
 
     // v2.85.0 (Clement's request): the front end INTERLOCKS - the
     // input trim rides the TOP MIDDLE (0), and the two cuts share
@@ -6068,7 +6069,7 @@ void testCostesStripSectionIcons()
 
         expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
                         && meters[3]->getBounds().getY() > transient.getBottom()
-                        && transient.getHeight() == 220
+                        && transient.getHeight() == 170
                         && reserved[0].getY() == 26
                         && reserved[0].getHeight() == 370
                         && reserved[1].getY() == reserved[0].getBottom() + 8
@@ -6076,7 +6077,7 @@ void testCostesStripSectionIcons()
                         && reserved[1].getBottom() <= editor.getHeight() - 8
                         && reserved[0].getY() < sliders[4]->getBounds().getY()
                         && sliders[4]->getBounds().getBottom() <= reserved[1].getBottom(),
-                    "the two blocks sit engraved in the grid - TRANSIENT at its own 220 px between the stages, IMAGE and SHAPE OUT stacked down column 3");
+                    "the two blocks sit engraved in the grid - TRANSIENT at its own 170 px between the stages, IMAGE and SHAPE OUT stacked down column 3");
     }
 
     // v2.72.0 (Clement's request): each stage's GR ladder sits at the
@@ -9076,7 +9077,7 @@ void testV287ZoneTilesAndCaptionBreath()
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet, and the section's own ladders");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED");
 
     juce::MidiBuffer noMidi;
 
@@ -9193,13 +9194,18 @@ void testV288TransientDesigner()
     expectNear (measureSteadyDb (0.25) - juce::Decibels::gainToDecibels (0.25), 0.0, 0.1,
                 "the parked transient designer is a true bypass (attack 0, sustain 0, gain 0, the plate dark)");
 
-    // ---- the section's own ladders (v2.89.0): their one-poles feed
-    // every sample, parked or not, so on the parked tone the IN and
-    // the OUT read the same honest level and the bipolar GR reads
-    // its dead centre ----
-    expectTrue (std::abs (strip->getTransInDb() - strip->getTransOutDb()) <= 0.05
-                    && std::abs (strip->getTransGrDb()) <= 0.01,
-                "the transient's own ladders tell the truth on a parked tone - the IN matches the OUT, the GR reads unity");
+    // ---- the section's single meter (v2.90.0, Clement's call): the
+    // IN and OUT ladders are gone - their samples are the expander's
+    // OUT and the compressor's IN, sample for sample - and the
+    // bipolar GR reads on the section's horizontal bar ----
+    expectTrue (std::abs (strip->getTransGrDb()) <= 0.01,
+                "the parked section's GR bar reads its dead centre");
+
+    // ---- the CLIPPER's LED (v2.90.0): the plate's dot burns red for
+    // a second after the wet half touches the rail - on the parked
+    // tone nothing has clipped yet, so the LED reads dark ----
+    expectTrue (! strip->getTransClipActive(),
+                "the CLIPPER's LED reads dark before anything has touched the rail");
 
     // ---- the GAIN rides the wet half: +6 dB on a steady tone, the
     // mix parked at 100 % ----
@@ -9311,6 +9317,12 @@ void testV288TransientDesigner()
     expectTrue (peakOpen > 1.2 && peakClipped <= 1.0 + 1.0e-3,
                 "the CLIPPER plate bounds the wet half at the rail - +18 dB of make-up clips at exactly 1.0");
 
+    // ---- the CLIPPER's LED lit: the last clipped sample sits a few
+    // ms back, well inside the one second peak-hold window, so the
+    // flag reads true without any sleep ----
+    expectTrue (strip->getTransClipActive(),
+                "the CLIPPER's LED reads lit right after the wet half touched the rail");
+
     setParam ("transMix", 50.0f);
     expectNear (measureSteadyPeak(), 0.6, 0.02,
                 "the dry half rides untouched through the blend - the clipper takes only the WET (0.2 + 0.5 x (1.0 - 0.2) = 0.6)");
@@ -9393,12 +9405,13 @@ void testV288TransientDesigner()
                     "a pre-2.88 session parks the PUNCH plate lit at its default");
     }
 
-    // ---- the layout (v2.89.0, Clement's restyle): the PUNCH plate
+    // ---- the layout (v2.90.0, Clement's request): the PUNCH plate
     // rides the meters column's head, the CLIPPER plate the block's
-    // top-right corner, the IN / OUT / GR trio down the left column,
-    // and the four knobs in TWO RANKS OF TWO - Mix, Gain / Attack,
-    // Sustain - each 84 px square, each caption hugging its own
-    // knob's feet ----
+    // top-right corner, ONE HORIZONTAL bipolar GR bar under the
+    // plates' line - the IN and OUT ladders are gone with their
+    // one-poles - and the four knobs in ONE RANK of four: ATTACK,
+    // SUSTAIN, then WET GAIN, MIX, character first, dosage after,
+    // each 84 px square, each caption hugging its own knob's feet ----
     {
         CostesStrip stripForV288;
         stripForV288.prepareToPlay (48000.0, 512);
@@ -9408,54 +9421,52 @@ void testV288TransientDesigner()
 
         const auto knobs    = editorForV288.getTransientKnobs();
         const auto captions = editorForV288.getTransientCaptions();
-        const auto meters   = editorForV288.getTransientMeters();
+        const auto grBar    = editorForV288.getTransientGrBar();
         const auto punchBtn = editorForV288.getPunchButton();
         const auto clipBtn  = editorForV288.getTransClipButton();
         const auto& frame   = editorForV288.getTransientFrame();
 
-        // the knobs: two ranks of two, MIX and GAIN over ATTACK and
-        // SUSTAIN, each 84 px square centred in its own 144 px cell
+        // the knobs: one rank of four - ATTACK, SUSTAIN, WET GAIN,
+        // MIX - each 84 px square centred in its own 108 px cell
         expectTrue (knobs[0] != nullptr && knobs[1] != nullptr
                         && knobs[2] != nullptr && knobs[3] != nullptr
-                        && knobs[0]->getBounds() == juce::Rectangle<int> (432, 314, 84, 84)
-                        && knobs[1]->getBounds() == juce::Rectangle<int> (576, 314, 84, 84)
-                        && knobs[2]->getBounds() == juce::Rectangle<int> (432, 412, 84, 84)
-                        && knobs[3]->getBounds() == juce::Rectangle<int> (576, 412, 84, 84),
-                    "the four transient knobs sit two ranks of two - MIX, GAIN over ATTACK, SUSTAIN, each 84 px square");
+                        && knobs[0]->getBounds() == juce::Rectangle<int> (270, 387, 84, 84)
+                        && knobs[1]->getBounds() == juce::Rectangle<int> (378, 387, 84, 84)
+                        && knobs[2]->getBounds() == juce::Rectangle<int> (486, 387, 84, 84)
+                        && knobs[3]->getBounds() == juce::Rectangle<int> (594, 387, 84, 84),
+                    "the four transient knobs sit one rank of four - ATTACK, SUSTAIN, WET GAIN, MIX, each 84 px square");
 
         // the captions hug their own knobs' feet and spell their words
         expectTrue (captions[0] != nullptr && captions[1] != nullptr
                         && captions[2] != nullptr && captions[3] != nullptr
-                        && captions[0]->getBounds() == juce::Rectangle<int> (404, 398, 140, 14)
-                        && captions[1]->getBounds() == juce::Rectangle<int> (548, 398, 140, 14)
-                        && captions[2]->getBounds() == juce::Rectangle<int> (404, 496, 140, 14)
-                        && captions[3]->getBounds() == juce::Rectangle<int> (548, 496, 140, 14)
-                        && captions[0]->getText() == "MIX" && captions[1]->getText() == "WET GAIN"
-                        && captions[2]->getText() == "ATTACK" && captions[3]->getText() == "SUSTAIN",
-                    "the caption words hug their own knobs' feet - MIX, WET GAIN / ATTACK, SUSTAIN");
+                        && captions[0]->getBounds() == juce::Rectangle<int> (260, 471, 104, 14)
+                        && captions[1]->getBounds() == juce::Rectangle<int> (368, 471, 104, 14)
+                        && captions[2]->getBounds() == juce::Rectangle<int> (476, 471, 104, 14)
+                        && captions[3]->getBounds() == juce::Rectangle<int> (584, 471, 104, 14)
+                        && captions[0]->getText() == "ATTACK" && captions[1]->getText() == "SUSTAIN"
+                        && captions[2]->getText() == "WET GAIN" && captions[3]->getText() == "MIX",
+                    "the caption words hug their own knobs' feet - ATTACK, SUSTAIN / WET GAIN, MIX");
 
         // the plates: PUNCH at the meters column's head, CLIPPER at
         // the block's top-right corner, both on the block's own top line
         expectTrue (punchBtn != nullptr && clipBtn != nullptr
-                        && punchBtn->getBounds() == juce::Rectangle<int> (258, 294, 88, 18)
-                        && clipBtn->getBounds() == juce::Rectangle<int> (590, 294, 100, 18),
+                        && punchBtn->getBounds() == juce::Rectangle<int> (258, 319, 88, 18)
+                        && clipBtn->getBounds() == juce::Rectangle<int> (590, 319, 100, 18),
                     "the PUNCH plate rides the meters column's head and the CLIPPER plate the block's top-right corner - both on the block's own top line");
 
-        // the ladders: IN, OUT and the bipolar GR down the left
-        // column - the same trio the dynamics stages wear
-        expectTrue (meters[0] != nullptr && meters[1] != nullptr && meters[2] != nullptr
-                        && meters[0]->getBounds() == juce::Rectangle<int> (260, 316, 40, 192)
-                        && meters[1]->getBounds() == juce::Rectangle<int> (304, 316, 40, 192)
-                        && meters[2]->getBounds() == juce::Rectangle<int> (348, 316, 52, 192),
-                    "the IN, OUT and GR ladders ride the left column - the same trio the dynamics stages wear");
+        // the GR bar: one horizontal strip, the full block width
+        // under the plates' line - the section's single meter
+        expectTrue (grBar != nullptr
+                        && grBar->getBounds() == juce::Rectangle<int> (258, 341, 432, 40),
+                    "the bipolar GR bar rides the full block width under the plates' line - the section's single meter");
 
         // the whole section sits inside its engraved frame, its title
         // band gone (v2.89.0), flush inside the frame's own floor
-        expectTrue (frame == juce::Rectangle<int> (254, 292, 440, 220)
+        expectTrue (frame == juce::Rectangle<int> (254, 317, 440, 170)
                         && punchBtn->getBounds().getY() == frame.getY() + 2
                         && knobs[0]->getBounds().getY() >= punchBtn->getBounds().getBottom()
                         && captions[3]->getBounds().getBottom() == frame.getBottom() - 2,
-                    "the transient section owns its engraved 220 px frame - the frame alone carries the section, flush inside the frame's floor");
+                    "the transient section owns its engraved 170 px frame - the frame alone carries the section, flush inside the frame's floor");
     }
 }
 } // namespace
