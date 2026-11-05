@@ -1495,8 +1495,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // the parameters appended at the very end - every session and
     // every automation index born before v2.88 keeps its own order.
     // The ATTACK and SUSTAIN knobs span -15 to +15 dB of envelope
-    // lead, the WET GAIN is the wet half's own make-up (-18 to
-    // +18 dB), the MIX the dry/wet blend, and the CLIPPER plate
+    // lead, the WET GAIN is the wet half's own make-up (-9 to
+    // +9 dB since v2.93.0, Clement's ask: a dosage, not a fader), the MIX the dry/wet blend, and the CLIPPER plate
     // bounds the wet half at the rail. v2.89.0: the PUNCH plate is
     // the section's master switch (default lit, EXP and COMP's own
     // grammar), and the SC corners are GONE (Clement's verdict: a
@@ -1532,7 +1532,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
 
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "transGain", 1 }, "Transient Gain",
-        juce::NormalisableRange<float> (-18.0f, 18.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float> (-9.0f, 9.0f, 0.1f), 0.0f,
         juce::AudioParameterFloatAttributes()
             .withStringFromValueFunction (dbText)
             .withValueFromStringFunction (dbParse)));
@@ -1692,6 +1692,8 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     // changes nothing yet
     transOutPower = 0.0f;
     transBalanceDb.store (0.0f, std::memory_order_relaxed);
+    // v2.93.0: the compressor's ADD readout starts from unity too
+    compBalanceDb.store (0.0f, std::memory_order_relaxed);
 
     for (auto& section : compSidechain)
         section.reset();
@@ -2131,8 +2133,8 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // The PUNCH plate is the section's own master switch (v2.89.0) -
     // lit by default like EXP and COMP, a dark plate parks the
     // section wherever its knobs stand. The attack and sustain knobs
-    // span -15 to +15 dB of envelope lead, the WET GAIN -18 to +18 dB
-    // of wet make-up, and the section is hard-bypassed at rest - the
+    // span -15 to +15 dB of envelope lead, the WET GAIN -9 to +9 dB
+    // of wet dosage (v2.93.0, Clement's request), and the section is hard-bypassed at rest - the
     // plate lit and every knob parked still touches not a single
     // sample (the wet rides at unity, the blend at mix 100 is the
     // exact identity), so the parked strip is bit-for-bit the strip
@@ -2143,7 +2145,7 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const bool  transPunchOn   = transOn->load() > 0.5f;
     const float transAttackDb   = juce::jlimit (-15.0f, 15.0f, transAttack->load());
     const float transSustainDb  = juce::jlimit (-15.0f, 15.0f, transSustain->load());
-    const float transGainDbParam = juce::jlimit (-18.0f, 18.0f, transGain->load());
+    const float transGainDbParam = juce::jlimit (-9.0f, 9.0f, transGain->load());
     const float transMakeupGain = juce::Decibels::decibelsToGain (transGainDbParam);
     const float transMixNorm    = juce::jlimit (0.0f, 100.0f, transMix->load()) * 0.01f;
     const bool  transClipOn     = transClipper->load() > 0.5f;
@@ -2547,18 +2549,26 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
                 transGainDb += (targetDb - transGainDb) * transGainCoef;
 
-                const float wetGain = transMakeupGain
-                    * juce::Decibels::decibelsToGain (transGainDb);
+                // v2.93.0 (Clement's request): the CLIPPER rides
+                // BEFORE the WET GAIN - the rail bounds the shape
+                // alone, and the make-up behind the plate re-levels
+                // whatever it bounded (clip the transient hard, then
+                // bring the bounded wet back to the level the mix
+                // wants). The make-up is a +/-9 dB dosage now, and
+                // the shape's own crest is what the LED stamps - the
+                // WET GAIN never folds into the plate's input again
+                const float shapeGain
+                    = juce::Decibels::decibelsToGain (transGainDb);
 
                 for (int ch = 0; ch < numChannels; ++ch)
                 {
                     const float dry = channels[ch][i];
-                    float wet = dry * wetGain;
+                    float wet = dry * shapeGain;
 
                     // v2.90.0: the CLIPPER stamps the wall-clock moment
                     // the wet half touches the rail - the plate's LED
                     // peak-holds for one second from that timestamp -
-                    // then bounds the wet half exactly as before
+                    // and the pre-make-up wet is what it bounds now
                     if (transClipOn)
                     {
                         if (wet > 1.0f || wet < -1.0f)
@@ -2566,6 +2576,8 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                                                    std::memory_order_relaxed);
                         wet = juce::jlimit (-1.0f, 1.0f, wet);
                     }
+
+                    wet *= transMakeupGain;
 
                     channels[ch][i] = dry + transMixNorm * (wet - dry);
                 }
@@ -2827,6 +2839,18 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                               - 10.0f * std::log10 (
                               juce::jmax (expOutPower, detectorFloorPower)),
                           std::memory_order_relaxed);
+
+    // v2.93.0 (Clement's request): the compressor's ADD readout - the
+    // stage's own level delta, OUT minus IN, both one-poles floored
+    // at the detector's silence so a parked or silent stage reads a
+    // clean 0.0. The editor engraves the reading beside the COMP ON
+    // plate, level with it on the plates' line - the same discipline
+    // as the PUNCH side's own ADD face
+    compBalanceDb.store (10.0f * std::log10 (
+                             juce::jmax (compOutPower, detectorFloorPower))
+                             - 10.0f * std::log10 (
+                             juce::jmax (compInPower, detectorFloorPower)),
+                         std::memory_order_relaxed);
 
     // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
     // signal rides on its way out. The drive stage keeps its own
@@ -3352,6 +3376,12 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     compOnButton.caption = "COMP";
     addAndMakeVisible (compOnButton);
 
+    // v2.93.0 (Clement's request): the compressor's ADD face - the
+    // stage's OUT-minus-IN delta, riding the plates' line just right
+    // of its own plate, in the air between the ladders' head and
+    // the knob field's corner
+    addAndMakeVisible (compAddFace);
+
     // v2.88.0 (Clement's spec): the transient designer's CLIPPER
     // plate - lit amber "CLIPPER ON" while the wet half is bounded
     // at the rail, dark "CLIPPER OFF" while it plays through, the
@@ -3361,7 +3391,7 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // joins at the block's head, the section's own master switch,
     // lit by default like EXP and COMP
     // v2.92.0: the GR bar meter is added BEFORE the two plates - its
-    // top strip IS their line now (the BAL readout rides it, level
+    // top strip IS their line now (the ADD face rides it, level
     // with PUNCH and CLIPPER), so the plates must sit ON TOP of the
     // meter to keep painting and taking their own clicks
     addAndMakeVisible (transGrBar);
@@ -3916,6 +3946,7 @@ void CostesStripEditor::timerCallback()
     compOutMeter.repaint();
     compGrMeter.repaint();
     transGrBar.repaint();     // v2.90.0: the transient's horizontal GR bar
+    compAddFace.repaint();   // v2.93.0: the compressor's ADD face
 
     // v2.81.0 (Clement's remark 4): the outer bands' glyphs repaint
     // here too - they FOLLOW their BELL/SHELF plates (the shape is
@@ -4389,6 +4420,13 @@ void CostesStripEditor::resized()
                         compScLpfSlider,
                         compListenButton,
                         compLinkSlider);
+
+        // v2.93.0 (Clement's request): the ADD face rides just right
+        // of the plate it speaks for - the plate's own 88 px plus a
+        // 6 px breath, level on the plates' line, inside the air
+        // between the ladders' head and the knob field's corner
+        compAddFace.setBounds (compOnButton.getX() + compOnButton.getWidth() + 6,
+                                compOnButton.getY(), 76, 18);
     }
 
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
@@ -4410,8 +4448,8 @@ void CostesStripEditor::resized()
 
         // v2.92.0 (Clement's request): the meter owns the whole face
         // from the plates' line down - its top strip IS the plates'
-        // line, so the BAL readout rides there, level with PUNCH and
-        // CLIPPER and centred over the bar it names. The plates keep
+        // line, so the ADD face rides there, level with PUNCH and
+        // CLIPPER - and since v2.93.0, just right of the PUNCH plate. The plates keep
         // their own line: they are added AFTER the meter, so they
         // paint and take their clicks on top of it
         transGrBar.setBounds (block.getX(), block.getY(), block.getWidth(), 62);
@@ -4894,10 +4932,11 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
     // small enough to divide by
     auto b = getLocalBounds();
 
-    // v2.92.0 (Clement's request): the BAL readout rides the meter's
-    // own top strip - the plates' line itself, level with PUNCH ON
-    // and CLIPPER ON, centred over the bar it names, bigger than the
-    // caption below it. The reading latches ONCE A SECOND (1 Hz) off
+    // v2.92.0 (Clement's request): the ADD face (BAL until v2.93.0)
+    // rides the meter's own top strip - the plates' line itself,
+    // level with PUNCH ON and CLIPPER ON, and since v2.93.0 just
+    // right of the PUNCH plate (renamed ADD at Clement's ask: it
+    // reads what the section ADDs), bigger than the caption below it. The reading latches ONCE A SECOND (1 Hz) off
     // a ~1.5 s EMA, so the digits stand still instead of dancing -
     // a fresh paint only advances the smoothing; the latch decides
     // what the eye gets to read. Green within half a dB of unity,
@@ -4918,17 +4957,23 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
         juce::String balText;
 
         if (balLatch >= 0.5f)
-            balText = "BAL +" + juce::String (balLatch, 1) + " dB";
+            balText = "ADD +" + juce::String (balLatch, 1) + " dB";
         else if (balLatch <= -0.5f)
-            balText = "BAL " + juce::String (balLatch, 1) + " dB";
+            balText = "ADD " + juce::String (balLatch, 1) + " dB";
         else
-            balText = "BAL 0.0 dB";
+            balText = "ADD 0.0 dB";
 
         auto balStrip = b.removeFromTop (18);
 
+        // v2.93.0 (Clement's request): the face rides just right of
+        // the PUNCH ON plate - the plate's 88 px plus a 6 px breath -
+        // and reads left-aligned off its own margin from there,
+        // level with the COMP's own ADD face on the line below
+        balStrip.removeFromLeft (94);
+
         g.setColour ((std::abs (balLatch) <= 0.5f) ? meterGreen : valueArc);
         g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
-        g.drawText (balText, balStrip, juce::Justification::centred);
+        g.drawText (balText, balStrip, juce::Justification::centredLeft);
     }
 
     // the breath under the plates' line, then the caption that reads
@@ -5075,6 +5120,41 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
                                           20, 10),
                     juce::Justification::centred);
     }
+}
+
+void CostesStripEditor::CompAddFace::paint (juce::Graphics& g)
+{
+    // v2.93.0 (Clement's request): the compressor's ADD face - the
+    // stage's own OUT-minus-IN delta, engraved just right of the
+    // COMP ON plate, level with it on the plates' line. The PUNCH
+    // side's own ADD face carries the same discipline: a ~1.5 s EMA
+    // off the processor's per-block snapshot, LATCHED once a second
+    // (1 Hz), so the digits stand still instead of dancing. Green
+    // within half a dB of unity, amber beyond - the compressor ADDs
+    // loudness or takes it away, the face reads which
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    const float raw = juce::jlimit (-30.0f, 30.0f, owner.getCompBalanceDb());
+
+    balEma += (raw - balEma) * 0.022f;   // ~1.5 s at 30 Hz
+
+    if (balLastLatchMs <= 0.0 || nowMs - balLastLatchMs >= 1000.0)
+    {
+        balLastLatchMs = nowMs;
+        balLatch = balEma;
+    }
+
+    juce::String addText;
+
+    if (balLatch >= 0.5f)
+        addText = "ADD +" + juce::String (balLatch, 1) + " dB";
+    else if (balLatch <= -0.5f)
+        addText = "ADD " + juce::String (balLatch, 1) + " dB";
+    else
+        addText = "ADD 0.0 dB";
+
+    g.setColour ((std::abs (balLatch) <= 0.5f) ? meterGreen : valueArc);
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    g.drawText (addText, getLocalBounds(), juce::Justification::centredLeft);
 }
 
 void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,

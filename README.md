@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.92.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.93.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,20 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.93.0** — *The ADD faces and the reordered clipper.*
+  - **ADD, beside the plates (Clement's request).** The PUNCH
+    section's delta readout is renamed **ADD** - it reads what the
+    section ADDs, signed - and moves just right of the PUNCH ON
+    plate. The compressor gets its own **ADD** face just right of
+    COMP ON: the stage's OUT-minus-IN delta, the same 1 Hz-latched
+    ~1.5 s smoothing, green within half a dB of unity, amber beyond.
+  - **The clipper before the WET GAIN.** The CLIPPER plate rides
+    upstream of the WET GAIN now: the rail bounds the shape alone,
+    and the make-up re-levels whatever the plate bounded - clip the
+    transients hard, then bring them back to the level the mix wants.
+  - **WET GAIN at +/-9 dB.** The wet make-up is a dosage, not a
+    fader: its dial spans -9 to +9 dB (older sessions clamp to the
+    new ceiling at load).
 - **2.92.0** - *The balance face: a calmer BAL readout engraved on
   the plates' line, cranked character knobs, and a tighter console.*
   - **BAL, big and still (Clement's request).** The WET GAIN balance

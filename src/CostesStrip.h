@@ -234,6 +234,11 @@ public:
     // engraves the reading beside the GR bar
     float getTransBalanceDb() const { return transBalanceDb.load (std::memory_order_relaxed); }
 
+    // v2.93.0 (Clement's request): the compressor's ADD readout - the
+    // stage's own level delta, OUT minus IN, for the editor's face
+    // beside the COMP ON plate and the offline harness
+    float getCompBalanceDb() const { return compBalanceDb.load (std::memory_order_relaxed); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -513,6 +518,10 @@ private:
     // IN level (the expander's own OUT one-pole), both floored at
     // the detector's silence so a silent section reads a clean 0.0
     std::atomic<float> transBalanceDb { 0.0f };
+
+    // v2.93.0: the compressor's ADD readout - the stage's OUT-minus-IN
+    // one-pole delta, snapped per block beside the transient's
+    std::atomic<float> compBalanceDb { 0.0f };
     // v2.90.0: last wall-clock moment the wet signal touched the
     // CLIPPER's rail (-1e12 = never); the plate's LED peak-holds
     // for one second from this timestamp
@@ -1028,6 +1037,27 @@ public:
         double balLastLatchMs = 0.0;
     };
 
+    // v2.93.0 (Clement's request): the compressor's ADD face - the
+    // stage's own OUT-minus-IN delta engraved just right of the COMP
+    // ON plate, level with it on the plates' line, in the same
+    // 1 Hz-latched discipline as the PUNCH side's own ADD face.
+    // Public so the offline harness can pin its bounds
+    struct CompAddFace : public juce::Component
+    {
+        explicit CompAddFace (CostesStrip& source) : owner (source) {}
+
+        void paint (juce::Graphics& g) override;
+
+        CostesStrip& owner;
+
+        // the same display state as the GrBarMeter's own readout: a
+        // ~1.5 s EMA off the per-block snapshot, LATCHED once a
+        // second so the digits stand still instead of dancing
+        float balEma = 0.0f;
+        float balLatch = 0.0f;
+        double balLastLatchMs = 0.0;
+    };
+
     // the six ladders in stage order - the expander's IN/OUT/GR trio
     // then the compressor's - for the offline test harness
     std::array<DynamicsMeter*, 6> getDynMeters()
@@ -1038,6 +1068,9 @@ public:
 
     // v2.90.0: the transient's horizontal GR bar for the offline harness
     GrBarMeter* getTransientGrBar()  { return &transGrBar; }
+
+    // v2.93.0: the compressor's ADD face for the offline harness
+    CompAddFace* getCompAddFace()  { return &compAddFace; }
 
     // v2.73.0: the dynamics plates in stable order - the expander's
     // FAST ATK and LISTEN, then the compressor's - so the offline
@@ -1383,6 +1416,7 @@ private:
     // v2.90.0: the transient designer's single meter - the
     // horizontal bipolar GR bar replacing the v2.89 trio
     GrBarMeter transGrBar { owner };
+    CompAddFace compAddFace { owner };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimInAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> trimOutAttachment;   // v2.86.0

@@ -9085,7 +9085,7 @@ void testV287ZoneTilesAndCaptionBreath()
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout; v2.92.0: the BAL face on the plates' line");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout; v2.92.0: the BAL face on the plates' line; v2.93.0: the CLIPPER before the WET GAIN, the ADD face beside the plate");
 
     juce::MidiBuffer noMidi;
 
@@ -9310,28 +9310,32 @@ void testV288TransientDesigner()
     // unknown ids fall on the floor), and the blob below rides the
     // section's own six ----
 
-    // ---- the CLIPPER plate bounds the WET half at the rail: a +18 dB
-    // make-up on a 0.2 tone pushes the wet past the rail, the plate
-    // catches it, and the dry half rides untouched through the blend.
-    // The tolerance is the strip's own float32 floor, not slack: the
-    // identity EQ and tilt cascades that sit downstream of the clipper
-    // integrate their deterministic rounding pattern through their
-    // near-DC poles (the 27.95 Hz tilt shelf's DC error gain alone is
-    // ~1 / 37000), which leaves a DC offset of a few 1e-4 on the
-    // output - invisible to every coherent (lock-in) measurement in
-    // this suite and present since the tilt's own v2.57.0, but real in
-    // an absolute peak read at the crest. A broken clipper reads
-    // 1.5887 here - a thousand times past the pin, so the plate is
-    // still pinned hard ----
-    setParam ("transAttack", 0.0f);
-    setParam ("transGain", 18.0f);
+    // ---- v2.93.0 (Clement's request): the CLIPPER rides BEFORE the
+    // WET GAIN - the rail bounds the shape alone, and the make-up
+    // behind the plate re-levels whatever it bounded (clip the
+    // transient hard, then bring the bounded wet back to the level
+    // the mix wants). The probe is an onset burst under ATTACK +15
+    // with a -6 dB WET GAIN: the pre-make-up wet throws past the
+    // rail within a millisecond (0.45 x 5.6 = 2.5 at the block's
+    // last crest), so with the plate lit the block's peak lands at
+    // exactly the rail folded behind the make-up (1.0 x 0.5012 =
+    // 0.5012) - a plate still bounding the make-up's own output
+    // reads 1.0 here, twice past the pin. The tolerance is the
+    // strip's own float32 floor, not slack: the identity EQ and
+    // tilt cascades that sit downstream integrate their
+    // deterministic rounding pattern through their near-DC poles
+    // (the 27.95 Hz tilt shelf's DC error gain alone is ~1 / 37000),
+    // which leaves a DC offset of a few 1e-4 on the output - present
+    // since the tilt's own v2.57.0, but invisible at a 0.01 pin ----
+    setParam ("transAttack", 15.0f);
+    setParam ("transGain", -6.0f);
 
-    const double peakOpen = measureSteadyPeak();
+    const double onsetOpen = measureOnsetPeak (1000.0, 0.45);
     setParam ("transClipper", true);
-    const double peakClipped = measureSteadyPeak();
+    const double onsetClipped = measureOnsetPeak (1000.0, 0.45);
 
-    expectTrue (peakOpen > 1.2 && peakClipped <= 1.0 + 1.0e-3,
-                "the CLIPPER plate bounds the wet half at the rail - +18 dB of make-up clips at exactly 1.0");
+    expectTrue (onsetOpen > 1.15 && onsetClipped < 0.51,
+                "the CLIPPER rides before the WET GAIN - the rail bounds the shape alone, and the make-up behind the plate re-levels the bounded wet (1.25 open, 0.50 clipped)");
 
     // ---- the CLIPPER's LED lit: the last clipped sample sits a few
     // ms back, well inside the one second peak-hold window, so the
@@ -9339,10 +9343,23 @@ void testV288TransientDesigner()
     expectTrue (strip->getTransClipActive(),
                 "the CLIPPER's LED reads lit right after the wet half touched the rail");
 
+    // ---- the dry half rides untouched through the blend: at mix 50
+    // the burst's peak reads the blend's own arithmetic, the bounded
+    // wet folded against the raw dry (0.45 + 0.5 x (0.5012 - 0.45)
+    // = 0.4756) ----
     setParam ("transMix", 50.0f);
-    expectNear (measureSteadyPeak(), 0.6, 0.02,
-                "the dry half rides untouched through the blend - the clipper takes only the WET (0.2 + 0.5 x (1.0 - 0.2) = 0.6)");
+    expectNear (measureOnsetPeak (1000.0, 0.45), 0.4756, 0.02,
+                "the dry half rides untouched through the blend - the clipper takes only the WET (0.45 + 0.5 x (0.5012 - 0.45) = 0.4756)");
     setParam ("transMix", 100.0f);
+
+    // ---- and with the shape at unity the plate never engages: the
+    // make-up rides free behind the rail even at its new +9 dB
+    // ceiling - a 0.2 tone reads 0.2 x 2.818 = 0.5636, the whole
+    // wet under the rail ----
+    setParam ("transAttack", 0.0f);
+    setParam ("transGain", 9.0f);
+    expectNear (measureSteadyPeak(), 0.5636, 0.01,
+                "the make-up rides free behind the plate - a unity shape never touches the rail (0.2 x 2.818 = 0.5636)");
     setParam ("transGain", 0.0f);
     setParam ("transClipper", false);
 
@@ -9473,15 +9490,15 @@ void testV288TransientDesigner()
 
         // the GR bar (v2.92.0, Clement's request): the meter owns
         // the whole face from the plates' line down - its 62 px carry
-        // the BAL readout on the plates' own line, the GR caption,
+        // the ADD face on the plates' own line, the GR caption,
         // the bipolar track with its 1 dB divisions and the orange
         // BALANCE bar, and the engraved scale below
         expectTrue (grBar != nullptr
                         && grBar->getBounds() == juce::Rectangle<int> (254, 307, 424, 62),
-                    "the meter owns the whole face from the plates' line down - the BAL readout rides its top strip, the bipolar GR bar under it");
+                    "the meter owns the whole face from the plates' line down - the ADD face rides its top strip, the bipolar GR bar under it");
 
         // v2.92.0: the plates sit ON TOP of the meter (the meter is
-        // added first, the plates after), so the BAL readout on the
+        // added first, the plates after), so the ADD face on the
         // meter's own top strip reads LEVEL with PUNCH ON and
         // CLIPPER ON - and the plates keep their own clicks
         expectTrue (grBar->getBounds().getY() == punchBtn->getBounds().getY()
@@ -9491,7 +9508,7 @@ void testV288TransientDesigner()
                             punchBtn->getBounds().getCentreY()) == punchBtn
                         && editorForV288.getComponentAt (clipBtn->getBounds().getCentreX(),
                             clipBtn->getBounds().getCentreY()) == clipBtn,
-                    "the BAL readout rides the meter's own top strip - the plates' line itself, and the plates keep their own clicks on top of the meter");
+                    "the ADD face rides the meter's own top strip - the plates' line itself, and the plates keep their own clicks on top of the meter");
 
         // the whole section sits inside its engraved frame, its title
         // band gone (v2.89.0), flush inside the frame's own floor
@@ -9567,6 +9584,104 @@ void testV292CrankedKnobs()
                     probe.landsOn, 0.001,
                     probe.words);
     }
+}
+
+// ---------------------------------------------------------------------------
+// v2.93.0 (Clement's request): the ADD faces - the PUNCH side's delta
+// renamed ADD and reading just right of the PUNCH plate, the COMP's own
+// OUT-minus-IN delta engraved just right of COMP ON, the WET GAIN
+// halved to a +/-9 dB dosage, and the CLIPPER riding BEFORE the WET GAIN
+// so the rail bounds the shape alone (the re-levelled clip order is
+// pinned inside testV288TransientDesigner)
+// ---------------------------------------------------------------------------
+void testV293AddFaces()
+{
+    beginTest ("v2.93.0: the WET GAIN at +/-9, the ADD faces beside their plates");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- the WET GAIN is a dosage now, not a fader: the parameter
+    // clamps the ask to its own half-dial, so an old session that
+    // carries a +18 lands at the +9 ceiling ----
+    setParam ("transGain", 12.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("transGain")->load(), 9.0, 0.001,
+                "the WET GAIN tops out at +9 dB - the make-up is a dosage, not a fader");
+    setParam ("transGain", -12.0f);
+    expectNear (strip->getApvts().getRawParameterValue ("transGain")->load(), -9.0, 0.001,
+                "the WET GAIN bottoms out at -9 dB - the rail's own mirror");
+    setParam ("transGain", 0.0f);
+
+    // ---- the COMP's ADD readout: parked, the stage is bit-skipped
+    // and its two one-poles see the same samples - an exact zero ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectTrue (std::abs (strip->getCompBalanceDb()) <= 0.05,
+                    "the parked compressor's ADD face reads its dead centre - out minus in is zero");
+    }
+
+    // ---- working: threshold -20, ratio 10 - a 0.5 tone at -9.03 dB
+    // RMS rides 11 dB over the threshold and the curve takes 0.9 of
+    // it, so the ADD reads the stage's whole truth (make-up at unity,
+    // mix at 100): -9.87 dB ----
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the working compressor's ADD face reads the curve's own arithmetic - 0.9 x (20 - 9.03) = 9.87 dB down");
+    }
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+
+    // ---- the faces on the plates' line: the COMP's ADD just right of
+    // its plate - level with it, inside the air between the ladders'
+    // head and the knob field's corner - and the PUNCH side's ADD
+    // digits still riding the meter's own top strip ----
+    CostesStripEditor editorForV293 (*strip);
+    editorForV293.setVisible (true);
+
+    const auto* compFace = editorForV293.getCompAddFace();
+
+    expectTrue (compFace != nullptr
+                    && compFace->getBounds() == juce::Rectangle<int> (348, 492, 76, 18)
+                    && editorForV293.getComponentAt (compFace->getBounds().getCentreX(),
+                        compFace->getBounds().getCentreY()) == compFace,
+                "the COMP's ADD face rides just right of the COMP ON plate - level with it on the plates' line, inside the block's own head, clear of the knob field");
+
+    expectTrue (editorForV293.getComponentAt (400, 316) == editorForV293.getTransientGrBar(),
+                "the PUNCH side's ADD digits ride the meter's own top strip - the air beside the PUNCH plate belongs to the meter");
 }
 } // namespace
 
@@ -9653,6 +9768,7 @@ int main (int argc, char* argv[])
     testV287ZoneTilesAndCaptionBreath();
     testV288TransientDesigner();
     testV292CrankedKnobs();
+    testV293AddFaces();
 
     if (integration)
         testIntegrationRealConsole();
