@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.94.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.95.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,20 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.95.0** — *The averaged ADD and the calmer meters.*
+  - **ADD, averaged (Clement's request).** The ADD faces speak the
+    SETTLED truth: a ~1 s one-pole on each per-block balance, living
+    in the processor, drives both the engraved digits and the click.
+    On dynamic material the instant's spike (a transient riding the
+    wet) never reaches the knob, only the section's own averaged
+    reading does - the calm number the eye reads is the same number
+    the hand folds.
+  - **Shorter meters (Clement's request).** The expander's and the
+    compressor's ladders give 20 px each back: the panel slims from
+    830 x 744 to **830 x 704**, the EQ rows tighten to a 98 px pitch
+    (its knobs 83 x 94), the IMAGE and SHAPE OUT blocks close to
+    344 px, the phase and OS plates slim to 18 px, and every knob
+    keeps its own square.
 - **2.94.0** — *The one-click ADD and the taller console.*
   - **ADD, clickable (Clement's request).** The ADD faces work for
     their living: one click on the digits folds their reading

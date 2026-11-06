@@ -234,10 +234,19 @@ public:
     // engraves the reading beside the GR bar
     float getTransBalanceDb() const { return transBalanceDb.load (std::memory_order_relaxed); }
 
+    // v2.95.0 (Clement's request): the AVERAGED balance - a ~1 s
+    // one-pole on the per-block reading, the number the ADD digits
+    // engrave and the click folds - the settled truth, not the
+    // instant's spike
+    float getTransBalanceAvgDb() const { return transBalanceAvgDb.load (std::memory_order_relaxed); }
+
     // v2.93.0 (Clement's request): the compressor's ADD readout - the
     // stage's own level delta, OUT minus IN, for the editor's face
     // beside the COMP ON plate and the offline harness
     float getCompBalanceDb() const { return compBalanceDb.load (std::memory_order_relaxed); }
+
+    // v2.95.0: the compressor's own averaged ADD reading
+    float getCompBalanceAvgDb() const { return compBalanceAvgDb.load (std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -519,9 +528,18 @@ private:
     // the detector's silence so a silent section reads a clean 0.0
     std::atomic<float> transBalanceDb { 0.0f };
 
+    // v2.95.0: the averaged WET GAIN balance - a ~1 s one-pole the
+    // ADD face engraves and its click folds
+    float transBalanceAvg = 0.0f;
+    std::atomic<float> transBalanceAvgDb { 0.0f };
+
     // v2.93.0: the compressor's ADD readout - the stage's OUT-minus-IN
     // one-pole delta, snapped per block beside the transient's
     std::atomic<float> compBalanceDb { 0.0f };
+
+    // v2.95.0: the compressor's own averaged balance
+    float compBalanceAvg = 0.0f;
+    std::atomic<float> compBalanceAvgDb { 0.0f };
     // v2.90.0: last wall-clock moment the wet signal touched the
     // CLIPPER's rail (-1e12 = never); the plate's LED peak-holds
     // for one second from this timestamp
@@ -1039,9 +1057,11 @@ public:
 
         // v2.91.0: the WET GAIN balance readout's display state.
         // v2.92.0 (Clement's request): the reading stopped dancing -
-        // the EMA slowed to ~1.5 s and the display value LATCHES
-        // once a second (1 Hz), off the paint's own 30 Hz pass
-        float balEma = 0.0f;
+        // the display value LATCHES once a second (1 Hz), off the
+        // paint's own 30 Hz pass. v2.95.0: the strip's own ~1 s
+        // average feeds the latch - the smoothing moved to the
+        // processor, so the digits and the click read the same
+        // number
         float balLatch = 0.0f;
         double balLastLatchMs = 0.0;
     };
@@ -1068,10 +1088,10 @@ public:
 
         CostesStrip& owner;
 
-        // the same display state as the GrBarMeter's own readout: a
-        // ~1.5 s EMA off the per-block snapshot, LATCHED once a
-        // second so the digits stand still instead of dancing
-        float balEma = 0.0f;
+        // the same display state as the GrBarMeter's own readout:
+        // the strip's own ~1 s average, LATCHED once a second so
+        // the digits stand still instead of dancing (v2.95.0: the
+        // smoothing lives in the processor now)
         float balLatch = 0.0f;
         double balLastLatchMs = 0.0;
     };

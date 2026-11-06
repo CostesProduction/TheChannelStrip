@@ -1694,6 +1694,11 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     transBalanceDb.store (0.0f, std::memory_order_relaxed);
     // v2.93.0: the compressor's ADD readout starts from unity too
     compBalanceDb.store (0.0f, std::memory_order_relaxed);
+    // v2.95.0: the averaged ADD readings start from unity as well
+    transBalanceAvg = 0.0f;
+    compBalanceAvg = 0.0f;
+    transBalanceAvgDb.store (0.0f, std::memory_order_relaxed);
+    compBalanceAvgDb.store (0.0f, std::memory_order_relaxed);
 
     for (auto& section : compSidechain)
         section.reset();
@@ -2834,11 +2839,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // clean 0.0. The editor engraves the reading beside the GR bar:
     // turn the makeup until it reads 0 and the section changes the
     // contrast without changing the loudness
-    transBalanceDb.store (10.0f * std::log10 (
-                              juce::jmax (transOutPower, detectorFloorPower))
-                              - 10.0f * std::log10 (
-                              juce::jmax (expOutPower, detectorFloorPower)),
-                          std::memory_order_relaxed);
+    const float transBalanceNow = 10.0f * std::log10 (
+                                      juce::jmax (transOutPower, detectorFloorPower))
+                                      - 10.0f * std::log10 (
+                                      juce::jmax (expOutPower, detectorFloorPower));
+    transBalanceDb.store (transBalanceNow, std::memory_order_relaxed);
 
     // v2.93.0 (Clement's request): the compressor's ADD readout - the
     // stage's own level delta, OUT minus IN, both one-poles floored
@@ -2847,11 +2852,26 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // action to take - beside the COMP ON plate, level with it on
     // the plates' line, the same discipline as the PUNCH side's own
     // ADD face
-    compBalanceDb.store (10.0f * std::log10 (
-                             juce::jmax (compOutPower, detectorFloorPower))
-                             - 10.0f * std::log10 (
-                             juce::jmax (compInPower, detectorFloorPower)),
-                         std::memory_order_relaxed);
+    const float compBalanceNow = 10.0f * std::log10 (
+                                     juce::jmax (compOutPower, detectorFloorPower))
+                                     - 10.0f * std::log10 (
+                                     juce::jmax (compInPower, detectorFloorPower));
+    compBalanceDb.store (compBalanceNow, std::memory_order_relaxed);
+
+    // v2.95.0 (Clement's request): the ADD faces speak an AVERAGED
+    // reading - a ~1 s one-pole on each per-block balance, driven by
+    // the block's own length so the average stays true whatever the
+    // host's buffer. The digits engrave this number and the click
+    // folds THIS number: on dynamic material the instant's spike
+    // (a transient riding the wet) never reaches the knob, only the
+    // section's own settled truth does
+    const float balanceAvgCoef = 1.0f
+        - std::exp (-(float) numSamples
+                    / (currentSampleRate * 1.0f));
+    transBalanceAvg += (transBalanceNow - transBalanceAvg) * balanceAvgCoef;
+    transBalanceAvgDb.store (transBalanceAvg, std::memory_order_relaxed);
+    compBalanceAvg += (compBalanceNow - compBalanceAvg) * balanceAvgCoef;
+    compBalanceAvgDb.store (compBalanceAvg, std::memory_order_relaxed);
 
     // v2.86.0 (Clement's request): the TRIM OUT - the last gain the
     // signal rides on its way out. The drive stage keeps its own
@@ -3623,7 +3643,7 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.94.0 (Clement's request): the console gains its height
     // back - the filters quincunx, the seams and the blocks
     // breathing tighter, and the panel reads 830 x 744
-    setSize (830, 744);
+    setSize (830, 704);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3883,9 +3903,10 @@ void CostesStripEditor::paint (juce::Graphics& g)
     // it returns to its own place: JUST above the EQ ON plate.
     // v2.86.0: the tighter front end carries the header up with it.
     // v2.92.0: the tightened console carries it up again - the EQ's
-    // own area starts at y = 296 (v2.94.0: the quincunx's savings),
-    // its header band at 300, and the rule rides 2 px above, at 298
-    g.drawLine (14.0f, 298.0f, 240.0f, 298.0f, 1.0f);
+    // own area starts at y = 286 (v2.95.0: the meters' savings carry
+    // it up once more), its header band at 290, and the rule rides
+    // 2 px above, at 288
+    g.drawLine (14.0f, 288.0f, 240.0f, 288.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -4011,7 +4032,7 @@ void CostesStripEditor::resized()
     // another 14 px of height, and the EQ keeps its own whole room.
     // v2.92.0: the signature's own band slims from 24 to 18 - the
     // EQ keeps its whole 101 px rows still
-    column1.removeFromTop (18);   // the signature's own band
+    column1.removeFromTop (14);   // the signature's own band (v2.95.0)
 
     // v2.86.0 (Clement's request): the front end tightens again -
     // the phase plate left for the IMAGE block at the head of the
@@ -4129,7 +4150,7 @@ void CostesStripEditor::resized()
     // v2.79.0 (Clement's remark 1): a real breath between the end of
     // the filters and the start of the EQ - the merged block's last
     // line and the section's own name never touch
-    column1.removeFromTop (12);
+    column1.removeFromTop (8);
 
     // ---- the EQ section (v2.61.0, Clement's spec; stacked in
     // v2.75.0; SSL-ordered in v2.77.0; v2.78.0, Clement's remarks):
@@ -4143,7 +4164,7 @@ void CostesStripEditor::resized()
     // v2.94.0 (Clement's request): the EQ keeps its own whole room -
     // it pins to the column's own floor instead, so the front end's
     // quincunx savings flow into the air above it
-    auto eqArea = column1.removeFromBottom (444);
+    auto eqArea = column1.removeFromBottom (414);
     eqArea.removeFromTop (4);
     auto eqHeader = eqArea.removeFromTop (18);
 
@@ -4251,8 +4272,8 @@ void CostesStripEditor::resized()
     // savings flow here - the stages grow to 280 and their ladders
     // to 246, the transient frame closing to a 9 px breath on either
     // side where 21 px of air once stood
-    auto expBlock = column2.removeFromTop (280);
-    auto compBlock = column2.removeFromBottom (280);
+    auto expBlock = column2.removeFromTop (260);
+    auto compBlock = column2.removeFromBottom (260);
 
     // v2.76.0 (Clement's remarks): the stages returned to their
     // v2.74 height, and the TRANSIENT slot kept its own engraved
@@ -4535,21 +4556,21 @@ void CostesStripEditor::resized()
     // v2.94.0 (Clement's request): the blocks shed their knobs' own
     // savings - 364 px tall with a 2 px breath between them, ending
     // flush under the panel's floor
-    auto imageBlock = column3.removeFromTop (364);
+    auto imageBlock = column3.removeFromTop (344);
     reservedFrames[0] = imageBlock;
-    auto shapeBlock = column3.removeFromBottom (364);
+    auto shapeBlock = column3.removeFromBottom (344);
     reservedFrames[1] = shapeBlock;
 
     // ---- the IMAGE block ----
     auto imageBody = imageBlock;
-    imageBody.removeFromTop (16);   // the engraved name's own band
+    imageBody.removeFromTop (14);   // the engraved name's own band
 
     // the phase plate at the block's head, under its engraved name:
     // "PHASE INVERT" with the LED at its left and the empty-set
     // symbol at its right, 118 px of the column's own width
-    imageBody.removeFromTop (2);
-    phaseButton.setBounds (imageBody.removeFromTop (26)
-                                .withSizeKeepingCentre (118, 26));
+    imageBody.removeFromTop (1);
+    phaseButton.setBounds (imageBody.removeFromTop (18)
+                                .withSizeKeepingCentre (118, 18));
 
     // the three image knobs, each with its caption word under it -
     // the block's engraved name names the SECTION now, so every knob
@@ -4563,12 +4584,12 @@ void CostesStripEditor::resized()
 
     for (int i = 0; i < 3; ++i)
     {
-        imageBody.removeFromTop (3);   // the street after the unit above
+        imageBody.removeFromTop (2);   // the street after the unit above
         const auto imageKnobBounds = imageBody.removeFromTop (84)
                                          .withSizeKeepingCentre (83, 84);
         imageKnobList[(size_t) i]->setBounds (imageKnobBounds);
         imageBody.removeFromTop (1);   // the caption hugs its own knob
-        const auto imageWordBounds = imageBody.removeFromTop (18)
+        const auto imageWordBounds = imageBody.removeFromTop (16)
                                          .reduced (4, 0);
         imageWordList[(size_t) i]->setBounds (imageWordBounds);
 
@@ -4585,7 +4606,7 @@ void CostesStripEditor::resized()
 
     // ---- the SHAPE OUT block ----
     auto shapeBody = shapeBlock;
-    shapeBody.removeFromTop (16);   // the engraved name's own band
+    shapeBody.removeFromTop (14);   // the engraved name's own band
 
     // the tilt, its caption word and glyph back under its knob.
     // v2.87.0 (Clement's remark 3): the caption hugs ITS OWN knob -
@@ -4594,12 +4615,12 @@ void CostesStripEditor::resized()
     // its word: the word is drawn centred in its box, so the glyph
     // takes its place 4 px left of the word's own left edge (the old
     // formula sat it 7 px INTO the word)
-    shapeBody.removeFromTop (2);
+    shapeBody.removeFromTop (1);
     const auto tiltKnobBounds = shapeBody.removeFromTop (84)
                                     .withSizeKeepingCentre (83, 84);
     tiltKnob.setBounds (tiltKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
-    auto tiltCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    auto tiltCaption = shapeBody.removeFromTop (16).reduced (4, 0);
     tiltLabel.setBounds (tiltCaption);
     const int tiltTextWidth = tiltLabel.getFont()
                                   .getStringWidth (tiltLabel.getText());
@@ -4612,20 +4633,20 @@ void CostesStripEditor::resized()
     // its caption under it, the OS plate under the caption, the same
     // per-knob pattern as the whole column. The OS plate belongs to
     // the drive, so the drive's tile carries them BOTH
-    shapeBody.removeFromTop (3);
+    shapeBody.removeFromTop (2);
     const auto driveKnobBounds = shapeBody.removeFromTop (84)
                                      .withSizeKeepingCentre (83, 84);
     driveKnob.setBounds (driveKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
-    auto driveCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    auto driveCaption = shapeBody.removeFromTop (16).reduced (4, 0);
     driveLabel.setBounds (driveCaption);
     const int driveTextWidth = driveLabel.getFont()
                                   .getStringWidth (driveLabel.getText());
     driveIcon.setBounds (driveCaption.getCentreX() - driveTextWidth / 2 - 16 - 4,
                          driveCaption.getY() + 1, 16, 16);
-    shapeBody.removeFromTop (2);
-    oversampleButton.setBounds (shapeBody.removeFromTop (26)
-                                    .withSizeKeepingCentre (110, 26));
+    shapeBody.removeFromTop (1);
+    oversampleButton.setBounds (shapeBody.removeFromTop (18)
+                                    .withSizeKeepingCentre (110, 18));
     driveZone.setBounds (driveKnobBounds.expanded (6, 0)
                             .withBottom (oversampleButton.getBounds().getBottom()));
 
@@ -4633,12 +4654,12 @@ void CostesStripEditor::resized()
     // on its way out, the fader glyph at its caption's left. A
     // FOUR-breath street after the OS plate keeps the drive's own
     // zone together and sets the trim out apart
-    shapeBody.removeFromTop (4);
+    shapeBody.removeFromTop (3);
     const auto trimOutKnobBounds = shapeBody.removeFromTop (84)
                                        .withSizeKeepingCentre (83, 84);
     trimOutKnob.setBounds (trimOutKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
-    auto trimOutCaption = shapeBody.removeFromTop (18).reduced (4, 0);
+    auto trimOutCaption = shapeBody.removeFromTop (16).reduced (4, 0);
     trimOutLabel.setBounds (trimOutCaption);
     const int trimOutTextWidth = trimOutLabel.getFont()
                                      .getStringWidth (trimOutLabel.getText());
@@ -4951,12 +4972,14 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
 // v2.94.0 (Clement's request): the ADD face works for its living -
 // ONE CLICK on the digits folds their reading straight into the
 // WET GAIN knob, the gain staging in a single move (a knob at
-// 2.4 dB with the face reading ADD +1.2 lands at 3.6). The click
-// takes the LIVE reading rounded to the digits' own decimal - the
-// display's 1 Hz latch belongs to the eye, not to the hand
+// 2.4 dB with the face reading ADD +1.2 lands at 3.6). v2.95.0
+// (Clement's request): the click takes the AVERAGED reading,
+// rounded to the digits' own decimal - the ~1 s average belongs to
+// the hand as much as to the eye, so the click folds the same
+// settled truth the digits engrave
 void CostesStripEditor::GrBarMeter::applyTheAdd()
 {
-    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getTransBalanceDb());
+    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getTransBalanceAvgDb());
     const float stepped = (float) juce::roundToInt (addDb * 10.0f) / 10.0f;
 
     if (std::abs (stepped) < 0.05f)
@@ -5010,22 +5033,21 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
     // rides the meter's own top strip - the plates' line itself,
     // level with PUNCH ON and CLIPPER ON, and since v2.93.0 just
     // right of the PUNCH plate (renamed ADD at Clement's ask: it
-    // reads what the section ADDs), bigger than the caption below it. The reading latches ONCE A SECOND (1 Hz) off
-    // a ~1.5 s EMA, so the digits stand still instead of dancing -
-    // a fresh paint only advances the smoothing; the latch decides
-    // what the eye gets to read. Green within half a dB of unity,
-    // amber beyond - turn the WET GAIN until it reads 0 and the
-    // section changes the contrast without changing the loudness
+    // reads what the section ADDs), bigger than the caption below it. v2.95.0 (Clement's request): the digits carry
+    // the strip's own ~1 s averaged balance - the same settled
+    // number the click folds - and LATCH once a second (1 Hz), so
+    // they stand still instead of dancing; the average belongs to
+    // the hand as much as to the eye. Green within half a dB of
+    // unity, amber beyond - turn the WET GAIN until it reads 0 and
+    // the section changes the contrast without changing the loudness
     {
         const double nowMs = juce::Time::getMillisecondCounterHiRes();
-        const float raw = juce::jlimit (-30.0f, 30.0f, owner.getTransBalanceDb());
-
-        balEma += (raw - balEma) * 0.022f;   // ~1.5 s at 30 Hz
+        const float raw = juce::jlimit (-30.0f, 30.0f, owner.getTransBalanceAvgDb());
 
         if (balLastLatchMs <= 0.0 || nowMs - balLastLatchMs >= 1000.0)
         {
             balLastLatchMs = nowMs;
-            balLatch = balEma;
+            balLatch = raw;
         }
 
         // v2.93.1 (Clement's remark): the digits speak the ACTION,
@@ -5212,7 +5234,9 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
 // whole face is the button
 void CostesStripEditor::CompAddFace::applyTheAdd()
 {
-    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getCompBalanceDb());
+    // v2.95.0: the click folds the AVERAGED reading - the same
+    // settled number the digits engrave
+    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getCompBalanceAvgDb());
     const float stepped = (float) juce::roundToInt (addDb * 10.0f) / 10.0f;
 
     if (std::abs (stepped) < 0.05f)
@@ -5245,23 +5269,22 @@ void CostesStripEditor::CompAddFace::paint (juce::Graphics& g)
     // v2.93.0 (Clement's request): the compressor's ADD face - the
     // stage's own OUT-minus-IN delta, engraved just right of the
     // COMP ON plate, level with it on the plates' line. The PUNCH
-    // side's own ADD face carries the same discipline: a ~1.5 s EMA
-    // off the processor's per-block snapshot, LATCHED once a second
-    // (1 Hz), so the digits stand still instead of dancing. Green
-    // within half a dB of unity, amber beyond - and v2.93.1
-    // (Clement's remark): the digits speak the ACTION, not the
-    // balance, the balance's own negation (a compressor 3.1 dB
-    // under unity reads ADD +3.1 dB, its make-up ask; 3.1 over
+    // side's own ADD face carries the same discipline: the strip's
+    // own ~1 s averaged balance, LATCHED once a second (1 Hz), so
+    // the digits stand still instead of dancing (v2.95.0: the
+    // average lives in the processor now, and the click folds the
+    // same number). Green within half a dB of unity, amber beyond -
+    // and v2.93.1 (Clement's remark): the digits speak the ACTION,
+    // not the balance, the balance's own negation (a compressor 3.1
+    // dB under unity reads ADD +3.1 dB, its make-up ask; 3.1 over
     // reads ADD -3.1 dB, take 3.1 off)
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    const float raw = juce::jlimit (-30.0f, 30.0f, owner.getCompBalanceDb());
-
-    balEma += (raw - balEma) * 0.022f;   // ~1.5 s at 30 Hz
+    const float raw = juce::jlimit (-30.0f, 30.0f, owner.getCompBalanceAvgDb());
 
     if (balLastLatchMs <= 0.0 || nowMs - balLastLatchMs >= 1000.0)
     {
         balLastLatchMs = nowMs;
-        balLatch = balEma;
+        balLatch = raw;
     }
 
     const float addLatch = -balLatch;
