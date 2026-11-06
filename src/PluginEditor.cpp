@@ -1899,7 +1899,15 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // v2.39.0 (Clement): the minimum WIDTH drops to 860 - the
     // sidebar needs 147, narrow channel strips were drowning in
     // dead margin at the old 1024 floor.
-    setResizeLimits (860, proc.getAnalyserVisible() ? 970 : 790, 2560, 1600);
+    // v2.95.1 (Clement's report): the minimum HEIGHT follows the
+    // fit's own floor now - the condensed sidebar's 911 / 731
+    // (v2.52/v2.57) - instead of the stale 970 / 790 left over
+    // from before the condensation. The hosts clamp the window at
+    // these limits, and the old 970 drowned the short consoles
+    // (the Costes Console at 830 x 704) in a dead bottom margin
+    // the fit never asked for - the tall bx consoles ride over
+    // the floor and never saw it.
+    setResizeLimits (860, proc.getAnalyserVisible() ? 911 : 731, 2560, 1600);
 
     // v2.4: the title sits at the top of the condensed left sidebar, so
     // it is small and wraps onto two lines inside the column.
@@ -2583,7 +2591,9 @@ void TheChannelStripAudioProcessorEditor::applyAnalyserVisibility()
         spectrumPanel.resetDisplay();
 
     spectrumPanel.setVisible (show);
-    setResizeLimits (860, show ? 970 : 790, 2560, 1600); // v2.39.0: min width 860
+    // v2.95.1: the limits follow the fit's own floor - 911 / 731,
+    // the condensed sidebar's minimum (see the constructor)
+    setResizeLimits (860, show ? 911 : 731, 2560, 1600); // v2.39.0: min width 860
     resized();
 
     if (embeddedHostedEditor != nullptr)

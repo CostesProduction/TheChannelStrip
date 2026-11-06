@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.95.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.95.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,16 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.95.1** — *The window hugs the short consoles.*
+  - **Dead bottom margin, fixed (Clement's report).** Hosting the
+    Costes Console (830 x 704, the shortest of the hosted strips)
+    the shell window still carried the stale 970 px minimum height
+    left over from before the sidebar's v2.52/v2.57 condensation:
+    the fit asked for 911 px, the hosts clamped the window back up
+    to 970, and the console drowned in a dead bottom margin. The
+    window's resize limits now follow the fit's own floor - 911 px
+    with the analyser strip, 731 without - so the shell frames the
+    Costes Console as tightly as it frames the tall bx consoles.
 - **2.95.0** — *The averaged ADD and the calmer meters.*
   - **ADD, averaged (Clement's request).** The ADD faces speak the
     SETTLED truth: a ~1 s one-pole on each per-block balance, living
