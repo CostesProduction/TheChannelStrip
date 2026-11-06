@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.95.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.96.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,26 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.96.0** — *The top end stops cramping.*
+  - **The de-cramped top end (Clement's report).** The RBJ/bilinear
+    filters folded every analog prototype's frequency axis at Nyquist:
+    a low-pass read -infinity dB there while its analog prototype
+    still speaks, and a Q-form high shelf levelled at HALF its gain.
+    The internal strip's EQ bells and shelves, its high cut (every
+    Butterworth order) and the ten tilt steps are now ANALOG-MATCHED:
+    each biquad is fitted to its analog prototype across the whole
+    band (dense-grid least squares in the power domain, spectral
+    factorisation, then a damped Gauss-Newton refinement in the dB
+    domain, scored against the prototype at the true corner). The
+    high shelf now reads half its dB at its corner and reaches its
+    full gain; a 2 kHz second-order cut reads the analog -35.3 dB at
+    16 kHz (the bilinear cramp read -44.7); the tilt line holds
+    within 0.11 dB from 40 Hz to 16 kHz. The low cut keeps its RBJ
+    form (its legal 16 - 1600 Hz range never cramps), flat bands
+    stay the bit-exact identity, and the Nyquist guard relaxes from
+    0.45 to 0.475 of the rate so the parked 24 kHz cut lands at
+    22.8 kHz at 48 kHz.
 
 - **2.95.1** — *The window hugs the short consoles.*
   - **Dead bottom margin, fixed (Clement's report).** Hosting the

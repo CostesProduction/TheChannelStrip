@@ -65,6 +65,838 @@ namespace
         return best;
     }
 
+    // ---------------------------------------------------------------
+    // v2.96.0: THE DE-CRAMPED TOP END. The RBJ/bilinear formulas above
+    // map the analog prototypes through the bilinear transform, whose
+    // frequency axis folds at Nyquist: a low-pass section's (1 + z^-1)^2
+    // numerator reads -infinity dB there while its analog prototype
+    // still speaks (a parked 22.8 kHz second-order cut says -0.9 dB at
+    // 16 kHz in the analog world but -0.02 dB through RBJ; a 2 kHz cut
+    // probed three octaves up says -35 dB analog, -45 dB through RBJ),
+    // and a Q-form high shelf tops at HALF its gain (+6 dB shelf at
+    // 7200 Hz: +3 dB at Nyquist, +0.00 dB at its own corner - the
+    // analog shelf says +3 dB at the corner and reaches the full +6 dB).
+    // The top octaves cramp - Clement's complaint. The designs below fit
+    // each biquad to its ANALOG prototype directly in the magnitude
+    // domain: candidate starts (RBJ at the corner and nearby corners,
+    // a weighted least-squares power-domain fit recovered by spectral
+    // factorisation) are refined by a damped Gauss-Newton in the dB
+    // domain over a dense grid and scored against the prototype on
+    // that same grid - the best wins, and the winner is usually found
+    // within one start. Far below Nyquist the prototypes coincide with
+    // RBJ, so nothing changes where nothing was wrong, and the low cut
+    // (corner <= 1600 Hz) keeps its RBJ form above: its cramping is nil
+    // on its legal range. At 0 dB / flat every design degenerates to
+    // the exact unity biquad, so the bypass invariants survive
+    // bit-exact.
+    // ---------------------------------------------------------------
+
+    struct MatchedTarget
+    {
+        enum Kind { bell, hShelf, lShelf, lpSection, lp1 } kind = lp1;
+        double a = 1.0;   // A = 10 ^ (gain / 40), bells and shelves
+        double k = 0.0;   // K = ln2 / 2 * octaves, bells
+        double q = 1.0;   // section Q, low-pass pairs
+
+        double sq (double x) const
+        {
+            const double x2 = x * x;
+
+            switch (kind)
+            {
+                case bell:
+                {
+                    const double s = std::sinh (k);
+                    const double base = (1.0 - x2) * (1.0 - x2);
+                    const double nb = 2.0 * a * s * x;
+                    const double db = 2.0 * s * x / a;
+                    return (base + nb * nb) / (base + db * db);
+                }
+                case hShelf:
+                {
+                    const double x4 = x2 * x2;
+                    return (1.0 + a * a * x4) / (1.0 + x4 / (a * a));
+                }
+                case lShelf:
+                {
+                    const double x4 = x2 * x2;
+                    return (x4 + a * a) / (x4 + 1.0 / (a * a));
+                }
+                case lpSection:
+                {
+                    const double base = (1.0 - x2) * (1.0 - x2);
+                    const double xq = x / q;
+                    return 1.0 / (base + xq * xq);
+                }
+                case lp1:
+                default:
+                    return 1.0 / (1.0 + x2);
+            }
+        }
+    };
+
+    // the dense design/score grid: full band up to 0.999 Nyquist, the
+    // points where the prototype still matters (above -60 dB)
+    struct MatchedGrid
+    {
+        int n = 0;
+        double f[100];
+        double targetDb[100];
+    };
+
+    void buildMatchedGrid (MatchedGrid& g, double fs, double fc,
+                           const MatchedTarget& t)
+    {
+        const double nyq = fs * 0.5 * 0.999;
+        g.n = 0;
+
+        auto add = [&] (double freq)
+        {
+            if (g.n >= 100)
+                return;
+            const double m2 = t.sq (freq / fc);
+            if (m2 >= 1.0e-6)
+            {
+                g.f[g.n] = freq;
+                g.targetDb[g.n] = 10.0 * std::log10 (m2);
+                ++g.n;
+            }
+        };
+
+        auto span = [&] (double lo, double hi, int count)
+        {
+            if (hi <= lo * 1.0001)
+                hi = lo * 1.0001;
+            for (int i = 0; i < count; ++i)
+                add (lo * std::pow (hi / lo, (double) i / (double) (count - 1)));
+        };
+
+        if (fc > 20.0)
+        {
+            span (10.0, fc * 0.25, 24);
+            span (fc * 0.25, nyq, 72);
+        }
+        else
+        {
+            span (10.0, nyq, 72);
+        }
+
+        add (nyq);
+    }
+
+    // the biquad's magnitude in dB at a frequency, floored at -150 so
+    // the dB-domain refinement keeps a gradient near its Nyquist zeros
+    double matchedDb (const double* c, double fs, double f)
+    {
+        const double w = juce::MathConstants<double>::twoPi * f / fs;
+        const double cw = std::cos (w);
+        const double c2 = std::cos (2.0 * w);
+        const double b = c[0] * c[0] + c[1] * c[1] + c[2] * c[2]
+                         + 2.0 * c[1] * (c[0] + c[2]) * cw
+                         + 2.0 * c[0] * c[2] * c2;
+        const double d = 1.0 + c[3] * c[3] + c[4] * c[4]
+                         + 2.0 * c[3] * (1.0 + c[4]) * cw
+                         + 2.0 * c[4] * c2;
+
+        if (b <= 0.0 || d <= 0.0)
+            return -150.0;
+
+        const double db = 10.0 * std::log10 (b / d);
+        return db < -150.0 ? -150.0 : db;
+    }
+
+    bool matchedStable (double a1, double a2)
+    {
+        const double disc = a1 * a1 - 4.0 * a2;
+
+        if (disc >= 0.0)
+        {
+            const double r1 = 0.5 * (-a1 + std::sqrt (disc));
+            const double r2 = 0.5 * (-a1 - std::sqrt (disc));
+            return std::abs (r1) < 1.0 && std::abs (r2) < 1.0;
+        }
+
+        return a2 > 0.0 && a2 < 1.0;
+    }
+
+    // worst dB error over the grid (the selection score, always against
+    // the prototype at the TRUE corner)
+    double matchedScore (const double* c, const MatchedGrid& g, double fs)
+    {
+        if (! matchedStable (c[3], c[4]))
+            return 1.0e9;
+
+        double worst = 0.0;
+        for (int i = 0; i < g.n; ++i)
+        {
+            const double e = std::abs (matchedDb (c, fs, g.f[i]) - g.targetDb[i]);
+            if (e > worst)
+                worst = e;
+        }
+        return worst;
+    }
+
+    // Modified Gram-Schmidt least squares on the power-domain rows
+    // (never the normal equations: the shelves' systems are far too
+    // ill-conditioned for J^T J)
+    bool matchedMgs (const double rows[][5], const double* rhsIn,
+                     int rowCount, double* out)
+    {
+        double a[96][5], q[96][5], r[5][5] {}, c[5] {}, b[96];
+
+        if (rowCount < 5 || rowCount > 96)
+            return false;
+
+        for (int i = 0; i < rowCount; ++i)
+        {
+            for (int j = 0; j < 5; ++j)
+                a[i][j] = rows[i][j];
+            b[i] = rhsIn[i];
+        }
+
+        for (int j = 0; j < 5; ++j)
+        {
+            double norm = 0.0;
+            for (int i = 0; i < rowCount; ++i)
+            {
+                q[i][j] = a[i][j];
+                norm += q[i][j] * q[i][j];
+            }
+            norm = std::sqrt (norm);
+
+            if (norm < 1.0e-300)
+                return false;
+
+            for (int i = 0; i < rowCount; ++i)
+                q[i][j] /= norm;
+
+            for (int k = j + 1; k < 5; ++k)
+            {
+                r[j][k] = 0.0;
+                for (int i = 0; i < rowCount; ++i)
+                    r[j][k] += q[i][j] * a[i][k];
+                for (int i = 0; i < rowCount; ++i)
+                    a[i][k] -= r[j][k] * q[i][j];
+            }
+
+            r[j][j] = norm;
+        }
+
+        for (int j = 0; j < 5; ++j)
+        {
+            c[j] = 0.0;
+            for (int i = 0; i < rowCount; ++i)
+                c[j] += q[i][j] * b[i];
+            for (int i = 0; i < rowCount; ++i)
+                b[i] -= q[i][j] * c[j];
+        }
+
+        for (int i = 4; i >= 0; --i)
+        {
+            if (std::abs (r[i][i]) < 1.0e-300)
+                return false;
+            double s = c[i];
+            for (int j = i + 1; j < 5; ++j)
+                s -= r[i][j] * out[j];
+            out[i] = s / r[i][i];
+        }
+
+        return true;
+    }
+
+    // closed-form spectral factorisation: C0 + C1 cos w + C2 cos 2w as
+    // |q0 + q1 e^-jw + q2 e^-2jw|^2 on the unit circle
+    bool matchedSpectralFactor (double c0, double c1, double c2, double* q)
+    {
+        const double base = c0 + c2;
+        double disc = base * base - c1 * c1;
+        if (disc < 0.0)
+            disc = 0.0;
+        const double root = std::sqrt (disc);
+        const double p = c2 * 0.5;
+
+        for (int sgn = 0; sgn < 2; ++sgn)
+        {
+            const double s2 = (base + (sgn == 0 ? root : -root)) * 0.5;
+            const double s = std::sqrt (s2 < 0.0 ? 0.0 : s2);
+            const double q1 = s > 1.0e-300 ? c1 / (2.0 * s) : 0.0;
+            double d2 = s * s - 4.0 * p;
+            if (d2 < 0.0)
+                d2 = 0.0;
+            const double sq = std::sqrt (d2);
+            const double q0 = (s + sq) * 0.5;
+            const double q2 = (s - sq) * 0.5;
+
+            if (std::abs (q0 * q0 + q1 * q1 + q2 * q2 - c0)
+                < 1.0e-6 * std::max (1.0, std::abs (c0)) + 1.0e-9)
+            {
+                q[0] = q0; q[1] = q1; q[2] = q2;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // power-domain solution -> real biquad: factor both polys, pick the
+    // stable denominator orientation
+    bool matchedRecover (double b0, double b1, double b2,
+                         double a1, double a2, double* out)
+    {
+        double qn[3], qd[3];
+
+        if (! matchedSpectralFactor (b0, b1, b2, qn)
+            || ! matchedSpectralFactor (1.0, a1, a2, qd))
+            return false;
+
+        for (int flip = 0; flip < 2; ++flip)
+        {
+            const double q0 = flip == 0 ? qd[0] : qd[2];
+            const double q1 = qd[1];
+            const double q2 = flip == 0 ? qd[2] : qd[0];
+
+            if (std::abs (q0) < 1.0e-300)
+                continue;
+
+            const double da1 = q1 / q0, da2 = q2 / q0;
+
+            if (matchedStable (da1, da2))
+            {
+                out[0] = qn[0] / q0; out[1] = qn[1] / q0; out[2] = qn[2] / q0;
+                out[3] = da1;        out[4] = da2;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // the lift: when the least-squares polys hover just below zero, lift
+    // them over it and renormalise - the Gauss-Newton pass cleans up the
+    // small bias this leaves
+    bool matchedRecoverLifted (double b0, double b1, double b2,
+                               double a1, double a2, double* out)
+    {
+        double bmin = 0.0, dmin = 0.0;
+
+        for (int i = 0; i <= 64; ++i)
+        {
+            const double cw = std::cos (juce::MathConstants<double>::pi
+                                        * (double) i / 64.0);
+            bmin = std::min (bmin, b0 + b1 * cw + b2 * std::cos (2.0 * cw));
+            dmin = std::min (dmin, 1.0 + a1 * cw + a2 * std::cos (2.0 * cw));
+        }
+
+        if (bmin < -0.5 || dmin < -0.5)
+            return false;
+
+        const double d0 = 1.0 - dmin * 1.02 + 1.0e-12;
+        return matchedRecover ((b0 - bmin * 1.02 + 1.0e-12) / d0,
+                               b1 / d0, b2 / d0, a1 / d0, a2 / d0, out);
+    }
+
+    // damped Gauss-Newton in the dB domain, numeric Jacobian, lambda
+    // scaled to the Jacobian's own magnitude (a fixed 1e-3 is invisible
+    // next to a diagonal of ~1e5 and the damping never engages)
+    void matchedRefine (double* c, const MatchedGrid& g, double fs)
+    {
+        auto cost = [&] (const double* v) -> double
+        {
+            if (! matchedStable (v[3], v[4]))
+                return 1.0e9;
+
+            double tot = 0.0;
+            for (int i = 0; i < g.n; ++i)
+            {
+                const double e = matchedDb (v, fs, g.f[i]) - g.targetDb[i];
+                tot += e * e;
+            }
+            return tot;
+        };
+
+        double x[5] = { c[0], c[1], c[2], c[3], c[4] };
+        double c0cost = cost (x);
+        double cols[5][100];
+
+        for (int iter = 0; iter < 7; ++iter)
+        {
+            double jtj[5][5] {}, jtr[5] {};
+
+            for (int i = 0; i < g.n; ++i)
+            {
+                const double e = matchedDb (x, fs, g.f[i]) - g.targetDb[i];
+
+                for (int a = 0; a < 5; ++a)
+                {
+                    const double h = 1.0e-6 * std::max (std::abs (x[a]), 1.0);
+                    double x2[5] = { x[0], x[1], x[2], x[3], x[4] };
+                    x2[a] += h;
+                    cols[a][i] = matchedDb (x2, fs, g.f[i]) - g.targetDb[i];
+                }
+
+                for (int a = 0; a < 5; ++a)
+                {
+                    const double h = 1.0e-6 * std::max (std::abs (x[a]), 1.0);
+                    const double grad = (cols[a][i] - e) / h;
+                    jtr[a] += grad * e;
+                    for (int b = a; b < 5; ++b)
+                        jtj[a][b] += grad * grad;
+                }
+            }
+
+            for (int a = 0; a < 5; ++a)
+                for (int b = 0; b < a; ++b)
+                    jtj[a][b] = jtj[b][a];
+
+            double diagMax = 0.0;
+            for (int a = 0; a < 5; ++a)
+                diagMax = std::max (diagMax, std::abs (jtj[a][a]));
+
+            double lam = 1.0e-3 * std::max (diagMax, 1.0);
+            bool improved = false;
+
+            for (int attempt = 0; attempt < 9 && ! improved; ++attempt)
+            {
+                double m[5][6];
+                for (int a = 0; a < 5; ++a)
+                {
+                    for (int b = 0; b < 5; ++b)
+                        m[a][b] = jtj[a][b] + (a == b ? lam : 0.0);
+                    m[a][5] = -jtr[a];
+                }
+
+                for (int col = 0; col < 5; ++col)
+                {
+                    int piv = col;
+                    for (int rr = col; rr < 5; ++rr)
+                        if (std::abs (m[rr][col]) > std::abs (m[piv][col]))
+                            piv = rr;
+                    if (std::abs (m[piv][col]) < 1.0e-300)
+                        continue;
+                    if (piv != col)
+                        for (int cc2 = col; cc2 < 6; ++cc2)
+                            std::swap (m[col][cc2], m[piv][cc2]);
+                    const double pv = m[col][col];
+                    for (int rr = 0; rr < 5; ++rr)
+                    {
+                        if (rr == col)
+                            continue;
+                        const double fac = m[rr][col] / pv;
+                        for (int cc2 = col; cc2 < 6; ++cc2)
+                            m[rr][cc2] -= fac * m[col][cc2];
+                    }
+                }
+
+                // after the full Gauss-Jordan above m[j][5] / m[j][j]
+                // IS dx[j] already
+                double xn[5];
+                for (int j = 0; j < 5; ++j)
+                    xn[j] = x[j] + (std::abs (m[j][j]) > 1.0e-300
+                        ? m[j][5] / m[j][j] : 0.0);
+
+                const double cn = cost (xn);
+                if (cn < c0cost - 1.0e-12)
+                {
+                    for (int j = 0; j < 5; ++j)
+                        x[j] = xn[j];
+                    c0cost = cn;
+                    lam = std::max (lam * 0.3, 1.0e-9);
+                    improved = true;
+                }
+                else
+                {
+                    lam *= 8.0;
+                }
+            }
+
+            if (! improved)
+                break;
+        }
+
+        // keep the refinement only if it actually scored better
+        if (matchedStable (x[3], x[4])
+            && matchedScore (x, g, fs) < matchedScore (c, g, fs))
+            for (int j = 0; j < 5; ++j)
+                c[j] = x[j];
+    }
+
+    // ------- the candidate starts -------
+    void rbjLp (double fs, double fc, double q, double* c)
+    {
+        const double w0 = juce::MathConstants<double>::twoPi * fc / fs;
+        const double cs = std::cos (w0);
+        const double alpha = std::sin (w0) / (2.0 * q);
+        const double a0 = 1.0 + alpha;
+        const double n = 1.0 - cs;
+        c[0] = n * 0.5 / a0; c[1] = n / a0; c[2] = n * 0.5 / a0;
+        c[3] = -2.0 * cs / a0; c[4] = (1.0 - alpha) / a0;
+    }
+
+    void rbjBell (double fs, double fc, double A, double K, double* c)
+    {
+        const double w0 = juce::MathConstants<double>::twoPi * fc / fs;
+        const double cs = std::cos (w0);
+        const double alpha = std::sin (w0) * std::sinh (K);
+        const double a0 = 1.0 + alpha / A;
+        c[0] = (1.0 + alpha * A) / a0;
+        c[1] = -2.0 * cs / a0;
+        c[2] = (1.0 - alpha * A) / a0;
+        c[3] = c[1];
+        c[4] = (1.0 - alpha / A) / a0;
+    }
+
+    void rbjHShelf (double fs, double fc, double A, double* c)
+    {
+        const double w0 = juce::MathConstants<double>::twoPi * fc / fs;
+        const double cs = std::cos (w0);
+        const double sqA = std::sqrt (A);
+        const double alpha = std::sin (w0) * sqA * 0.5;
+        const double a0 = (A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha;
+        c[0] = ((A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
+        c[1] = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
+        c[2] = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+        c[3] = 2.0 * ((A - 1.0) - (A + 1.0) * cs) / a0;
+        c[4] = ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+    }
+
+    void rbjLShelf (double fs, double fc, double A, double* c)
+    {
+        const double w0 = juce::MathConstants<double>::twoPi * fc / fs;
+        const double cs = std::cos (w0);
+        const double sqA = std::sqrt (A);
+        const double alpha = std::sin (w0) * sqA * 0.5;
+        const double a0 = (A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha;
+        c[0] = A * ((A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
+        c[1] = 2.0 * A * ((A - 1.0) - (A + 1.0) * cs) / a0;
+        c[2] = A * ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+        c[3] = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
+        c[4] = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
+    }
+
+    // the weighted least-squares power-domain start at the (possibly
+    // shifted) corner: |H|^2 rows scaled by 1/sqrt(M^2), a pinned DC,
+    // a pinned Nyquist, plus the LP tail and bump cluster
+    bool matchedLsStart (double fs, double fcE, const MatchedTarget& t, double* c)
+    {
+        const double nyq = fs * 0.5 * 0.999;
+        double rows[96][5], rhs[96];
+        int rowCount = 0;
+        const bool isLp = (t.kind == MatchedTarget::lpSection
+                           || t.kind == MatchedTarget::lp1);
+
+        auto row = [&] (double freq, double weight)
+        {
+            if (rowCount >= 96)
+                return;
+            const double m2 = std::max (t.sq (freq / fcE), 1.0e-10);
+            const double w = juce::MathConstants<double>::twoPi * freq / fs;
+            const double cw = std::cos (w), c2 = std::cos (2.0 * w);
+            const double s = weight;
+            rows[rowCount][0] = s;        rows[rowCount][1] = s * cw;
+            rows[rowCount][2] = s * c2;   rows[rowCount][3] = -s * m2 * cw;
+            rows[rowCount][4] = -s * m2 * c2;
+            rhs[rowCount] = s * m2;
+            ++rowCount;
+        };
+
+        auto span = [&] (double lo, double hi, int count,
+                          double weight, double floorM2, bool invScale)
+        {
+            if (hi <= lo * 1.0001)
+                hi = lo * 1.0001;
+            for (int i = 0; i < count; ++i)
+            {
+                const double f = lo * std::pow (hi / lo, (double) i / (double) (count - 1));
+                if (t.sq (f / fcE) < floorM2)
+                    continue;
+                const double s = invScale
+                    ? weight * std::sqrt (1.0 / std::max (t.sq (f / fcE), 1.0e-10))
+                    : weight;
+                row (f, s);
+            }
+        };
+
+        span (fcE * 0.125, std::min (fcE * 8.0, nyq), 48, 1.0, 1.0e-4, true);
+
+        if (isLp)
+        {
+            if (t.kind == MatchedTarget::lpSection && t.q > 1.0)
+                span (fcE * std::pow (2.0, -0.5), std::min (fcE * std::pow (2.0, 0.5), nyq),
+                      std::min (16, std::max (6, (int) std::round (t.q * 4.0))), 1.0, 0.0, true);
+
+            if (fcE * 8.0 < nyq)
+                span (fcE * 8.0, nyq, 10, 0.1, 0.0, false);
+
+            row (10.0e-9 * fs, 10.0);   // the DC pin (w ~ 0)
+        }
+
+        // the Nyquist pin, dB-balanced against the DC pin
+        {
+            const double m2n = isLp ? std::max (t.sq (nyq / fcE), 1.0e-10)
+                                    : (t.kind == MatchedTarget::hShelf
+                                         ? std::max (t.sq (nyq / fcE), 1.0e-10) : 1.0);
+            const double s = isLp
+                ? std::min (316.0, 10.0 * std::sqrt (1.0 / std::max (m2n, 1.0e-4)))
+                : 10.0;
+            const double w = juce::MathConstants<double>::twoPi * nyq / fs;
+            const double cw = std::cos (w), c2 = std::cos (2.0 * w);
+            rows[rowCount][0] = s;        rows[rowCount][1] = s * cw;
+            rows[rowCount][2] = s * c2;   rows[rowCount][3] = -s * m2n * cw;
+            rows[rowCount][4] = -s * m2n * c2;
+            rhs[rowCount] = s * m2n;
+            ++rowCount;
+        }
+
+        // the shelf DC pin: the band gain at DC
+        if (! isLp)
+        {
+            const double dc = (t.kind == MatchedTarget::hShelf) ? 1.0 : t.a * t.a * t.a * t.a;
+            const double s = 10.0;
+            rows[rowCount][0] = s;        rows[rowCount][1] = s;
+            rows[rowCount][2] = s;        rows[rowCount][3] = -s * dc;
+            rows[rowCount][4] = -s * dc;
+            rhs[rowCount] = s * dc;
+            ++rowCount;
+        }
+
+        double sol[5];
+        if (! matchedMgs (rows, rhs, rowCount, sol))
+            return false;
+
+        if (matchedRecover (sol[0], sol[1], sol[2], sol[3], sol[4], c))
+            return true;
+
+        return matchedRecoverLifted (sol[0], sol[1], sol[2], sol[3], sol[4], c);
+    }
+
+    // the bell's exact 5-point start: |H|^2 nailed at DC, the band
+    // edges, the centre and Nyquist (linear in the power coefficients)
+    bool matchedBellExactStart (double fs, double fc, const MatchedTarget& t, double* c)
+    {
+        const double pi = juce::MathConstants<double>::pi;
+        const double w0 = juce::MathConstants<double>::twoPi * fc / fs;
+        const double a2 = t.a * t.a;
+        const double wL = w0 * std::pow (2.0, -t.k / std::log (2.0));
+        const double wU = w0 * std::pow (2.0, t.k / std::log (2.0));
+
+        double conds[5][2];
+        conds[0][0] = 0.0;
+        conds[0][1] = 1.0;                       // DC: exactly flat
+        conds[1][0] = wL;
+        conds[1][1] = a2;                        // lower band edge
+        conds[2][0] = w0;
+        conds[2][1] = a2 * a2;                    // centre: exactly the gain
+        if (wU < pi * 0.98)
+        {
+            conds[3][0] = wU;
+            conds[3][1] = a2;                     // upper band edge
+        }
+        else
+        {
+            const double wG = std::sqrt (std::max (w0 * pi, 1.0e-12));
+            conds[3][0] = wG;
+            conds[3][1] = t.sq ((wG * fs / juce::MathConstants<double>::twoPi) / fc);
+        }
+        conds[4][0] = pi;
+        conds[4][1] = t.sq ((fs * 0.5) / fc);
+
+        double m[5][6];
+        for (int i = 0; i < 5; ++i)
+        {
+            const double w = conds[i][0], m2 = conds[i][1];
+            const double cw = std::cos (w), c2 = std::cos (2.0 * w);
+            m[i][0] = 1.0;      m[i][1] = cw;     m[i][2] = c2;
+            m[i][3] = -m2 * cw; m[i][4] = -m2 * c2;
+            m[i][5] = m2;
+        }
+
+        for (int col = 0; col < 5; ++col)
+        {
+            int piv = col;
+            for (int rr = col; rr < 5; ++rr)
+                if (std::abs (m[rr][col]) > std::abs (m[piv][col]))
+                    piv = rr;
+            if (std::abs (m[piv][col]) < 1.0e-300)
+                return false;
+            if (piv != col)
+                for (int cc2 = col; cc2 < 6; ++cc2)
+                    std::swap (m[col][cc2], m[piv][cc2]);
+            const double pv = m[col][col];
+            for (int rr = 0; rr < 5; ++rr)
+            {
+                if (rr == col)
+                    continue;
+                const double fac = m[rr][col] / pv;
+                for (int cc2 = col; cc2 < 6; ++cc2)
+                    m[rr][cc2] -= fac * m[col][cc2];
+            }
+        }
+
+        double sol[5];
+        for (int i = 0; i < 5; ++i)
+            sol[i] = std::abs (m[i][i]) > 1.0e-300 ? m[i][5] / m[i][i] : 0.0;
+
+        if (matchedRecover (sol[0], sol[1], sol[2], sol[3], sol[4], c))
+            return true;
+
+        return matchedRecoverLifted (sol[0], sol[1], sol[2], sol[3], sol[4], c);
+    }
+
+    // ------- the driver: starts -> refine -> best true score -------
+    // quality bar: once a candidate sits within 0.15 dB of its
+    // prototype the search stops early - easy corners (the vast
+    // majority) cost a single refinement
+    void designMatched (double* best, double& bestScore, double fs, double fc,
+                        const MatchedTarget& t)
+    {
+        MatchedGrid g;
+        buildMatchedGrid (g, fs, fc, t);
+
+        double c[5], start[5];
+        bestScore = 1.0e9;
+        best[0] = 1.0; best[1] = 0.0; best[2] = 0.0; best[3] = 0.0; best[4] = 0.0;
+
+        auto consider = [&] (const double* s)
+        {
+            const double s0 = matchedScore (s, g, fs);
+            if (bestScore < 1.0e8 && s0 > bestScore + 30.0)
+                return;
+            for (int j = 0; j < 5; ++j)
+                c[j] = s[j];
+            matchedRefine (c, g, fs);
+
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                const double sc = pass == 0 ? s0 : matchedScore (c, g, fs);
+                const double* cc = pass == 0 ? s : c;
+                if (sc < bestScore)
+                {
+                    bestScore = sc;
+                    for (int j = 0; j < 5; ++j)
+                        best[j] = cc[j];
+                }
+            }
+        };
+
+        const double deltas[3] = { 0.0, 0.15, 0.35 };
+
+        for (int d = 0; d < 3; ++d)
+        {
+            const double fcE = fc * std::exp (deltas[d]);
+
+            switch (t.kind)
+            {
+                case MatchedTarget::lpSection:
+                    rbjLp (fs, fcE, t.q, start);
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    if (matchedLsStart (fs, fcE, t, start))
+                        consider (start);
+                    break;
+
+                case MatchedTarget::lp1:
+                {
+                    const double w0 = juce::MathConstants<double>::twoPi
+                                          * std::min (fcE, 0.49 * fs) / fs;
+                    const double tq = std::tan (w0 * 0.5);
+                    const double dd = 1.0 + tq;
+                    start[0] = tq / dd; start[1] = tq / dd; start[2] = 0.0;
+                    start[3] = (tq - 1.0) / dd; start[4] = 0.0;
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    rbjLp (fs, fcE, 0.7071, start);
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    rbjLp (fs, fcE, 0.5, start);
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    if (matchedLsStart (fs, fcE, t, start))
+                        consider (start);
+                    break;
+                }
+
+                case MatchedTarget::hShelf:
+                case MatchedTarget::lShelf:
+                    if (t.kind == MatchedTarget::hShelf)
+                        rbjHShelf (fs, fcE, t.a, start);
+                    else
+                        rbjLShelf (fs, fcE, t.a, start);
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    if (matchedLsStart (fs, fcE, t, start))
+                        consider (start);
+                    break;
+
+                case MatchedTarget::bell:
+                default:
+                    rbjBell (fs, fcE, t.a, t.k, start);
+                    consider (start);
+                    if (bestScore < 0.15) return;
+                    if (d < 2)
+                    {
+                        if (matchedBellExactStart (fs, fc, t, start))
+                            consider (start);
+                        if (bestScore < 0.15) return;
+                    }
+                    break;
+            }
+        }
+    }
+
+    // the four public designs, all in double; the callers cast to
+    // float once, exactly like the RBJ paths they replace
+    void matchedLpSection (double fs, double fc, double q, double* c)
+    {
+        MatchedTarget t;
+        t.kind = MatchedTarget::lpSection;
+        t.q = q;
+        double score = 0.0;
+        designMatched (c, score, fs, fc, t);
+    }
+
+    void matchedLp1 (double fs, double fc, double* c)
+    {
+        if (fc < 1.0)
+            fc = 1.0;
+        MatchedTarget t;
+        t.kind = MatchedTarget::lp1;
+        double score = 0.0;
+        designMatched (c, score, fs, fc, t);
+    }
+
+    void matchedShelf (double fs, double fc, double gainDb, bool isHigh, double* c)
+    {
+        // the knob's legal values are exact 0.5 dB steps, so an epsilon
+        // far below the smallest step IS the flat shelf (and no float
+        // equality compare trips -Wfloat-equal)
+        if (std::abs (gainDb) < 1.0e-6)
+        {
+            // the flat shelf degenerates to the exact unity biquad
+            c[0] = 1.0; c[1] = 0.0; c[2] = 0.0; c[3] = 0.0; c[4] = 0.0;
+            return;
+        }
+        MatchedTarget t;
+        t.kind = isHigh ? MatchedTarget::hShelf : MatchedTarget::lShelf;
+        t.a = std::pow (10.0, gainDb / 40.0);
+        double score = 0.0;
+        designMatched (c, score, fs, fc, t);
+    }
+
+    void matchedBell (double fs, double fc, double gainDb, double octaves, double* c)
+    {
+        if (std::abs (gainDb) < 1.0e-6)
+        {
+            // the flat bell degenerates to the exact unity biquad
+            c[0] = 1.0; c[1] = 0.0; c[2] = 0.0; c[3] = 0.0; c[4] = 0.0;
+            return;
+        }
+        MatchedTarget t;
+        t.kind = MatchedTarget::bell;
+        t.a = std::pow (10.0, gainDb / 40.0);
+        t.k = std::log (2.0) * 0.5 * octaves;
+        double score = 0.0;
+        designMatched (c, score, fs, fc, t);
+    }
     // v2.60.0 (Clement's remark 1): the same seven legal orders as an
     // array, shared by the parameter's equal-step range below. The
     // index of the nearest legal order uses the same tie rule as the
@@ -1739,9 +2571,11 @@ void CostesStrip::releaseResources()
 
 void CostesStrip::refreshCutCoefficients()
 {
-    // clamp both corners below Nyquist with headroom: a hostile rate
-    // change must never feed the RBJ formulas an w0 at or past pi
-    const float nyquistGuard = (float) (currentSampleRate * 0.45);
+    // v2.96.0: the guard relaxes from 0.45 to 0.475 of the rate - the
+    // matched designs below never fold at Nyquist, so the headroom
+    // only needs to keep the corners identifiable; the parked 24 kHz
+    // cut now lands at 22.8 kHz at 48 kHz instead of 21.6
+    const float nyquistGuard = (float) (currentSampleRate * 0.475);
 
     const float low  = juce::jlimit (16.0f,   nyquistGuard, lowCutHz->load());
     const float high = juce::jlimit (240.0f, nyquistGuard, highCutHz->load());
@@ -1820,39 +2654,28 @@ void CostesStrip::refreshCutCoefficients()
             section.setCoefficients (b0, b1, b2, a1, a2);
     }
 
-    // RBJ low-pass (the high cut): b0 = (1 - cos w0) / 2 ... same odd-order
-    // first-order treatment (t = tan (w0 / 2): b0 = b1 = t / d)
+    // v2.96.0 (Clement's report): the high cut is ANALOG-MATCHED now -
+    // every section is fitted to its Butterworth prototype across the
+    // whole band instead of the bilinear fold, so the wall keeps its
+    // analog slope up high where RBJ read -infinity dB at Nyquist.
+    // The odd orders' first slot carries a full matched biquad
+    // (setCoefficients takes five), which avoids the structural
+    // error a true first-order z-form suffers up there
     for (int j = 0; j < activeHighCutSections; ++j)
     {
-        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+        double c[5];
 
         if (highOrder % 2 == 1 && j == 0)
-        {
-            const double w0 = juce::MathConstants<double>::twoPi
-                                  * (double) high / currentSampleRate;
-            const double t = std::tan (w0 * 0.5);
-            const double d = 1.0 + t;
-
-            b0 = (float) (t / d);
-            b1 = (float) (t / d);
-            a1 = (float) ((t - 1.0) / d);
-        }
+            matchedLp1 (currentSampleRate, (double) high, c);
         else
         {
             const double q = (highOrder % 2 == 1) ? butterworthQ (highOrder, j - 1)
                                                   : butterworthQ (highOrder, j);
-            const double w0 = juce::MathConstants<double>::twoPi
-                                  * (double) high / currentSampleRate;
-            const double cs = std::cos (w0);
-            const double alpha = std::sin (w0) / (2.0 * q);
-            const double a0 = 1.0 + alpha;
-
-            b0 = (float) ((1.0 - cs) * 0.5 / a0);
-            b1 = (float) ((1.0 - cs) / a0);
-            b2 = (float) ((1.0 - cs) * 0.5 / a0);
-            a1 = (float) (-2.0 * cs / a0);
-            a2 = (float) ((1.0 - alpha) / a0);
+            matchedLpSection (currentSampleRate, (double) high, q, c);
         }
+
+        const float b0 = (float) c[0], b1 = (float) c[1], b2 = (float) c[2];
+        const float a1 = (float) c[3], a2 = (float) c[4];
 
         for (auto& section : highCut[j])
             section.setCoefficients (b0, b1, b2, a1, a2);
@@ -1861,9 +2684,10 @@ void CostesStrip::refreshCutCoefficients()
 
 void CostesStrip::refreshEqCoefficients()
 {
-    // clamp all four corners below Nyquist with the same headroom as
-    // the cuts: a hostile rate change must never feed RBJ a w0 past pi
-    const float nyquistGuard = (float) (currentSampleRate * 0.45);
+    // clamp all four corners below Nyquist with the same relaxed
+    // headroom as the cuts: the matched designs never fold, and a
+    // hostile rate change must still never see a corner past the band
+    const float nyquistGuard = (float) (currentSampleRate * 0.475);
 
     const float hz[4] =
     {
@@ -1909,66 +2733,34 @@ void CostesStrip::refreshEqCoefficients()
     // coefficients but no sample passes through
     activeEqSections = (on == 1) ? numEqBands : 0;
 
-    // the RBJ formulas in double, cast to float once, normalised by a0 -
-    // exactly the cuts' discipline. The bell uses the bandwidth-in-
-    // octaves form (alpha = sin w0 * sinh (ln2/2 * N * w0 / sin w0)),
-    // so a bell reads EXACTLY its gain at its centre whatever N; the
-    // shelves use the Q form with Q = 1/sqrt(2). At 0 dB (A == 1) the
-    // numerator coefficients equal the denominators coefficient-for-
-    // coefficient, so a parked band is the bit-exact identity
+    // v2.96.0 (Clement's report): the bells and shelves are ANALOG-
+    // MATCHED now - each band's biquad is fitted to its analog
+    // prototype across the whole band, so the top octaves stop
+    // cramping: an RBJ Q-form high shelf read +0.00 dB at its own
+    // corner and levelled at HALF its gain at Nyquist, while its
+    // analog prototype reads half its dB at the corner and reaches
+    // the full gain. At 0 dB every design degenerates to the exact
+    // unity biquad, so a parked band stays the bit-exact identity;
+    // far below Nyquist the prototypes coincide with RBJ, so the
+    // low corners keep their sound
     for (int j = 0; j < activeEqSections; ++j)
     {
-        const double w0 = juce::MathConstants<double>::twoPi
-                              * (double) hz[j] / currentSampleRate;
-        const double cs = std::cos (w0);
-        const double sn = std::sin (w0);
-        const double A  = std::pow (10.0, (double) gainDb[j] / 40.0);
+        double c[5];
 
-        double b0, b1, b2, a0, a1, a2;
-
-        if (bell[j])
+        if (std::abs (gainDb[j]) < 1.0e-6f)
         {
-            const double alpha = sn
-                * std::sinh ((std::log (2.0) * 0.5 * (double) octaves[j] * w0) / sn);
-
-            a0 = 1.0 + alpha / A;
-            b0 = (1.0 + alpha * A) / a0;
-            b1 = -2.0 * cs / a0;
-            b2 = (1.0 - alpha * A) / a0;
-            a1 = -2.0 * cs / a0;
-            a2 = (1.0 - alpha / A) / a0;
+            // the flat band: the exact unity biquad
+            c[0] = 1.0; c[1] = 0.0; c[2] = 0.0; c[3] = 0.0; c[4] = 0.0;
         }
+        else if (bell[j])
+            matchedBell (currentSampleRate, (double) hz[j], (double) gainDb[j],
+                         (double) octaves[j], c);
         else
-        {
-            // the RBJ shelf, Q form with Q = 1/sqrt(2): alpha =
-            // sin w0 / (2 Q) = sin w0 * sqrt(2) / 2
-            const double alpha = sn * std::sqrt (2.0) * 0.5;
-            const double sqA  = std::sqrt (A);
+            matchedShelf (currentSampleRate, (double) hz[j], (double) gainDb[j],
+                          j != 0, c);
 
-            if (j == 0)
-            {
-                // the low shelf of band 1
-                a0 = (A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha;
-                b0 = A * ((A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
-                b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cs) / a0;
-                b2 = A * ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
-                a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
-                a2 = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
-            }
-            else
-            {
-                // the high shelf of band 4
-                a0 = (A + 1.0) - (A - 1.0) * cs + 2.0 * sqA * alpha;
-                b0 = ((A + 1.0) + (A - 1.0) * cs + 2.0 * sqA * alpha) / a0;
-                b1 = -2.0 * ((A - 1.0) + (A + 1.0) * cs) / a0;
-                b2 = ((A + 1.0) + (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
-                a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cs) / a0;
-                a2 = ((A + 1.0) - (A - 1.0) * cs - 2.0 * sqA * alpha) / a0;
-            }
-        }
-
-        const float fb0 = (float) b0, fb1 = (float) b1, fb2 = (float) b2;
-        const float fa1 = (float) a1, fa2 = (float) a2;
+        const float fb0 = (float) c[0], fb1 = (float) c[1], fb2 = (float) c[2];
+        const float fa1 = (float) c[3], fa2 = (float) c[4];
 
         for (auto& section : eqBands[j])
             section.setCoefficients (fb0, fb1, fb2, fa1, fa2);
@@ -2007,21 +2799,28 @@ void CostesStrip::refreshTiltCoefficients()
     // The pivot is the geometric mean of the band edges: the line's dB
     // average over any octave-symmetric spectrum is exactly zero there,
     // so an octave-uniform (pink-like) spectrum - most music - keeps its
-    // loudness at any tilt. JUCE owns the shelf formulas (the arrays are
-    // { b0, b1, b2, a0, a1, a2 }, normalised by a0 in setShelfCoefficients),
-    // and the corners stay under the Nyquist guard so the formulas never
-    // see an omega past pi. At tilt == 0 every shelf degenerates to an
-    // exact unity biquad, so the whole cascade is bit-transparent.
-    const float gain = juce::Decibels::decibelsToGain (tilt / 10.0f);
-    const double nyquistGuard = currentSampleRate * 0.45;
+    // loudness at any tilt. v2.96.0 (Clement's report): every step of
+    // the staircase is an ANALOG-MATCHED shelf now, so the line holds
+    // its slope right up to Nyquist instead of sagging (the RBJ
+    // staircase sat a full dB low at 16 kHz at +12 dB tilt). The
+    // arrays are { b0, b1, b2, a0, a1, a2 } normalised by a0 in
+    // setShelfCoefficients; the designs come out already normalised,
+    // so a0 is the exact 1.0f. The corners stay under the Nyquist
+    // guard. At tilt == 0 every shelf degenerates to an exact unity
+    // biquad, so the whole cascade is bit-transparent.
+    const double nyquistGuard = currentSampleRate * 0.475;
 
     for (int k = 0; k < numTiltShelves; ++k)
     {
-        const float corner = (float) juce::jmin (
+        const double corner = juce::jmin (
             tiltPivotHz * std::pow (2.0, (double) k - 4.5), nyquistGuard);
 
-        const auto shelf = juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf (
-            currentSampleRate, corner, shelfQ, gain);
+        double c[5];
+        matchedShelf (currentSampleRate, corner, (double) tilt * 0.1, true, c);
+
+        const std::array<float, 6> shelf = { (float) c[0], (float) c[1],
+                                             (float) c[2], 1.0f,
+                                             (float) c[3], (float) c[4] };
 
         for (auto& section : tiltShelves[k])
             section.setShelfCoefficients (shelf);

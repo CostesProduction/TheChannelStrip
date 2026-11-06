@@ -4747,24 +4747,27 @@ void testCostesStripAudio()
     // any tilt. Four octaves of probe points pin the line: 100 Hz, the
     // 1 kHz midline, 8 kHz and 16 kHz. Expected values are the float64
     // simulation of the exact cascade (ten octave-spaced shelves plus
-    // the flat -tilt/2 dB centring), parked cuts included.
+    // the flat -tilt/2 dB centring), parked cuts included. v2.96.0:
+    // the staircase's shelves are ANALOG-MATCHED now, so the line
+    // holds its slope right to 16 kHz - the RBJ staircase sagged a
+    // full dB low at the top at +12 dB.
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (12.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), -3.2, 0.75,
                 "tilt +12 dB reads -3.2 dB at 100 Hz (the log line)");
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.8, 0.5,
                 "tilt +12 dB reads +0.8 dB at 1 kHz (halfway up the line)");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), 4.4, 0.75,
-                "tilt +12 dB reads +4.4 dB at 8 kHz (the log line)");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 5.5, 0.75,
-                "tilt +12 dB reads +5.5 dB at 16 kHz (toward the band edge)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), 4.2, 0.75,
+                "tilt +12 dB reads +4.2 dB at 8 kHz (the log line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 4.5, 0.75,
+                "tilt +12 dB reads +4.5 dB at 16 kHz (the analog-matched line, no sag)");
 
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (-12.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (100.0, 100.0) / unity1k), 3.2, 0.75,
                 "tilt -12 dB reads +3.2 dB at 100 Hz (the mirrored line)");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), -4.4, 0.75,
-                "tilt -12 dB reads -4.4 dB at 8 kHz (the mirrored line)");
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), -5.9, 0.75,
-                "tilt -12 dB reads -5.9 dB at 16 kHz (toward the band edge)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (8000.0, 8000.0) / unity1k), -4.5, 0.75,
+                "tilt -12 dB reads -4.5 dB at 8 kHz (the mirrored line)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), -6.4, 0.75,
+                "tilt -12 dB reads -6.4 dB at 16 kHz (the analog-matched mirrored line)");
 
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (0.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (1000.0, 1000.0) / unity1k), 0.0, 0.3,
@@ -4869,38 +4872,41 @@ void testCostesStripAudio()
     strip->getApvts().getParameterAsValue ("lowCutOn").setValue (true);
 
     // the high cut: parked reference at 16 kHz, then a 2 kHz corner probed
-    // at 16 kHz - 3 octaves above it. The bilinear prewarp at 8x the corner
-    // makes the digital slopes steeper than the analog ones (order 1 reads
-    // -22.4 dB, not -18); OFF reads the parked reference's own +0.02 dB
+    // at 16 kHz - 3 octaves above it. v2.96.0: the wall is the ANALOG
+    // Butterworth's own now - every pin below is the prototype's dB plus
+    // the +0.9 dB the parked 22.8 kHz reference trims at 16 kHz (order 1
+    // reads -17.2 dB, the analog -18 dB plus that trim; before, the
+    // bilinear prewarp read steeper than the analog, order 1 at -22.4);
+    // OFF reads the parked reference's own +0.9 dB
     const double flat16k = measureAmplitude (16000.0, 16000.0);
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (2000.0f);
 
     strip->getApvts().getParameterAsValue ("highCutOn").setValue (false);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), 0.02, 0.3,
-                "the high cut's OFF plate bypasses the filter (the +0.02 is the parked reference's own 16 kHz response)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), 0.9, 0.3,
+                "the high cut's OFF plate bypasses the filter (the +0.9 is the parked 22.8 kHz reference's own -0.92 dB at 16 kHz, removed by the bypass)");
 
     strip->getApvts().getParameterAsValue ("highCutOn").setValue (true);
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (1.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -22.4, 0.8,
-                "a 6 dB/oct first-order high cut reads -22.4 dB at 16 kHz");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -17.2, 0.8,
+                "a 6 dB/oct first-order high cut reads the analog -17.2 dB at 16 kHz");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -44.7, 1.0,
-                "a 12 dB/oct high cut reads -44.7 dB at 16 kHz");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -35.3, 1.0,
+                "a 12 dB/oct high cut reads the analog -35.3 dB at 16 kHz");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (3.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -67.1, 1.5,
-                "an 18 dB/oct high cut reads -67.1 dB at 16 kHz");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -53.3, 1.5,
+                "an 18 dB/oct high cut reads the analog -53.3 dB at 16 kHz");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (4.0f);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -89.5, 1.5,
-                "a 24 dB/oct high cut reads -89.5 dB at 16 kHz (the lock-in ignores the low cut's float32 DC offset)");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / flat16k), -71.4, 1.5,
+                "a 24 dB/oct high cut reads the analog -71.4 dB at 16 kHz (the lock-in ignores the low cut's float32 DC offset)");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (6.0f);
-    expectNear (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -134.3, 5.0,
-                "a 36 dB/oct high cut reads -134.3 dB at 16 kHz");
+    expectNear (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -107.6, 5.0,
+                "a 36 dB/oct high cut reads the analog -107.6 dB at 16 kHz");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (8.0f);
     expectAtMost (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -140.0,
-                  "a 48 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -179.0 dB)");
+                  "a 48 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -143.8 dB)");
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (12.0f);
     expectAtMost (deepDb (measureAmplitude (16000.0, 16000.0) / flat16k), -140.0,
-                  "a 72 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -262 dB in float64, about -249 dB in float32)");
+                  "a 72 dB/oct high cut buries 16 kHz below -140 dB (the simulation says -216 dB in float64)");
 
     strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
     strip->getApvts().getParameterAsValue ("highCutOrder").setValue (2.0f);
@@ -6474,16 +6480,34 @@ void testCostesStripEq()
     strip->getApvts().getParameterAsValue ("eq3Gain").setValue (0.0f);
     strip->getApvts().getParameterAsValue ("eq3Oct").setValue (1.0f);
 
-    // band 4 (HF): the centre, then the high shelf. fc 7200 at +6 dB has
-    // reached +3.74 dB of its own by 16 kHz and the parked 24 kHz cut
-    // eats another 0.79 dB there, so the chain reads +2.95 dB
+    // band 4 (HF): the centre, then the high shelf. The ANALOG shelf
+    // (v2.96.0) reaches +5.7 dB of its own by 16 kHz and the parked
+    // 22.8 kHz cut trims another 0.92 dB there, so the chain reads
+    // +4.8 dB
     strip->getApvts().getParameterAsValue ("eq4Gain").setValue (6.0f);
     expectNear (juce::Decibels::gainToDecibels (measureAmplitude (7200.0, 7200.0) / unity1k), 6.0, 0.3,
                 "band 4 bell +6 dB reads +6 dB at its 7200 Hz centre");
     strip->getApvts().getParameterAsValue ("eq4Bell").setValue (false);
-    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 2.95, 0.4,
-                "band 4 high shelf +6 dB at 7200 Hz reads +2.95 dB at 16 kHz");
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (16000.0, 16000.0) / unity1k), 4.8, 0.4,
+                "band 4 high shelf +6 dB at 7200 Hz reads +4.8 dB at 16 kHz");
+
+    // v2.96.0: the analog shelf's own signature - it reads HALF its dB
+    // at its own corner where the RBJ Q-form shelf read +0.00 dB; then
+    // the matched high cut's analog wall and the wide bell's centre,
+    // both probed in the top octave
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (7200.0, 7200.0) / unity1k), 2.9, 0.3,
+                "the analog high shelf reads +2.9 dB at its own 7200 Hz corner - half its +6 dB (the RBJ shelf read +0.00 dB there)");
     strip->getApvts().getParameterAsValue ("eq4Bell").setValue (true);
+    strip->getApvts().getParameterAsValue ("eq4Gain").setValue (0.0f);
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (12000.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (18000.0, 18000.0) / unity1k), -7.9, 0.5,
+                "a 12 kHz second-order high cut reads the analog -7.9 dB at 18 kHz (the bilinear cramp read -15.4 dB there)");
+    strip->getApvts().getParameterAsValue ("highCutHz").setValue (24000.0f);
+    strip->getApvts().getParameterAsValue ("eq4Hz").setValue (12000.0f);
+    strip->getApvts().getParameterAsValue ("eq4Gain").setValue (6.0f);
+    expectNear (juce::Decibels::gainToDecibels (measureAmplitude (12000.0, 12000.0) / unity1k), 5.6, 0.3,
+                "band 4 bell +6 dB at 12000 Hz reads +5.6 dB at its centre (the parked 22.8 kHz cut's -0.3 dB included)");
+    strip->getApvts().getParameterAsValue ("eq4Hz").setValue (7200.0f);
     strip->getApvts().getParameterAsValue ("eq4Gain").setValue (0.0f);
 
     // the global plate with a live band: OFF must silence it exactly -
