@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.93.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.94.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,21 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.94.0** — *The one-click ADD and the taller console.*
+  - **ADD, clickable (Clement's request).** The ADD faces work for
+    their living: one click on the digits folds their reading
+    straight into the gain knob they serve - the PUNCH face into
+    the WET GAIN, the COMP face into the compressor's make-up - so
+    the gain staging is a single move (a knob at 2.4 dB with the
+    face reading ADD +1.2 lands at 3.6). The digits carry the
+    pointing hand; a dead-centre face (ADD 0.0) stays quiet.
+  - **The console gains height back (Clement's request).** The
+    panel slims from 830 x 770 to **830 x 744**: the filters ride
+    in a quincunx (the cut row interlocks into the trim's own
+    room), the dynamics stages close on the transient frame (a
+    4 px breath), the PUNCH meter tightens to 58 px, the IMAGE and
+    SHAPE OUT blocks breathe 2 px apart with 83 x 84 knobs, and
+    the signature band rides at the panel's own top.
 - **2.93.1** — *The ADD digits speak the action.*
   - **ADD, inverted (Clement's remark).** The ADD faces read the
     levelling ACTION, not the balance: a section running 3.1 dB over

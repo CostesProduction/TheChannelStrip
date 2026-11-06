@@ -5660,9 +5660,11 @@ void testCostesStripSectionIcons()
     // 274 and the panel to 860 x 786, the EQ keeping its whole room.
     // v2.92.0 (Clement's request): the console tightens one more
     // time - the signature band slims, the margins and seams
-    // breathe narrower, and the panel reads 830 x 770
-    expectTrue (editor.getWidth() == 830 && editor.getHeight() == 770,
-                "the strip panel opens as the three-column console, tightened top to floor (830 x 770)");
+    // breathe narrower, and the panel reads 830 x 770.
+    // v2.94.0 (Clement's request): the console gains its height
+    // back - the filters quincunx, the blocks and seams tighter
+    expectTrue (editor.getWidth() == 830 && editor.getHeight() == 744,
+                "the strip panel opens as the three-column console, tightened top to floor (830 x 744)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -5986,14 +5988,14 @@ void testCostesStripSectionIcons()
 
     // v2.83.0 (Clement's remark 4): the front end's knobs wear the
     // EQ's own 83 x 101 square. v2.85.0: the tilt, out in the output
-    // column, wears the image knobs' own 83 x 86 instead
+    // column, wears the image knobs' own 83 x 84 instead
     expectTrue (sliders[0] != nullptr && sliders[1] != nullptr
                     && sliders[2] != nullptr && sliders[3] != nullptr
                     && sliders[0]->getWidth() == 83 && sliders[0]->getHeight() == 101
                     && sliders[1]->getWidth() == 83 && sliders[1]->getHeight() == 101
                     && sliders[2]->getWidth() == 83 && sliders[2]->getHeight() == 101
-                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86,
-                "the front end's knobs wear the EQ's own 83 x 101 square - and the tilt, out in the output column, the image knobs' 83 x 86");
+                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 84,
+                "the front end's knobs wear the EQ's own 83 x 101 square - and the tilt, out in the output column, the image knobs' 83 x 84");
 
     // v2.78.0 (Clement's remarks): the EQ reads SSL-style - the HIGHS
     // at the top of the stack, the lows at the bottom (15 is the HF
@@ -6074,15 +6076,15 @@ void testCostesStripSectionIcons()
 
         expectTrue (transient.getY() > meters[2]->getBounds().getBottom()
                         && meters[3]->getBounds().getY() > transient.getBottom()
-                        && transient.getHeight() == 170
-                        && reserved[0].getY() == 16
-                        && reserved[0].getHeight() == 370
-                        && reserved[1].getY() == reserved[0].getBottom() + 8
-                        && reserved[1].getHeight() == 370
-                        && reserved[1].getBottom() <= editor.getHeight() - 6
+                        && transient.getHeight() == 162
+                        && reserved[0].getY() == 10
+                        && reserved[0].getHeight() == 364
+                        && reserved[1].getY() == reserved[0].getBottom() + 2
+                        && reserved[1].getHeight() == 364
+                        && reserved[1].getBottom() <= editor.getHeight() - 4
                         && reserved[0].getY() < sliders[4]->getBounds().getY()
                         && sliders[4]->getBounds().getBottom() <= reserved[1].getBottom(),
-                    "the two blocks sit engraved in the grid - TRANSIENT at its own 170 px between the stages, IMAGE and SHAPE OUT stacked down column 3");
+                    "the two blocks sit engraved in the grid - TRANSIENT at its own 162 px between the stages, IMAGE and SHAPE OUT stacked down column 3 (v2.94.0)");
     }
 
     // v2.72.0 (Clement's request): each stage's GR ladder sits at the
@@ -7957,17 +7959,17 @@ void testV281FourRemarks()
     // request): the trim rides the top middle, the two cuts share
     // one band under it (v2.89.0, Clement's swap: the HPF at the
     // bottom left, the LPF at the bottom right), and the tilt - out
-    // in the output column - wears the image knobs' own 83 x 86
+    // in the output column - wears the image knobs' own 83 x 84
     expectTrue (sliders81[0] != nullptr && sliders81[1] != nullptr
                     && sliders81[2] != nullptr && sliders81[3] != nullptr
                     && sliders81[0]->getWidth() == 83 && sliders81[0]->getHeight() == 101
                     && sliders81[1]->getWidth() == 83 && sliders81[1]->getHeight() == 101
                     && sliders81[2]->getWidth() == 83 && sliders81[2]->getHeight() == 101
-                    && sliders81[3]->getWidth() == 83 && sliders81[3]->getHeight() == 86
+                    && sliders81[3]->getWidth() == 83 && sliders81[3]->getHeight() == 84
                     && sliders81[2]->getBounds().getY() == sliders81[1]->getBounds().getY()
                     && sliders81[1]->getBounds().getX() < sliders81[2]->getBounds().getX()
                     && sliders81[1]->getBounds().getY() > sliders81[0]->getBounds().getY(),
-                "the front end's knobs wear the EQ's own square - TRIM at the top middle, HPF bottom left and LPF bottom right level under it (v2.89.0), the tilt the image knobs' 83 x 86");
+                "the front end's knobs wear the EQ's own square - TRIM at the top middle, HPF bottom left and LPF bottom right level under it (v2.89.0), the tilt the image knobs' 83 x 84");
 
     // and the cut slopes' "12 dB/oct" reads SMALLER inside its 52 px
     // box - 10 px, the size the look-and-feel's factory stamps on
@@ -8126,7 +8128,7 @@ void testV283FourRemarks()
     // half-row the EQ's own 222 px cells give their knob pairs -
     // 83 x 101 - and the front end wears that square too now, every
     // knob of both sections truly one size. v2.85.0: the tilt wears
-    // the image knobs' own 83 x 86 out in the output column - the
+    // the image knobs' own 83 x 84 out in the output column - the
     // trim and the two cuts keep the EQ's square
     {
         bool uniform = sliders83[0] != nullptr && sliders83[1] != nullptr
@@ -8137,7 +8139,7 @@ void testV283FourRemarks()
                                 && sliders83[(size_t) i]->getHeight() == 101;
 
         uniform = uniform && sliders83[3]->getWidth() == 83
-                          && sliders83[3]->getHeight() == 86;
+                          && sliders83[3]->getHeight() == 84;
 
         const int eqKnobIndices[8] = { 7, 8, 9, 10, 12, 13, 15, 16 };
 
@@ -8147,7 +8149,7 @@ void testV283FourRemarks()
                                 && sliders83[(size_t) eqKnobIndices[i]]->getHeight() == 101;
 
         expectTrue (uniform,
-                    "every knob of the front end AND of the EQ wears the EQ's own 83 x 101 - the tilt the image knobs' 83 x 86 (the v2.83.0 fix, read again in v2.85.0)");
+                    "every knob of the front end AND of the EQ wears the EQ's own 83 x 101 - the tilt the image knobs' 83 x 84 (the v2.83.0 fix, read again in v2.85.0)");
     }
 
     // ---- Clement's remark 3: the engraved rule rides JUST above the EQ ON plate ----
@@ -8155,19 +8157,19 @@ void testV283FourRemarks()
     // straight through the HPF knob; it belongs just above the EQ ON
     // plate. v2.85.0: the interlocked front end carries the header up
     // with it - and v2.86.0: the tightened front end carries it up
-    // again. v2.92.0: the tightened console carries it up once more -
-    // the EQ's own area starts at y = 320, the plate's band at 324,
-    // and the rule rides 2 px above, at 322. The harness paints the
-    // panel and probes the rule's own rows against the clean air
-    // above the EQ
+    // again. v2.92.0: the tightened console carries it up once more.
+    // v2.94.0: the quincunx carries it up again - the EQ's own area
+    // starts at y = 296, the plate's band at 300, and the rule rides
+    // 2 px above, at 298. The harness paints the panel and probes the
+    // rule's own rows against the clean air above the EQ
     {
-        juce::Image canvas (juce::Image::ARGB, 830, 770, true);
+        juce::Image canvas (juce::Image::ARGB, 830, 744, true);
         juce::Graphics g (canvas);
         editorForV283.paint (g);
 
-        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 321).getRed(),
-                                          canvas.getPixelAt (100, 322).getRed());
-        const int cleanRow = canvas.getPixelAt (100, 318).getRed();
+        const int ruleRow  = juce::jmin (canvas.getPixelAt (100, 297).getRed(),
+                                          canvas.getPixelAt (100, 298).getRed());
+        const int cleanRow = canvas.getPixelAt (100, 293).getRed();
 
         expectTrue (ruleRow < 190 && cleanRow > 200,
                     "the engraved rule rides just above the EQ ON plate again - no more crossing the HPF knob");
@@ -8281,12 +8283,12 @@ void testV284ImageSection()
         // and the tilt knob owns the SHAPE OUT block's first slot,
         // under the block's own engraved name (v2.86.0)
         expectTrue (sliders[3] != nullptr
-                        && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
+                        && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 84
                         && sliders[3]->getBounds().getX() >= reserved[1].getX() + 4
                         && sliders[3]->getBounds().getRight() <= reserved[1].getRight() - 4
                         && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
                         && sliders[3]->getBounds().getBottom() <= reserved[1].getBottom(),
-                    "the tilt knob rides the SHAPE OUT block, 83 x 86 under the block's own head");
+                    "the tilt knob rides the SHAPE OUT block, 83 x 84 under the block's own head");
 
         expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
                         && imageKnobs[2] != nullptr
@@ -8554,22 +8556,28 @@ void testV285InterlockedFrontEnd()
     // to the trim's side, so the front-end block drops from 288 to
     // 274 and the panel from 860 x 800 to 860 x 786, the EQ keeping
     // its own whole room (its 105 px pitch pinned in the v2.60 test,
-    // unchanged)
-    expectTrue (editorForV285.getWidth() == 830 && editorForV285.getHeight() == 770,
-                "v2.92.0 tightens the panel to 830 x 770 - the margins' savings the whole way down, the EQ keeping its whole room");
+    // unchanged). v2.94.0 (Clement's request): the quincunx and the
+    // tighter seams gain the console its height back - 830 x 744
+    expectTrue (editorForV285.getWidth() == 830 && editorForV285.getHeight() == 744,
+                "v2.94.0 gains the console its height back - 830 x 744, the EQ keeping its whole room");
 
-    // ---- the trim rides the TOP MIDDLE, the cuts the bottom band ----
-    // the trim centred on the column's own axis, ABOVE the cuts;
-    // the two cuts share ONE band, level with each other (v2.89.0,
-    // Clement's swap: the HPF at the bottom left, the LPF at the
-    // bottom right)
+    // ---- the trim rides the TOP MIDDLE, the cuts the QUINCUNX ----
+    // the trim centred on the column's own axis with the cuts riding
+    // UP into its own room (v2.94.0, Clement's request): the two cuts
+    // share ONE band, level with each other (v2.89.0, Clement's
+    // swap: the HPF at the bottom left, the LPF at the bottom
+    // right), their discs never touching the trim's own disc
     expectTrue (sliders[0] != nullptr && sliders[1] != nullptr
                     && sliders[2] != nullptr
                     && sliders[0]->getBounds().getCentreX() == 125
-                    && sliders[0]->getBounds().getBottom() < sliders[1]->getBounds().getY()
+                    && sliders[1]->getBounds().getY() < sliders[0]->getBounds().getBottom()
                     && sliders[2]->getBounds().getY() == sliders[1]->getBounds().getY()
-                    && sliders[1]->getBounds().getX() < sliders[2]->getBounds().getX(),
-                "the input trim rides the top middle - the HPF bottom left and the LPF bottom right, level under it (v2.89.0)");
+                    && sliders[1]->getBounds().getX() < sliders[0]->getBounds().getX()
+                    && sliders[1]->getBounds().getCentre().getDistanceFrom (
+                           sliders[0]->getBounds().getCentre()) > 83
+                    && sliders[2]->getBounds().getCentre().getDistanceFrom (
+                           sliders[0]->getBounds().getCentre()) > 83,
+                "the input trim rides the top middle with the cuts in a quincunx under it - the HPF bottom left, the LPF bottom right, their discs never touching (v2.94.0)");
 
     // ---- the phase plate LEFT the front end (v2.86.0) ---- it
     // lives at the head of the IMAGE block now, so the free middle
@@ -8580,7 +8588,7 @@ void testV285InterlockedFrontEnd()
     expectTrue (phaseBtn != nullptr
                     && sliders[1] != nullptr && sliders[2] != nullptr
                     && phaseBtn->getBounds().getX() >= 702
-                    && phaseBtn->getBounds().getY() == 34
+                    && phaseBtn->getBounds().getY() == 28
                     && editorForV285.getComponentAt (125,
                         sliders[1]->getBounds().getCentreY()) == &editorForV285,
                 "the phase plate left the front end's middle street - it lives at the head of the IMAGE block in the output column now");
@@ -8610,15 +8618,15 @@ void testV285InterlockedFrontEnd()
                 "the LPF's stack rides under its own knob too");
 
     // ---- the tilt, out in the output column ---- the knob wears the
-    // image knobs' own 83 x 86, riding the SHAPE OUT block's first
+    // image knobs' own 83 x 84, riding the SHAPE OUT block's first
     // slot under the block's engraved name (v2.86.0)
     expectTrue (sliders[3] != nullptr
-                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
+                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 84
                     && sliders[3]->getBounds().getX() >= reserved[1].getX() + 4
                     && sliders[3]->getBounds().getRight() <= reserved[1].getRight() - 4
                     && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
                     && sliders[3]->getBounds().getBottom() <= reserved[1].getBottom(),
-                "the tilt knob lives in the output column now - 83 x 86, riding the SHAPE OUT block under its engraved name");
+                "the tilt knob lives in the output column now - 83 x 84, riding the SHAPE OUT block under its engraved name");
 
     // ---- and its caption word and glyph are back (v2.86.0) ----
     // the block spells its name at its head, so every knob carries
@@ -8666,14 +8674,14 @@ void testV286ImageAndShapeBlocks()
                 "the TRIM IN caption rides at its knob's left, mid-height of the trim's own row - the freed height below the trim is the console's own");
 
     // ---- Clement's remark 3: TWO blocks, not five little frames ----
-    // IMAGE at the top of the column, SHAPE OUT under it, both 370 px
-    // tall with an 8 px breath between them, ending above the panel's
-    // own floor
-    expectTrue (reserved[0].getHeight() == 370
-                    && reserved[1].getY() == reserved[0].getBottom() + 8
-                    && reserved[1].getHeight() == 370
-                    && reserved[1].getBottom() <= editorForV286.getHeight() - 6,
-                "the output column carries TWO engraved blocks - IMAGE and SHAPE OUT, 370 px each with a breath between, ending above the panel's floor");
+    // IMAGE at the top of the column, SHAPE OUT under it, both 364 px
+    // tall (v2.94.0: the knobs' own 84 px squares) with a 2 px breath
+    // between them, ending flush above the panel's own floor
+    expectTrue (reserved[0].getHeight() == 364
+                    && reserved[1].getY() == reserved[0].getBottom() + 2
+                    && reserved[1].getHeight() == 364
+                    && reserved[1].getBottom() <= editorForV286.getHeight() - 4,
+                "the output column carries TWO engraved blocks - IMAGE and SHAPE OUT, 364 px each with a breath between, ending above the panel's floor (v2.94.0)");
 
     // ---- Clement's remark 1: the phase plate at the IMAGE block's
     // head ---- "PHASE INVERT" spelled between the LED and the
@@ -8694,7 +8702,7 @@ void testV286ImageAndShapeBlocks()
                     && imageKnobs[2] != nullptr
                     && outCaps[0] != nullptr && outCaps[1] != nullptr
                     && outCaps[2] != nullptr
-                    && imageKnobs[0]->getWidth() == 83 && imageKnobs[0]->getHeight() == 86
+                    && imageKnobs[0]->getWidth() == 83 && imageKnobs[0]->getHeight() == 84
                     && imageKnobs[0]->getBounds().getY() > phaseBtn->getBounds().getBottom()
                     && imageKnobs[1]->getBounds().getY() > imageKnobs[0]->getBounds().getBottom()
                     && imageKnobs[2]->getBounds().getY() > imageKnobs[1]->getBounds().getBottom()
@@ -8705,21 +8713,21 @@ void testV286ImageAndShapeBlocks()
                 "the balance, width and mono maker stack down the IMAGE block - each with its caption word directly under its own knob");
 
     // ---- the SHAPE OUT block (remark 3): the tilt, the drive, and
-    // the new TRIM OUT ---- all three the 83 x 86 square, stacked
+    // the new TRIM OUT ---- all three the 83 x 84 square, stacked
     // in the block under its engraved name, the tilt's and the trim
     // out's own captions riding under their knobs
     expectTrue (sliders[3] != nullptr && sliders[4] != nullptr && sliders[33] != nullptr
                     && captions[1] != nullptr && outCaps[3] != nullptr
-                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 86
-                    && sliders[4]->getWidth() == 83 && sliders[4]->getHeight() == 86
-                    && sliders[33]->getWidth() == 83 && sliders[33]->getHeight() == 86
+                    && sliders[3]->getWidth() == 83 && sliders[3]->getHeight() == 84
+                    && sliders[4]->getWidth() == 83 && sliders[4]->getHeight() == 84
+                    && sliders[33]->getWidth() == 83 && sliders[33]->getHeight() == 84
                     && sliders[3]->getBounds().getY() >= reserved[1].getY() + 16
                     && sliders[4]->getBounds().getY() > sliders[3]->getBounds().getBottom()
                     && sliders[33]->getBounds().getY() > sliders[4]->getBounds().getBottom()
                     && sliders[33]->getBounds().getBottom() <= reserved[1].getBottom()
                     && captions[1]->getBounds().getY() == sliders[3]->getBounds().getBottom() + 1
                     && outCaps[3]->getBounds().getY() == sliders[33]->getBounds().getBottom() + 1,
-                "the SHAPE OUT block stacks the tilt, the drive and the TRIM OUT - all 83 x 86, the captions under their knobs, ending inside the block");
+                "the SHAPE OUT block stacks the tilt, the drive and the TRIM OUT - all 83 x 84, the captions under their knobs, ending inside the block");
 
     // ---- the TRIM OUT rides the very END of the chain ---- -6 dB on
     // the way out, measured once the 20 ms ramp has settled
@@ -9064,8 +9072,8 @@ void testV287ZoneTilesAndCaptionBreath()
     expectTrue (editorForV287.getComponentAt (tiles[1]->getBounds().getX() + 2,
                                                      tiles[1]->getBounds().getY() + 2)
                            == &editorForV287
-                    && reserved[0].getHeight() == 370
-                    && reserved[1].getHeight() == 370
+                    && reserved[0].getHeight() == 364
+                    && reserved[1].getHeight() == 364
                     && tiles[6]->getBounds().getBottom() <= reserved[1].getBottom(),
                 "the tiles never steal a click - the blocks keep their height, the panel never grew");
 }
@@ -9085,7 +9093,7 @@ void testV287ZoneTilesAndCaptionBreath()
 // ---------------------------------------------------------------------------
 void testV288TransientDesigner()
 {
-    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout; v2.92.0: the BAL face on the plates' line; v2.93.0: the CLIPPER before the WET GAIN, the ADD face beside the plate");
+    beginTest ("v2.88.0: the transient designer - attack, sustain, the PUNCH plate, makeup, mix, the CLIPPER plate on the wet; v2.90.0: one horizontal bipolar GR bar and the CLIPPER's LED; v2.91.0: the WET GAIN balance readout; v2.92.0: the BAL face on the plates' line; v2.93.0: the CLIPPER before the WET GAIN, the ADD face beside the plate; v2.94.0: the one-click ADD, the frame at 162");
 
     juce::MidiBuffer noMidi;
 
@@ -9464,19 +9472,19 @@ void testV288TransientDesigner()
         // (v2.92.0: the block narrowed with the console)
         expectTrue (knobs[0] != nullptr && knobs[1] != nullptr
                         && knobs[2] != nullptr && knobs[3] != nullptr
-                        && knobs[0]->getBounds() == juce::Rectangle<int> (265, 375, 84, 84)
-                        && knobs[1]->getBounds() == juce::Rectangle<int> (371, 375, 84, 84)
-                        && knobs[2]->getBounds() == juce::Rectangle<int> (477, 375, 84, 84)
-                        && knobs[3]->getBounds() == juce::Rectangle<int> (583, 375, 84, 84),
+                        && knobs[0]->getBounds() == juce::Rectangle<int> (265, 356, 84, 84)
+                        && knobs[1]->getBounds() == juce::Rectangle<int> (371, 356, 84, 84)
+                        && knobs[2]->getBounds() == juce::Rectangle<int> (477, 356, 84, 84)
+                        && knobs[3]->getBounds() == juce::Rectangle<int> (583, 356, 84, 84),
                     "the four transient knobs sit one rank of four - ATTACK, SUSTAIN, WET GAIN, MIX, each 84 px square");
 
         // the captions hug their own knobs' feet and spell their words
         expectTrue (captions[0] != nullptr && captions[1] != nullptr
                         && captions[2] != nullptr && captions[3] != nullptr
-                        && captions[0]->getBounds() == juce::Rectangle<int> (256, 459, 102, 14)
-                        && captions[1]->getBounds() == juce::Rectangle<int> (362, 459, 102, 14)
-                        && captions[2]->getBounds() == juce::Rectangle<int> (468, 459, 102, 14)
-                        && captions[3]->getBounds() == juce::Rectangle<int> (574, 459, 102, 14)
+                        && captions[0]->getBounds() == juce::Rectangle<int> (256, 440, 102, 14)
+                        && captions[1]->getBounds() == juce::Rectangle<int> (362, 440, 102, 14)
+                        && captions[2]->getBounds() == juce::Rectangle<int> (468, 440, 102, 14)
+                        && captions[3]->getBounds() == juce::Rectangle<int> (574, 440, 102, 14)
                         && captions[0]->getText() == "ATTACK" && captions[1]->getText() == "SUSTAIN"
                         && captions[2]->getText() == "WET GAIN" && captions[3]->getText() == "MIX",
                     "the caption words hug their own knobs' feet - ATTACK, SUSTAIN / WET GAIN, MIX");
@@ -9484,17 +9492,17 @@ void testV288TransientDesigner()
         // the plates: PUNCH at the meters column's head, CLIPPER at
         // the block's top-right corner, both on the block's own top line
         expectTrue (punchBtn != nullptr && clipBtn != nullptr
-                        && punchBtn->getBounds() == juce::Rectangle<int> (254, 307, 88, 18)
-                        && clipBtn->getBounds() == juce::Rectangle<int> (578, 307, 100, 18),
+                        && punchBtn->getBounds() == juce::Rectangle<int> (254, 296, 88, 18)
+                        && clipBtn->getBounds() == juce::Rectangle<int> (578, 296, 100, 18),
                     "the PUNCH plate rides the meters column's head and the CLIPPER plate the block's top-right corner - both on the block's own top line");
 
         // the GR bar (v2.92.0, Clement's request): the meter owns
-        // the whole face from the plates' line down - its 62 px carry
-        // the ADD face on the plates' own line, the GR caption,
+        // the whole face from the plates' line down - its 58 px (v2.94.0)
+        // carry the ADD face on the plates' own line, the GR caption,
         // the bipolar track with its 1 dB divisions and the orange
         // BALANCE bar, and the engraved scale below
         expectTrue (grBar != nullptr
-                        && grBar->getBounds() == juce::Rectangle<int> (254, 307, 424, 62),
+                        && grBar->getBounds() == juce::Rectangle<int> (254, 296, 424, 58),
                     "the meter owns the whole face from the plates' line down - the ADD face rides its top strip, the bipolar GR bar under it");
 
         // v2.92.0: the plates sit ON TOP of the meter (the meter is
@@ -9512,11 +9520,11 @@ void testV288TransientDesigner()
 
         // the whole section sits inside its engraved frame, its title
         // band gone (v2.89.0), flush inside the frame's own floor
-        expectTrue (frame == juce::Rectangle<int> (250, 305, 432, 170)
+        expectTrue (frame == juce::Rectangle<int> (250, 294, 432, 162)
                         && punchBtn->getBounds().getY() == frame.getY() + 2
                         && knobs[0]->getBounds().getY() >= punchBtn->getBounds().getBottom()
                         && captions[3]->getBounds().getBottom() == frame.getBottom() - 2,
-                    "the transient section owns its engraved 170 px frame - the frame alone carries the section, flush inside the frame's floor");
+                    "the transient section owns its engraved 162 px frame - the frame alone carries the section, flush inside the frame's floor (v2.94.0)");
     }
 }
 
@@ -9675,13 +9683,152 @@ void testV293AddFaces()
     const auto* compFace = editorForV293.getCompAddFace();
 
     expectTrue (compFace != nullptr
-                    && compFace->getBounds() == juce::Rectangle<int> (348, 492, 76, 18)
+                    && compFace->getBounds() == juce::Rectangle<int> (348, 468, 76, 18)
                     && editorForV293.getComponentAt (compFace->getBounds().getCentreX(),
                         compFace->getBounds().getCentreY()) == compFace,
                 "the COMP's ADD face rides just right of the COMP ON plate - level with it on the plates' line, inside the block's own head, clear of the knob field");
 
-    expectTrue (editorForV293.getComponentAt (400, 316) == editorForV293.getTransientGrBar(),
+    expectTrue (editorForV293.getComponentAt (400, 305) == editorForV293.getTransientGrBar(),
                 "the PUNCH side's ADD digits ride the meter's own top strip - the air beside the PUNCH plate belongs to the meter");
+}
+
+// ---------------------------------------------------------------------------
+// v2.94.0 (Clement's request): the ADD faces work for their living -
+// ONE CLICK on the digits folds their reading straight into the gain
+// knob they serve (the PUNCH face into the WET GAIN, the COMP face
+// into the compressor's make-up), the gain staging in a single move -
+// and the console gains its height back: 830 x 744, the filters in
+// a quincunx, the seams and the blocks breathing tighter
+// ---------------------------------------------------------------------------
+void testV294AddClicks()
+{
+    beginTest ("v2.94.0: the one-click ADD - a click on the face folds its reading into its knob; the console at 830 x 744");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- the console itself: 830 x 744 (v2.94.0, Clement's request:
+    // the filters quincunx, the seams and blocks tighter) ----
+    {
+        CostesStrip stripForV294;
+        stripForV294.prepareToPlay (48000.0, 512);
+
+        CostesStripEditor editorForV294 (stripForV294);
+
+        expectTrue (editorForV294.getWidth() == 830 && editorForV294.getHeight() == 744,
+                    "the console stands 830 x 744 - the quincunx and the tighter seams bought back 26 px of height");
+    }
+
+    CostesStripEditor editorForV294 (*strip);
+
+    // ---- the dead-centre faces first, on the fresh, default strip:
+    // the parked section and the parked stage are bit-skipped, their
+    // two one-poles see the same samples and the faces read an exact
+    // 0.0 - the clicks stay quiet ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        editorForV294.getTransientGrBar()->applyTheAdd();
+
+        expectNear (strip->getApvts().getRawParameterValue ("transGain")->load(), 0.0, 0.001,
+                    "a dead-centre face never touches its knob - the PUNCH's click stays quiet at ADD 0.0");
+
+        editorForV294.getCompAddFace()->applyTheAdd();
+
+        expectNear (strip->getApvts().getRawParameterValue ("compGain")->load(), 0.0, 0.001,
+                    "a dead-centre face never touches its knob - the COMP's click stays quiet at ADD 0.0");
+    }
+
+    // ---- the PUNCH face's click: the WET GAIN 3.7 dB down, the
+    // section running 3.7 under unity on a steady tone - one click
+    // and the knob takes the whole reading home ----
+    setParam ("transGain", -3.7f);
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getTransBalanceDb(), -3.7, 0.1,
+                    "the section runs 3.7 dB under unity - the ADD face reads +3.7");
+
+        editorForV294.getTransientGrBar()->applyTheAdd();
+
+        expectNear (strip->getApvts().getRawParameterValue ("transGain")->load(), 0.0, 0.02,
+                    "one click on the PUNCH's ADD face folds its reading into the WET GAIN knob - the gain staging in a single move");
+
+        for (int i = 0; i < 60; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getTransBalanceDb(), 0.0, 0.1,
+                    "the section levels out - the click landed the whole reading");
+    }
+    setParam ("transGain", 0.0f);
+
+    // ---- the COMP face's click: the v2.93 arithmetic working -
+    // threshold -20, ratio 10, the stage 9.87 under unity - one click
+    // and the make-up knob takes the ROUNDED reading home ----
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the working compressor runs 9.87 dB under unity - the ADD face reads +9.9");
+
+        editorForV294.getCompAddFace()->applyTheAdd();
+
+        expectNear (strip->getApvts().getRawParameterValue ("compGain")->load(), 9.9, 0.15,
+                    "one click on the COMP's ADD face folds the ROUNDED reading into the make-up knob - the digits' own decimal");
+
+        for (int i = 0; i < 60; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), 0.0, 0.15,
+                    "the compressor levels out at unity - the click landed the make-up");
+    }
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compGain", 0.0f);
 }
 } // namespace
 
@@ -9769,6 +9916,7 @@ int main (int argc, char* argv[])
     testV288TransientDesigner();
     testV292CrankedKnobs();
     testV293AddFaces();
+    testV294AddClicks();
 
     if (integration)
         testIntegrationRealConsole();

@@ -3620,7 +3620,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // signature band slims, the margins and seams breathe narrower,
     // the dynamics column 8 px narrower, the output column slimmer
     // too, and the panel reads 830 x 770
-    setSize (830, 770);
+    // v2.94.0 (Clement's request): the console gains its height
+    // back - the filters quincunx, the seams and the blocks
+    // breathing tighter, and the panel reads 830 x 744
+    setSize (830, 744);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -3822,10 +3825,11 @@ void CostesStripEditor::paint (juce::Graphics& g)
 
         // the group centred over column 1: the trace, a breath, the
         // name, the tick, a breath, CONSOLE. v2.92.0: the band slims
-        // to the 16 px the panel's own top margin gives it now
+        // to the 16 px the panel's own top margin gives it now.
+        // v2.94.0: the margin thins to 10 and the band rides with it
         const int groupW = 24 + 6 + costesW + 3 + 1 + 3 + consoleW;
         const int groupX = 10 + juce::jmax (0, (230 - groupW) / 2);
-        const int bandY = 16;
+        const int bandY = 10;
         const int bandH = 16;
 
         // the seismic line, the logo's own 50 x 20 trace scaled to
@@ -3841,7 +3845,7 @@ void CostesStripEditor::paint (juce::Graphics& g)
         // the name itself: COSTES in engraving, a small tick, CONSOLE
         // in dim caps - the same stacked wording as ever. v2.92.0:
         // the tick keeps a breath above the front end's own rule
-        // (the band slims to 16 px now - the rule rides at 31)
+        // (v2.94.0: the band rides at 10 - the rule at 25)
         const int nameX = groupX + 24 + 6;
         g.setFont (costesFont);
         g.drawText ("COSTES", juce::Rectangle<int> (nameX, bandY, costesW, bandH),
@@ -3864,23 +3868,24 @@ void CostesStripEditor::paint (juce::Graphics& g)
     g.setColour (engravingDim.withAlpha (0.5f));
 
     // v2.92.0: the dividers ride the 10 px seams (x = 245 and 687),
-    // under the 16 px signature band
-    g.drawVerticalLine (245, 22.0f, (float) getHeight() - 10.0f);
-    g.drawVerticalLine (687, 22.0f, (float) getHeight() - 10.0f);
+    // under the 16 px signature band. v2.94.0: the band rides at 10
+    // and the floor thins to 4, so the dividers run 16 to H - 8
+    g.drawVerticalLine (245, 16.0f, (float) getHeight() - 8.0f);
+    g.drawVerticalLine (687, 16.0f, (float) getHeight() - 8.0f);
 
-    // the rule over the front end block (v2.78.0): the block starts
-    // at y = 34 now (the 16 px band + the signature's own 18), and
-    // the rule rides 3 px above, at 31
-    g.drawLine (14.0f, 31.0f, 240.0f, 31.0f, 1.0f);
+    // the rule over the front end block (v2.78.0): the rule reads as
+    // the signature band's own underline, 1 px above its floor
+    // (v2.94.0: the band rides at 10, the rule at 25)
+    g.drawLine (14.0f, 25.0f, 240.0f, 25.0f, 1.0f);
     // v2.80.0: the rule rides under the EQ's header band.
     // v2.83.0 (Clement's remark 3): the taller front-end rows had
     // carried it down to y = 339 - straight through the HPF knob - so
     // it returns to its own place: JUST above the EQ ON plate.
     // v2.86.0: the tighter front end carries the header up with it.
     // v2.92.0: the tightened console carries it up again - the EQ's
-    // own area starts at y = 320 (16 + 18 + 274 + 12), its header
-    // band at 324, and the rule rides 2 px above, at 322
-    g.drawLine (14.0f, 322.0f, 240.0f, 322.0f, 1.0f);
+    // own area starts at y = 296 (v2.94.0: the quincunx's savings),
+    // its header band at 300, and the rule rides 2 px above, at 298
+    g.drawLine (14.0f, 298.0f, 240.0f, 298.0f, 1.0f);
 
     // v2.75.0: the reserved slots - engraved empty frames that name
     // the sections the future builds will fill (a degenerate resize
@@ -3969,9 +3974,11 @@ void CostesStripEditor::resized()
     // floor from 8 to 6, and the columns start at x = 10 with
     // 10 px seams. The savings: the dynamics stages close on the
     // transient frame (a 9 px breath where 21 px of air once stood)
-    // and the panel reads 830 x 770
-    area.removeFromTop (16);    // the engraved signature band (v2.69.0)
-    area.removeFromBottom (6); // the panel's own margin
+    // and the panel reads 830 x 770. v2.94.0 (Clement's request):
+    // the console gains height - the band rides at 10, the floor
+    // thins to 4, the filters quincunx and the seams close
+    area.removeFromTop (10);    // the engraved signature band (v2.69.0)
+    area.removeFromBottom (4); // the panel's own margin
 
     // v2.75.0 (Clement's spec): the console reads as THREE vertical
     // columns and the sound flows through them - down column 1 (the
@@ -4013,8 +4020,12 @@ void CostesStripEditor::resized()
     // own height below the trim returns to the console. The block
     // drops from 288 to 274: the trim row, a breath, then the cuts'
     // band with each button + slope stack riding under its own knob
-    auto frontEnd = column1.removeFromTop (274);
-    auto line = frontEnd.reduced (4, 2);   // 222 x 270
+    // v2.94.0 (Clement's request): the filters QUINCUNX - the cuts'
+    // row rides up into the trim's own room, so the block sheds its
+    // stacked air and drops to 253
+    auto frontEnd = column1.removeFromTop (253);
+    auto line = frontEnd.reduced (4, 2);   // 222 x 249
+    const int lineTop = line.getY();  // v2.94.0: the quincunx staggers off the line's own top
 
     // the input trim, TOP MIDDLE - the EQ's own 83 x 101 square,
     // centred on the cuts' own middle axis (withSizeKeepingCentre
@@ -4058,10 +4069,21 @@ void CostesStripEditor::resized()
     // plate lives in the IMAGE block at the head of the output
     // column; the process order itself never moves - the phase stays
     // folded into the input gain's own sign)
-    line.removeFromTop (8);
-    auto cutKnobStrip = line.removeFromTop (101);
+    // v2.94.0 (Clement's request): the QUINCUNX itself - the cuts'
+    // row rides up into the trim's own room, an 88 px stagger where
+    // 109 px once stood. The knobs read as one interlocked pattern:
+    // the trim centred on the column's axis, the HPF and the LPF at
+    // the sides, their discs never touching (the centres 112 px
+    // apart, 83 of disc across) and the caption's street clear above
+    auto cutKnobStrip = line.withY (lineTop + 88)
+                            .withHeight (101);
     lowCutKnob.setBounds (cutKnobStrip.removeFromLeft (83));    // the HPF, bottom left (v2.89.0, Clement's swap)
     highCutKnob.setBounds (cutKnobStrip.removeFromRight (83));   // the LPF, bottom right
+
+    // the stacks ride under the CUTS' own floor now - the line
+    // rebases under the interlocked row, the plate and slope bands
+    // keeping their own breaths
+    line = line.withY (lineTop + 189);
 
     // under each cut knob, its own stack: the merged plate centred
     // on the knob's own axis, DIRECTLY under its feet, and the slope
@@ -4118,7 +4140,10 @@ void CostesStripEditor::resized()
     // v2.79.0 (Clement's remark 2): the selector lines are GONE - the
     // mids' width sweeps ride the margin column under their glyphs,
     // so each row is one knob line and the knobs own its whole room
-    auto eqArea = column1;
+    // v2.94.0 (Clement's request): the EQ keeps its own whole room -
+    // it pins to the column's own floor instead, so the front end's
+    // quincunx savings flow into the air above it
+    auto eqArea = column1.removeFromBottom (444);
     eqArea.removeFromTop (4);
     auto eqHeader = eqArea.removeFromTop (18);
 
@@ -4238,7 +4263,9 @@ void CostesStripEditor::resized()
     // ladders are gone (their GR bar is one horizontal strip, the
     // four knobs one rank), the engraved frame stays and the
     // section lays out inside it
-    transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 170);
+    // v2.94.0 (Clement's request): the frame tightens to 162 px,
+    // the stages closing to a 4 px breath on either side
+    transientFrame = column2.withSizeKeepingCentre (column2.getWidth(), 162);
 
     // one layout for both stages: the same control set in the same
     // order, the same ladders, so the two halves read as one design.
@@ -4453,18 +4480,18 @@ void CostesStripEditor::resized()
         // CLIPPER - and since v2.93.0, just right of the PUNCH plate. The plates keep
         // their own line: they are added AFTER the meter, so they
         // paint and take their clicks on top of it
-        transGrBar.setBounds (block.getX(), block.getY(), block.getWidth(), 62);
+        transGrBar.setBounds (block.getX(), block.getY(), block.getWidth(), 58);
         punchOnButton.setBounds (block.getX(), block.getY(), 88, 18);
         transClipButton.setBounds (block.getRight() - 100, block.getY(), 100, 18);
 
-        // the plates' line (18), the breath under it (4), the GR
-        // caption (12), the track (14) and the engraved scale (14) -
-        // all of it the meter's own 62 px, out of the room
-        block.removeFromTop (62);
+        // the plates' line (18), the breath under it (2), the GR
+        // caption (12), the track (14) and the engraved scale (12) -
+        // all of it the meter's own 58 px (v2.94.0), out of the room
+        block.removeFromTop (58);
 
         // the knob field: one rank of four cells, the caption at
-        // every cell's feet
-        block.removeFromTop (6);
+        // every cell's feet (v2.94.0: a 2 px breath under the meter)
+        block.removeFromTop (2);
 
         const auto captionCell = [] (juce::Rectangle<int> cell, juce::Label& caption)
         {
@@ -4502,12 +4529,15 @@ void CostesStripEditor::resized()
     // and the mono maker, every knob with its caption word under
     // it), SHAPE OUT under it (the tilt, the drive with its OS
     // plate, and the new TRIM OUT - the gain the signal rides on its
-    // way out). Both blocks 370 px tall with an 8 px breath between
-    // them, ending flush under the EQ's own floor
-    auto imageBlock = column3.removeFromTop (370);
+    // way out). Both blocks 364 px tall (v2.94.0: the knobs' own
+    // 83 x 84 squares) with a 2 px breath between them, ending
+    // flush under the panel's floor
+    // v2.94.0 (Clement's request): the blocks shed their knobs' own
+    // savings - 364 px tall with a 2 px breath between them, ending
+    // flush under the panel's floor
+    auto imageBlock = column3.removeFromTop (364);
     reservedFrames[0] = imageBlock;
-    column3.removeFromTop (8);   // the breath between the blocks
-    auto shapeBlock = column3.removeFromTop (370);
+    auto shapeBlock = column3.removeFromBottom (364);
     reservedFrames[1] = shapeBlock;
 
     // ---- the IMAGE block ----
@@ -4534,8 +4564,8 @@ void CostesStripEditor::resized()
     for (int i = 0; i < 3; ++i)
     {
         imageBody.removeFromTop (3);   // the street after the unit above
-        const auto imageKnobBounds = imageBody.removeFromTop (86)
-                                         .withSizeKeepingCentre (83, 86);
+        const auto imageKnobBounds = imageBody.removeFromTop (84)
+                                         .withSizeKeepingCentre (83, 84);
         imageKnobList[(size_t) i]->setBounds (imageKnobBounds);
         imageBody.removeFromTop (1);   // the caption hugs its own knob
         const auto imageWordBounds = imageBody.removeFromTop (18)
@@ -4565,8 +4595,8 @@ void CostesStripEditor::resized()
     // takes its place 4 px left of the word's own left edge (the old
     // formula sat it 7 px INTO the word)
     shapeBody.removeFromTop (2);
-    const auto tiltKnobBounds = shapeBody.removeFromTop (86)
-                                    .withSizeKeepingCentre (83, 86);
+    const auto tiltKnobBounds = shapeBody.removeFromTop (84)
+                                    .withSizeKeepingCentre (83, 84);
     tiltKnob.setBounds (tiltKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto tiltCaption = shapeBody.removeFromTop (18).reduced (4, 0);
@@ -4583,8 +4613,8 @@ void CostesStripEditor::resized()
     // per-knob pattern as the whole column. The OS plate belongs to
     // the drive, so the drive's tile carries them BOTH
     shapeBody.removeFromTop (3);
-    const auto driveKnobBounds = shapeBody.removeFromTop (86)
-                                     .withSizeKeepingCentre (83, 86);
+    const auto driveKnobBounds = shapeBody.removeFromTop (84)
+                                     .withSizeKeepingCentre (83, 84);
     driveKnob.setBounds (driveKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto driveCaption = shapeBody.removeFromTop (18).reduced (4, 0);
@@ -4604,8 +4634,8 @@ void CostesStripEditor::resized()
     // FOUR-breath street after the OS plate keeps the drive's own
     // zone together and sets the trim out apart
     shapeBody.removeFromTop (4);
-    const auto trimOutKnobBounds = shapeBody.removeFromTop (86)
-                                       .withSizeKeepingCentre (83, 86);
+    const auto trimOutKnobBounds = shapeBody.removeFromTop (84)
+                                       .withSizeKeepingCentre (83, 84);
     trimOutKnob.setBounds (trimOutKnobBounds);
     shapeBody.removeFromTop (1);   // the caption hugs its own knob
     auto trimOutCaption = shapeBody.removeFromTop (18).reduced (4, 0);
@@ -4918,6 +4948,49 @@ void CostesStripEditor::DynamicsMeter::paint (juce::Graphics& g)
     }
 }
 
+// v2.94.0 (Clement's request): the ADD face works for its living -
+// ONE CLICK on the digits folds their reading straight into the
+// WET GAIN knob, the gain staging in a single move (a knob at
+// 2.4 dB with the face reading ADD +1.2 lands at 3.6). The click
+// takes the LIVE reading rounded to the digits' own decimal - the
+// display's 1 Hz latch belongs to the eye, not to the hand
+void CostesStripEditor::GrBarMeter::applyTheAdd()
+{
+    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getTransBalanceDb());
+    const float stepped = (float) juce::roundToInt (addDb * 10.0f) / 10.0f;
+
+    if (std::abs (stepped) < 0.05f)
+        return;   // the digits read ADD 0.0 - nothing to fold
+
+    auto* param = owner.getApvts().getParameter ("transGain");
+
+    if (param == nullptr)
+        return;
+
+    // the knob's own +/-9 span bounds the fold
+    const float current = owner.getApvts().getRawParameterValue ("transGain")->load();
+    const float target = juce::jlimit (-9.0f, 9.0f, current + stepped);
+
+    param->setValueNotifyingHost (param->convertTo0to1 (target));
+}
+
+// the click zone is the digits' own strip - the plates' line right
+// of the PUNCH plate; the GR bar's face below keeps its clicks to
+// itself
+void CostesStripEditor::GrBarMeter::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.y < 18 && e.x >= 94)
+        applyTheAdd();
+}
+
+// the pointing hand over the digits, the plain arrow elsewhere
+void CostesStripEditor::GrBarMeter::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor ((e.y < 18 && e.x >= 94)
+                        ? juce::MouseCursor::PointingHandCursor
+                        : juce::MouseCursor::NormalCursor);
+}
+
 void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
 {
     // v2.90.0 (Clement's request): the transient designer's HORIZONTAL
@@ -4986,9 +5059,10 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
         g.drawText (balText, balStrip, juce::Justification::centredLeft);
     }
 
-    // the breath under the plates' line, then the caption that reads
-    // centred above the bar it names
-    b.removeFromTop (4);
+    // the breath under the plates' line (v2.94.0: 2 px, the meter's
+    // own 58 px paying for the console's height), then the caption
+    // that reads centred above the bar it names
+    b.removeFromTop (2);
 
     auto captionStrip = b.removeFromTop (12);
     g.setColour (engraving);
@@ -5130,6 +5204,40 @@ void CostesStripEditor::GrBarMeter::paint (juce::Graphics& g)
                                           20, 10),
                     juce::Justification::centred);
     }
+}
+
+// v2.94.0 (Clement's request): the COMP's face carries the same
+// one-click gain staging - the digits fold into the compressor's
+// own make-up knob, bounded by the knob's own 0 to +18 span. The
+// whole face is the button
+void CostesStripEditor::CompAddFace::applyTheAdd()
+{
+    const float addDb = juce::jlimit (-30.0f, 30.0f, -owner.getCompBalanceDb());
+    const float stepped = (float) juce::roundToInt (addDb * 10.0f) / 10.0f;
+
+    if (std::abs (stepped) < 0.05f)
+        return;   // the digits read ADD 0.0 - nothing to fold
+
+    auto* param = owner.getApvts().getParameter ("compGain");
+
+    if (param == nullptr)
+        return;
+
+    const float current = owner.getApvts().getRawParameterValue ("compGain")->load();
+    const float target = juce::jlimit (0.0f, 18.0f, current + stepped);
+
+    param->setValueNotifyingHost (param->convertTo0to1 (target));
+}
+
+void CostesStripEditor::CompAddFace::mouseDown (const juce::MouseEvent&)
+{
+    applyTheAdd();
+}
+
+// the pointing hand over the whole face
+void CostesStripEditor::CompAddFace::mouseEnter (const juce::MouseEvent&)
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
 }
 
 void CostesStripEditor::CompAddFace::paint (juce::Graphics& g)

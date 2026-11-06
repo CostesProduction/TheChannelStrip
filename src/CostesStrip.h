@@ -1016,6 +1016,15 @@ public:
 
         void paint (juce::Graphics& g) override;
 
+        // v2.94.0 (Clement's request): the ADD face is a BUTTON now -
+        // one click on the digits folds their reading straight into
+        // the WET GAIN knob, the gain staging in one move. The zone
+        // is the digits' own strip - the plates' line right of the
+        // PUNCH plate; the GR bar below keeps its own face
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void applyTheAdd();
+
         CostesStrip& owner;
 
         // the peak-hold mark's state: the mark holds its magnitude
@@ -1048,6 +1057,14 @@ public:
         explicit CompAddFace (CostesStrip& source) : owner (source) {}
 
         void paint (juce::Graphics& g) override;
+
+        // v2.94.0 (Clement's request): the same one-click gain
+        // staging as the PUNCH side's face - a click folds the
+        // digits into the compressor's own make-up knob. The whole
+        // face is the button
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseEnter (const juce::MouseEvent&) override;
+        void applyTheAdd();
 
         CostesStrip& owner;
 
