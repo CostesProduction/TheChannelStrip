@@ -97,6 +97,17 @@ public:
     // -----------------------------------------------------------------
     std::function<void()> onConsoleResponseChanged;
 
+    // -----------------------------------------------------------------
+    // v2.102.0: the automation bridge. Fired by setPlugin / clearPlugin
+    // with the plugin that just took the slot (or nullptr) - the
+    // processor re-targets its proxy bank here and attaches the v2.27
+    // knob listeners, so EVERY hosting path (the message-thread toggle,
+    // the background instantiation thread, the test harness hosting
+    // through setPlugin directly) gets the exact same wiring in one
+    // place. Never the audio thread.
+    // -----------------------------------------------------------------
+    std::function<void (juce::AudioProcessor*)> onActivePluginChanged;
+
     // Test/support hook: how many hosted parameters currently carry
     // the change relay (the flush test asserts the listener wiring
     // without touching the console's audio).

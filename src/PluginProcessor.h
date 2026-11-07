@@ -3,10 +3,12 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <map>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "HostedStrip.h"
 #include "GRForwarder.h"
+#include "AutomationProxyBank.h"
 
 // v2.54.0: the version string comes from the build system (CMakeLists
 // injects TCS_VERSION on every target). The fallback keeps the
@@ -268,16 +270,74 @@ public:
     // v2.22: the cross-spectrum transfer measurement (EQ curve + coherence)
     TransferAnalyzer& getTransferAnalyzer() { return transferAnalyzer; }
 
-    float getTiltDb() const { return tiltDb.load (std::memory_order_relaxed); }
+    // v2.102.0: the tilt is a real exposed parameter now (see
+    // AutomationProxyBank.h) - Studio One can automate it. The editor
+    // keeps this exact interface: the getter reads the choice
+    // parameter's ladder, the UI setter snaps to the nearest rung and
+    // rides the host gesture so write-mode automation records the
+    // click, and the session save/restore still uses the plain tiltDb
+    // attribute (byte-compatible with older sessions).
+    static constexpr float tiltLadder[3] = { -3.0f, -4.5f, -6.0f };
+
+    float getTiltDb() const
+    {
+        return tiltLadder[(size_t) tiltParam->getIndex()];
+    }
+
+    // Nearest rung of the ladder: any legacy saved value maps onto a
+    // button, exactly like the editor's restore always did.
+    static int tiltIndexFor (float tilt)
+    {
+        int best = 1;
+        float bestDistance = 1.0e9f;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const float d = std::abs (tiltLadder[i] - tilt);
+
+            if (d < bestDistance)
+            {
+                best = i;
+                bestDistance = d;
+            }
+        }
+
+        return best;
+    }
+
     // v2.70.2: the UI-only setters also flag the session - these values
     // are persisted with the state, so the host must know they moved.
-    // The session restore bypasses the setters (direct stores), so a
-    // reload never raises a spurious dirty.
+    // The session restore bypasses this setter (see
+    // restoreTiltFromSession), so a reload never raises a spurious
+    // dirty.
     void setTiltDb (float tilt)
     {
-        tiltDb.store (tilt, std::memory_order_relaxed);
+        const int index = tiltIndexFor (tilt);
+
+        if (index != tiltParam->getIndex())
+        {
+            // the host gesture wraps the change so write-mode automation
+            // (touch / latch) records the button click
+            tiltParam->beginChangeGesture();
+            tiltParam->setValueNotifyingHost (tiltParam->convertTo0to1 ((float) index));
+            tiltParam->endChangeGesture();
+        }
+
         markSessionStateChanged();
     }
+
+    // Session restore: snap onto the ladder and adopt the value WITHOUT
+    // flagging the session (the host saved this tilt, it must not hear
+    // it back as a change).
+    void restoreTiltFromSession (float tilt)
+    {
+        tiltParam->setValueNotifyingHost (tiltParam->convertTo0to1 ((float) tiltIndexFor (tilt)));
+    }
+
+    // v2.102.0: the automation bank (one proxy slot per hosted
+    // parameter position). Test hook for the bridge suite.
+    AutomationProxyBank& getAutomationBank() { return *automationBank; }
+    juce::AudioParameterChoice* getTiltParameter() const { return tiltParam; }
 
     // ---- v2.8: analyser display options (persisted with the state) ----
     // v2.51: spectrum vertical scale: dB per division over a six-division
@@ -536,7 +596,12 @@ private:
     juce::String lastRestoreSummary;
     mutable juce::CriticalSection restoreSummaryLock;
     std::atomic<bool> scanning { false };
-    std::atomic<float> tiltDb { -4.5f };
+
+    // v2.102.0: handles to the exposed parameters. The AudioProcessor
+    // base owns both (addParameter) - these pointers never delete. The
+    // bank keeps non-owning proxy pointers for forwarding.
+    juce::AudioParameterChoice* tiltParam = nullptr;
+    std::unique_ptr<AutomationProxyBank> automationBank;
 
     // ---- v2.11: per-console settings memory (see the editor API above) ----
     // v2.27: mutable - the current-preset getters take the lock too.

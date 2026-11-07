@@ -124,6 +124,25 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
                         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout())
 {
+    // v2.102.0: the automation bridge. A DAW reads a plugin's parameter
+    // table ONCE, at load (the JUCE VST3 wrapper builds it in a single
+    // pass and never revisits it - see AutomationProxyBank.h), so the
+    // whole bank exists before anything else: the tilt as a real
+    // discrete parameter (the shell's parameter 0), then one proxy slot
+    // per hosted parameter position. From this version on, Studio One
+    // can automate the analyser tilt AND every knob of the hosted
+    // console.
+    tiltParam = new juce::AudioParameterChoice (juce::ParameterID { "tcsTilt", 1 },
+                                                "Analyser Tilt",
+                                                { "-3 dB/oct", "-4.5 dB/oct", "-6 dB/oct" },
+                                                1);
+    addParameter (tiltParam);
+
+    automationBank = std::make_unique<AutomationProxyBank>();
+
+    for (int i = 0; i < AutomationProxyBank::numSlots; ++i)
+        addParameter (automationBank->takeProxy (i).release());
+
     loadKnownPluginList();
 
     // v2.47.0 (the EQ-Verite curve) -> v2.49.0: when the hosted console's
@@ -141,6 +160,22 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
     hostedStrip.onConsoleResponseChanged = [this]
     {
         transferAnalyzer.requestFlush();
+    };
+
+    // v2.102.0: every swap / clear re-targets the automation bank at the
+    // console that just took the slot. The v2.27 knob listeners moved
+    // here too, so the internal strip's path and every test hosting a
+    // plugin through HostedStrip::setPlugin get the exact same wiring
+    // as instantiateHosted - one place, no double attach. The
+    // updateHostDisplay hint makes the host re-read the slot titles.
+    hostedStrip.onActivePluginChanged = [this] (juce::AudioProcessor* active)
+    {
+        if (active != nullptr)
+            for (auto* p : active->getParameters())
+                p->addListener (this);
+
+        automationBank->retarget (active);
+        updateHostDisplay (juce::AudioProcessor::ChangeDetails().withParameterInfoChanged (true));
     };
 
     // v1.0.10: helper-child mode. The parent instance re-launches this very
@@ -169,6 +204,11 @@ TheChannelStripAudioProcessor::~TheChannelStripAudioProcessor()
     // exactly like the disconnect above; ~HostedStrip then detaches
     // the relay from the parameters themselves.
     hostedStrip.onConsoleResponseChanged = nullptr;
+
+    // v2.102.0: the swap callback dies with the bank it feeds, and the
+    // proxies let go of the console before the members tear down.
+    hostedStrip.onActivePluginChanged = nullptr;
+    automationBank->retarget (nullptr);
 }
 
 juce::String TheChannelStripAudioProcessor::identFor (const juce::PluginDescription& d)
@@ -1698,24 +1738,34 @@ void TheChannelStripAudioProcessor::markSessionStateChanged()
     updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
-void TheChannelStripAudioProcessor::parameterValueChanged (int, float)
+void TheChannelStripAudioProcessor::parameterValueChanged (int index, float newValue)
 {
     // v2.27: any hosted-console knob move flags the current preset as
     // modified. The callback can fire on any thread (the plugin's own
     // editor, automation), so only a lock-free flag is raised here;
     // drainPresetDirtyFlag (message thread) turns it into "*".
-    // v2.70.2: the host must hear it too - the shell exposes no
-    // parameter, so without this the DAW never marks the song dirty.
-    // Restores and preset pushes run under HostedStatePushGuard and
-    // never reach this branch.
+    // v2.70.2: the host must hear it too - without this the DAW never
+    // marks the song dirty. Restores and preset pushes run under
+    // HostedStatePushGuard and never reach this branch.
     if (! suppressPresetDirty.load (std::memory_order_relaxed))
     {
         presetDirtyPending.store (true, std::memory_order_relaxed);
         markSessionStateChanged();
+
+        // v2.102.0: a user-visible console knob move is automation
+        // material - mirror it on the slot proxy so the DAW can record
+        // it. Machine restores (session / preset pushes) stay silent:
+        // the host saved those values, it must not hear them back.
+        automationBank->forwardValueChanged (index, newValue);
     }
 }
 
-void TheChannelStripAudioProcessor::parameterGestureChanged (int, bool) {}
+void TheChannelStripAudioProcessor::parameterGestureChanged (int index, bool hasBegun)
+{
+    // v2.102.0: forward the console knob's touch to the slot proxy, so
+    // write-mode automation (touch / latch) records the move.
+    automationBank->forwardGesture (index, hasBegun);
+}
 
 // v2.70.1: the doctor report prints this next to the strip's live
 // reading - the pair pinpoints whether a value was already wrong when
@@ -2277,12 +2327,13 @@ void TheChannelStripAudioProcessor::instantiateHosted (const juce::PluginDescrip
         return;
 
     // v2.27: watch the hosted console's parameters so a knob move can
-    // flag the console's current preset as modified ("*"). This only
-    // registers our listener in the JUCE parameter objects (never a
-    // call into the plugin), and the processor outlives every hosted
-    // instance, so no removal is needed.
-    for (auto* p : active->getParameters())
-        p->addListener (this);
+    // flag the console's current preset as modified ("*"). v2.102.0: the
+    // attach itself moved into the onActivePluginChanged wiring (one
+    // place for every hosting path - and the listener now also feeds
+    // the automation bank). This only registers our listener in the
+    // JUCE parameter objects (never a call into the plugin), and the
+    // processor outlives every hosted instance, so no removal is
+    // needed.
 
     juce::String message = "Hosted '" + desc.name + "' ready (latency "
                          + juce::String (active->getLatencySamples())
@@ -2518,8 +2569,8 @@ void TheChannelStripAudioProcessor::instantiateCostesStrip (bool applyPendingSta
 
     // v2.27: watch the strip's parameters so a knob move can flag its
     // current preset as modified ("*"), exactly like a console's.
-    for (auto* p : active->getParameters())
-        p->addListener (this);
+    // v2.102.0: the attach moved into the onActivePluginChanged wiring
+    // (see instantiateHosted).
 
     juce::String message = "Hosted 'Costes Strip' ready (latency "
                           + juce::String (active->getLatencySamples())
@@ -2631,7 +2682,10 @@ void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& dest
     auto xml = std::make_unique<juce::XmlElement> ("TCS");
     xml->setAttribute ("version", TCS_VERSION);
     xml->setAttribute ("hostedIdent", currentPluginIdent);
-    xml->setAttribute ("tiltDb", tiltDb.load (std::memory_order_relaxed));
+    // v2.102.0: the value rides the choice parameter now, but the
+    // attribute keeps the exact same format as the pre-2.102 sessions
+    // (one of -3 / -4.5 / -6).
+    xml->setAttribute ("tiltDb", getTiltDb());
 
     // v2.8: display options travel with the session too, so a reopened
     // project keeps the chosen scales and analyser visibility (same
@@ -2784,7 +2838,7 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
 
     const auto tilt = xml->getStringAttribute ("tiltDb");
     if (tilt.isNotEmpty())
-        tiltDb.store ((float) tilt.getDoubleValue(), std::memory_order_relaxed);
+        restoreTiltFromSession ((float) tilt.getDoubleValue());
 
     // v2.8: restore the display options; missing attributes (older
     // sessions) keep the v2.51 defaults (15 dB/div, 6 dB/div).

@@ -398,12 +398,21 @@ juce::AudioProcessor::BusesLayout makeLayout (bool mono)
 class MockConsole : public juce::AudioProcessor
 {
 public:
-    explicit MockConsole (bool acceptsMonoLayout)
+    explicit MockConsole (bool acceptsMonoLayout, int parameterCount = 0)
         : AudioProcessor (BusesProperties()
                             .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
                             .withOutput ("Main", juce::AudioChannelSet::stereo(), true)),
           acceptsMono (acceptsMonoLayout)
-    {}
+    {
+        // v2.102.0: optional hosted parameters for the automation-bridge
+        // suite - a console the DAW side can automate. Defaults to none,
+        // so every existing mock-based test is untouched.
+        for (int i = 0; i < parameterCount; ++i)
+            addParameter (new juce::AudioParameterFloat (
+                juce::ParameterID { "mockKnob" + juce::String (i), 1 },
+                "Mock Knob " + juce::String (i + 1),
+                juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+    }
 
     std::atomic<float> gain { 1.0f };
     std::atomic<int>   lastChannelCount { 0 };
@@ -11171,6 +11180,184 @@ void testV2100OptoCharacter()
 }
 
 
+// ---------------------------------------------------------------------------
+// v2.102.0: the automation bridge. The shell exposed no parameter to the
+// DAW since v2.6 - but a DAW reads a plugin's parameter table once, at
+// load, so the whole bank is born in the processor constructor (see
+// AutomationProxyBank.h): the tilt (parameter 0) plus one proxy slot per
+// hosted parameter position, re-targeted at the hosted console on every
+// swap. This suite pins the bank's shape, the tilt's parameter semantics,
+// BOTH forwarding directions (with the echo filter), the swap / clear
+// lifecycle, and the session attribute's byte compatibility.
+// ---------------------------------------------------------------------------
+void testV2102AutomationBridge()
+{
+    // ---- 1: the bank is born complete ----
+    beginTest ("v2.102.0: the automation bank is born complete");
+
+    TheChannelStripAudioProcessor proc;
+
+    expectTrue (proc.getParameters().size() == 1 + AutomationProxyBank::numSlots,
+                "the shell exposes the tilt plus the whole proxy bank");
+
+    auto* tilt = proc.getTiltParameter();
+    expectTrue (tilt != nullptr, "parameter 0 is the tilt");
+    expectTrue (tilt != nullptr && tilt->getParameterIndex() == 0,
+                "the tilt is the shell's parameter 0");
+    expectTrue (tilt != nullptr && tilt->getName (128) == "Analyser Tilt",
+                "the tilt parameter is named");
+    expectTrue (tilt != nullptr && tilt->isAutomatable(),
+                "the tilt is automatable");
+    // isDiscrete/getNumSteps are private overrides on AudioParameterChoice
+    // in JUCE 8: read them through the base interface, the way a host does.
+    auto* tiltBase = static_cast<juce::AudioProcessorParameter*> (tilt);
+    expectTrue (tilt != nullptr && tiltBase->isDiscrete() && tiltBase->getNumSteps() == 3,
+                "the tilt is a three-step choice");
+    expectNear (proc.getTiltDb(), -4.5, 0.001, "the tilt default is -4.5 dB/oct");
+
+    auto* idle = dynamic_cast<AutomationProxy*> (proc.getParameters() [1]);
+    expectTrue (idle != nullptr && idle->getName (128) == "(idle)",
+                "an empty slot reads as idle");
+    expectTrue (idle != nullptr && idle->isAutomatable(),
+                "every slot is automatable from birth (the DAW table is one-shot)");
+    expectTrue (proc.getAutomationBank().getLiveSlotCount() == 0,
+                "no slot is live before a console is hosted");
+
+    // ---- 2: the tilt rides the host and the session attribute ----
+    beginTest ("v2.102.0: the tilt parameter, the host gesture, the session");
+
+    proc.setTiltDb (-3.0f);
+    expectNear (proc.getTiltDb(), -3.0, 0.001, "setTiltDb snaps onto the ladder");
+    expectTrue (tilt != nullptr && tilt->getIndex() == 0,
+                "the -3 rung is choice index 0");
+
+    // the DAW-side view of the same parameter: automation writes the
+    // normalized value, the ladder reads it back
+    tilt->setValueNotifyingHost (tilt->convertTo0to1 (2.0f));
+    expectNear (proc.getTiltDb(), -6.0, 0.001,
+                "a DAW-driven tilt change moves the ladder");
+
+    juce::MemoryBlock saved;
+    proc.getStateInformation (saved);
+    auto xml = TheChannelStripAudioProcessor::getXmlFromBinary (saved.getData(),
+                                                                (int) saved.getSize());
+    expectTrue (xml != nullptr && xml->hasTagName ("TCS"),
+                "the session still parses as TCS xml");
+    expectTrue (xml != nullptr
+                    && std::abs (xml->getStringAttribute ("tiltDb").getDoubleValue() + 6.0) < 0.001,
+                "the tilt attribute keeps the pre-2.102 format");
+
+    TheChannelStripAudioProcessor restored;
+    restored.setStateInformation (saved.getData(), (int) saved.getSize());
+    expectNear (restored.getTiltDb(), -6.0, 0.001,
+                "the tilt restores through the session attribute");
+
+    // ---- 3: hosting a console re-targets the bank ----
+    beginTest ("v2.102.0: hosting a console re-targets the automation bank");
+
+    proc.prepareToPlay (48000.0, 512);
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true, 3));
+
+    auto* hosted = proc.getHostedStrip().getActivePlugin();
+    expectTrue (hosted != nullptr && hosted->getParameters().size() == 3,
+                "the mock console has three parameters");
+    expectTrue (proc.getParameters().size() == 1 + AutomationProxyBank::numSlots,
+                "the bank size never changes (the DAW table is one-shot)");
+    expectTrue (proc.getAutomationBank().getLiveSlotCount() == 3,
+                "three slots are live");
+
+    auto* slot0 = dynamic_cast<AutomationProxy*> (proc.getParameters() [1]);
+    auto* slot1 = dynamic_cast<AutomationProxy*> (proc.getParameters() [2]);
+    auto* slot3 = dynamic_cast<AutomationProxy*> (proc.getParameters() [4]);
+    expectTrue (slot0 != nullptr && slot0->getName (128) == "Mock Knob 1",
+                "slot 0 wears the console's first parameter name");
+    expectTrue (slot1 != nullptr && slot1->getName (128) == "Mock Knob 2",
+                "slot 1 wears the console's second parameter name");
+    expectTrue (slot3 != nullptr && slot3->getName (128) == "(idle)",
+                "the slots past the console stay idle");
+    expectNear (slot0 != nullptr ? slot0->getValue() : -1.0f, 0.1, 0.0001,
+                "the proxy reads the console's default");
+
+    // ---- 4: DAW -> console ----
+    if (slot0 != nullptr)
+        slot0->setValue (0.8f);
+    expectNear (hosted != nullptr ? hosted->getParameters() [0]->getValue() : -1.0f,
+                0.8, 0.0001,
+                "a DAW automation write reaches the console's parameter");
+
+    // ---- 5: console -> DAW, gesture included ----
+    struct ProxyCounter : public juce::AudioProcessorParameter::Listener
+    {
+        int valueChanges = 0;
+        int gestures = 0;
+        void parameterValueChanged (int, float) override { ++valueChanges; }
+        void parameterGestureChanged (int, bool) override { ++gestures; }
+    };
+
+    ProxyCounter counter;
+
+    if (slot0 != nullptr)
+        slot0->addListener (&counter);
+
+    if (hosted != nullptr)
+    {
+        auto* knob0 = hosted->getParameters() [0];
+        knob0->beginChangeGesture();
+        knob0->setValueNotifyingHost (0.3f);
+        knob0->endChangeGesture();
+    }
+
+    expectTrue (counter.valueChanges == 1,
+                "a console knob move reaches the DAW through the proxy");
+    expectTrue (counter.gestures == 2,
+                "the touch gesture is forwarded (begin and end)");
+    expectNear (slot0 != nullptr ? slot0->getValue() : -1.0f, 0.3, 0.0001,
+                "the proxy follows the console");
+
+    // ---- 6: the echo filter - the DAW's own write must not bounce ----
+    if (slot0 != nullptr)
+        slot0->setValue (0.5f); // the DAW drives
+    expectNear (hosted != nullptr ? hosted->getParameters() [0]->getValue() : -1.0f,
+                0.5, 0.0001,
+                "the DAW's write reached the console");
+    expectTrue (counter.valueChanges == 1,
+                "the DAW's own write does not echo back");
+    expectTrue (counter.gestures == 2,
+                "the DAW's own write raises no gesture");
+
+    if (slot0 != nullptr)
+        slot0->removeListener (&counter);
+
+    // ---- 7: swaps and clears re-target the bank ----
+    beginTest ("v2.102.0: swaps and clears re-target the bank");
+
+    proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true, 1));
+    expectTrue (proc.getAutomationBank().getLiveSlotCount() == 1,
+                "a smaller console leaves one live slot");
+    expectTrue (slot0 != nullptr && slot0->getName (128) == "Mock Knob 1",
+                "slot 0 follows console parameter 0 across the swap");
+    expectTrue (slot1 != nullptr && slot1->getName (128) == "(idle)",
+                "the surplus slot reads idle again");
+
+    proc.clearHostedPlugin();
+    expectTrue (proc.getAutomationBank().getLiveSlotCount() == 0,
+                "a cleared console empties the bank");
+    expectTrue (slot0 != nullptr && slot0->getName (128) == "(idle)",
+                "the slot reads idle after the clear");
+
+    // ---- 8: the internal Costes strip fills its fifty-six slots ----
+    proc.toggleCostesStrip();
+
+    auto* strip = proc.getHostedStrip().getActivePlugin();
+    expectTrue (strip != nullptr && strip->getName() == "Costes Strip",
+                "the internal strip is hosted");
+    expectTrue (proc.getAutomationBank().getLiveSlotCount() == 56,
+                "the internal strip fills fifty-six slots");
+    expectTrue (strip != nullptr && slot0 != nullptr
+                    && slot0->getName (128) == strip->getParameters() [0]->getName (128),
+                "slot 0 wears the strip's first parameter name");
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -11263,6 +11450,7 @@ int main (int argc, char* argv[])
     testV298CompParity();
     testV299FetCharacter();
     testV2100OptoCharacter();
+    testV2102AutomationBridge();
 
     if (integration)
         testIntegrationRealConsole();

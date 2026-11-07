@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.101.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.102.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,21 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.102.0** — *The shell speaks to the automation lanes.*
+  - **The DAW finally sees the knobs.** Since v2.6 the shell exposed
+    zero parameter to the host, so Studio One's automation had
+    nothing to grab. A DAW reads a plugin's parameter table once, at
+    load, so the whole bank exists from the first line of the
+    constructor: the analyser tilt as a real discrete parameter
+    (three rungs, -3 / -4.5 / -6 dB/oct), then one proxy slot per
+    hosted parameter position (128, every console covered with
+    headroom, the Costes strip fills 56). When a console takes the
+    slot, the proxies take the console's parameter names and values;
+    a knob moved on the console GUI writes on the DAW lane (touch /
+    latch record it), a curve drawn in the DAW moves the console
+    knob. Slot names and parameter IDs are stable for the plugin's
+    whole life, so automation curves survive console swaps and
+    plugin updates. Unused slots read "(idle)" and do nothing.
 - **2.101.0** — *The attack ladder - four characters, four grabs, one plate.*
   - **Every character reads the FAST ATTACK plate in its own honest
     time.** The plate keeps the VCA's engraved word (3 ms lit, 30 ms

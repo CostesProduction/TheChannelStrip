@@ -123,6 +123,12 @@ void HostedStrip::setPlugin (std::unique_ptr<juce::AudioProcessor> newPlugin)
 
     if (onConsoleResponseChanged)
         onConsoleResponseChanged();
+
+    // v2.102.0: the automation bank re-targets at the console that just
+    // took the slot (see AutomationProxyBank.h and the processor's
+    // onActivePluginChanged wiring).
+    if (onActivePluginChanged)
+        onActivePluginChanged (raw->plugin.get());
 }
 
 void HostedStrip::clearPlugin()
@@ -143,6 +149,11 @@ void HostedStrip::clearPlugin()
 
     if (onConsoleResponseChanged)
         onConsoleResponseChanged();
+
+    // v2.102.0: an emptied slot empties the automation bank too - every
+    // proxy returns to its idle name.
+    if (onActivePluginChanged)
+        onActivePluginChanged (nullptr);
 }
 
 void HostedStrip::retireActiveIntoOutgoing (HostedSlot* oldActive)
