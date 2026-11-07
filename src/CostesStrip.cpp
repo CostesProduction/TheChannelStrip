@@ -3003,19 +3003,24 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         / (juce::jmax (0.05f, compRelease->load()) * (float) currentSampleRate));
     const float compMakeupGain  = juce::Decibels::decibelsToGain (compGain->load());
     const float compCurveSlope  = 1.0f - 1.0f / compRatioValue;
+    // v2.98.0 (Clement's remark B): the GLUE's compensated loop gain -
+    // ratio - 1 settles the SAME static curve the VCA reads
+    // (k / (1 + k) = 1 - 1/r), so switching the character changes the
+    // grab, never the settled loudness; the dive the lagging fb
+    // detector digs on the attack is bounded at 240 dB/s
+    // (compGlueMaxDive below) - a real grab, never a runaway
+    const float compGlueLoopSlope = compRatioValue - 1.0f;
 
     // v2.97.0 (Clement's request): the compressor's CHARACTER - the
     // four-position radio on the plates' line. The VCA (position 1,
     // the default) is the strip's own feed-forward character; the
     // GLUE (position 2) is the feedback bus style: the detector
-    // listens to the stage's own output and the loop's own arithmetic
-    // bends the curve that emerges. The static slope stays the knob's
-    // own - the loop gain IS that slope (bounded below 1, always
-    // stable), and the settled curve reads slope / (1 + slope): a
-    // 10:1 knob reads as a gentle 1.9:1, exactly like the real bus
-    // comps whose engraved ratio never reads as a VCA ratio. FET (0)
-    // and OPTO (3) are engraved but not built yet - they park on the
-    // VCA character until their versions
+    // listens to the stage's own output, so the attack grabs what the
+    // loop actually did - and v2.98.0 (Clement's remark B) keeps the
+    // comparison honest: the characters read the same settled curve,
+    // the grab is the only thing that moves. FET (0) and OPTO (3) are
+    // engraved but not built yet - they park on the VCA character
+    // until their versions
     const int compStyleIndex = juce::jlimit (0, 3,
                                      juce::roundToInt (compStyle->load()));
     const bool compGlue = compStyleIndex == 2;
@@ -3620,9 +3625,11 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             if (compActive)
             {
-                // v2.97.0: the GLUE feeds the SAME static curve from
-                // the feedback detector - the loop's own arithmetic
-                // bends the curve that emerges; the VCA keeps reading
+                // v2.98.0 (Clement's remark B): the GLUE's loop is
+                // compensated - the target rides the loop gain
+                // (ratio - 1) so the settled curve IS the VCA's own
+                // (k / (1 + k) = 1 - 1/r) and switching characters
+                // never biases the loudness; the VCA keeps reading
                 // its feed-forward detector
                 const float levelDbL = 10.0f * std::log10 (
                     juce::jmax (compGlue ? compFbPowerL : compDetectorPowerL,
@@ -3643,16 +3650,42 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 float targetDbL = 0.0f;
                 float targetDbR = 0.0f;
 
+                const float targetSlope = compGlue ? compGlueLoopSlope
+                                                    : compCurveSlope;
+
                 if (effDbL > compThresholdDb)
-                    targetDbL = -(effDbL - compThresholdDb) * compCurveSlope;
+                    targetDbL = -(effDbL - compThresholdDb) * targetSlope;
 
                 if (effDbR > compThresholdDb)
-                    targetDbR = -(effDbR - compThresholdDb) * compCurveSlope;
+                    targetDbR = -(effDbR - compThresholdDb) * targetSlope;
+
+                const float previousGainDbL = compGainDbL;
+                const float previousGainDbR = compGainDbR;
 
                 compGainDbL += (targetDbL - compGainDbL)
                     * ((targetDbL < compGainDbL) ? compAttackCoef : compReleaseCoef);
                 compGainDbR += (targetDbR - compGainDbR)
                     * ((targetDbR < compGainDbR) ? compAttackCoef : compReleaseCoef);
+
+                // v2.98.0 (Clement's remark B): the GLUE's grab is
+                // BOUNDED - the lagging fb detector times the loop
+                // gain would dig the gain into a blackout on a fast
+                // attack at high ratios; the dive is rate-limited to
+                // 240 dB/s on the attack side only (the target below
+                // the pre-update gain), the release keeps the knob's
+                // own word
+                if (compGlue)
+                {
+                    const float compGlueMaxDive = 240.0f / (float) currentSampleRate;
+
+                    if (targetDbL < previousGainDbL)
+                        compGainDbL = juce::jmax (compGainDbL,
+                                                 previousGainDbL - compGlueMaxDive);
+
+                    if (targetDbR < previousGainDbR)
+                        compGainDbR = juce::jmax (compGainDbR,
+                                                 previousGainDbR - compGlueMaxDive);
+                }
 
                 const float wetL = compMakeupGain * std::pow (10.0f, compGainDbL * 0.05f);
                 const float wetR = compMakeupGain * std::pow (10.0f, compGainDbR * 0.05f);
@@ -4380,8 +4413,8 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         };
     }
 
-    compStylePlates[0].setEnabled (false);   // FET waits for v2.98.0
-    compStylePlates[3].setEnabled (false);   // OPTO waits for v2.99.0
+    compStylePlates[0].setEnabled (false);   // FET waits for v2.99.0
+    compStylePlates[3].setEnabled (false);   // OPTO waits for v2.100.0
 
     // v2.88.0 (Clement's spec): the transient designer's CLIPPER
     // plate - lit amber "CLIPPER ON" while the wet half is bounded
@@ -4624,7 +4657,10 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // v2.94.0 (Clement's request): the console gains its height
     // back - the filters quincunx, the seams and the blocks
     // breathing tighter, and the panel reads 830 x 744
-    setSize (830, 704);
+    // v2.98.0 (Clement's remark A): the console grows 20 px taller -
+    // the COMP stage takes them for its character plates' own line,
+    // and the panel reads 830 x 724
+    setSize (830, 724);
 
     // the meters repaint at 30 Hz - the detectors are already smoothed
     // (a 10 ms RMS envelope, attack and release one-poles), so a
@@ -5157,6 +5193,10 @@ void CostesStripEditor::resized()
     // v2.94.0 (Clement's request): the EQ keeps its own whole room -
     // it pins to the column's own floor instead, so the front end's
     // quincunx savings flow into the air above it
+    // v2.98.0 (Clement's remark A): the 20 px the console grew for the
+    // COMP's plates' line sit at the panel's foot here - the EQ keeps
+    // every pixel of its own room
+    column1.removeFromBottom (20);
     auto eqArea = column1.removeFromBottom (414);
     eqArea.removeFromTop (4);
     auto eqHeader = eqArea.removeFromTop (18);
@@ -5266,7 +5306,11 @@ void CostesStripEditor::resized()
     // to 246, the transient frame closing to a 9 px breath on either
     // side where 21 px of air once stood
     auto expBlock = column2.removeFromTop (260);
-    auto compBlock = column2.removeFromBottom (260);
+    // v2.98.0 (Clement's remark A): the COMP stage grows to 280 - the
+    // 20 px buy the character plates their own line, so the four
+    // engraved names never bite the knobs below them; the expander
+    // and the transient frame keep every pixel of their room
+    auto compBlock = column2.removeFromBottom (280);
 
     // v2.76.0 (Clement's remarks): the stages returned to their
     // v2.74 height, and the TRANSIENT slot kept its own engraved
@@ -5298,7 +5342,8 @@ void CostesStripEditor::resized()
                                  CostesSlider& hpfSlider,
                                  CostesSlider& lpfSlider,
                                  ListenToggle& listenButton,
-                                 CostesSlider& plateSelector)
+                                 CostesSlider& plateSelector,
+                                 const int plateLineH)
     {
         block = block.reduced (4, 2);
         block.removeFromTop (6);      // a breath under the band above
@@ -5325,6 +5370,13 @@ void CostesStripEditor::resized()
         // the OUT-to-GR seam
         auto meterColumn = block.removeFromLeft (144);
         meterColumn.removeFromTop (20);
+
+        // v2.98.0 (Clement's remark A): the stage's own growth stays
+        // OUT of the ladders - the trio keeps the 226 px height both
+        // stages share (v2.95.0's calm), the extra breath sits at the
+        // column's foot
+        if (plateLineH > 0)
+            meterColumn.removeFromBottom (plateLineH);
         auto meterIn  = meterColumn.removeFromLeft (44);
         auto meterOut = meterColumn.removeFromLeft (44);
         auto meterGr  = meterColumn.removeFromLeft (56);
@@ -5340,6 +5392,14 @@ void CostesStripEditor::resized()
         // with the section titles gone too, every knob grows to the
         // 84 px square - the height the two headers once took
         auto scStrip = block.removeFromBottom (39);
+
+        // v2.98.0 (Clement's remark A): the plates' line is CONSUMED
+        // here too - the meters column already reserves its own line
+        // under the stage plate, and now the knob field starts BELOW
+        // the engraved names instead of under them. The expander owns
+        // no plates, so it passes 0 and keeps its whole room
+        if (plateLineH > 0)
+            block.removeFromTop (plateLineH);
 
         // every cell sits its caption at the bottom and centres its
         // control in the room that is left
@@ -5437,7 +5497,7 @@ void CostesStripEditor::resized()
                         expScHpfSlider,
                         expScLpfSlider,
                         expListenButton,
-                        expKneeSlider);
+                        expKneeSlider, 0);
     }
 
     {
@@ -5461,7 +5521,7 @@ void CostesStripEditor::resized()
                         compHpfSlider,
                         compScLpfSlider,
                         compListenButton,
-                        compLinkSlider);
+                        compLinkSlider, 20);
 
         // v2.93.0 (Clement's request): the ADD face rides just right
         // of the plate it speaks for - the plate's own 88 px plus a
@@ -5561,6 +5621,9 @@ void CostesStripEditor::resized()
     // flush under the panel's floor
     auto imageBlock = column3.removeFromTop (344);
     reservedFrames[0] = imageBlock;
+    // v2.98.0 (Clement's remark A): the same 20 px foot breath under
+    // the SHAPE block - the frame and its content keep their pixels
+    column3.removeFromBottom (20);
     auto shapeBlock = column3.removeFromBottom (344);
     reservedFrames[1] = shapeBlock;
 

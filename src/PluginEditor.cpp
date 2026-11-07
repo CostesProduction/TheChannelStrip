@@ -1904,7 +1904,7 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     // (v2.52/v2.57) - instead of the stale 970 / 790 left over
     // from before the condensation. The hosts clamp the window at
     // these limits, and the old 970 drowned the short consoles
-    // (the Costes Console at 830 x 704) in a dead bottom margin
+    // (the Costes Console at 830 x 724) in a dead bottom margin
     // the fit never asked for - the tall bx consoles ride over
     // the floor and never saw it.
     setResizeLimits (860, proc.getAnalyserVisible() ? 911 : 731, 2560, 1600);

@@ -5676,9 +5676,11 @@ void testCostesStripSectionIcons()
     // v2.94.0 (Clement's request): the console gains its height
     // back - the filters quincunx, the blocks and seams tighter.
     // v2.95.0 (Clement's request): the meters give 40 px back -
-    // the expander's and the compressor's ladders 20 px each
-    expectTrue (editor.getWidth() == 830 && editor.getHeight() == 704,
-                "the strip panel opens as the three-column console, tightened top to floor (830 x 704)");
+    // the expander's and the compressor's ladders 20 px each.
+    // v2.98.0 (Clement's remark A): the console grows 20 px for the
+    // COMP's character plates' own line
+    expectTrue (editor.getWidth() == 830 && editor.getHeight() == 724,
+                "the strip panel opens as the three-column console, tightened top to floor (830 x 724 since v2.98.0's plates' line)");
 
     const auto icons = editor.getSectionIcons();
     const CostesStripEditor::SectionIcon::Icon expectedTypes[5] =
@@ -8200,7 +8202,7 @@ void testV283FourRemarks()
     // above, at 288. The harness paints the panel and probes the
     // rule's own rows against the clean air above the EQ
     {
-        juce::Image canvas (juce::Image::ARGB, 830, 704, true);
+        juce::Image canvas (juce::Image::ARGB, 830, 724, true);
         juce::Graphics g (canvas);
         editorForV283.paint (g);
 
@@ -8596,8 +8598,8 @@ void testV285InterlockedFrontEnd()
     // since v2.95.0). v2.94.0 (Clement's request): the quincunx and
     // the tighter seams gain the console its height back; v2.95.0
     // (Clement's request): the shorter meters bring it to 830 x 704
-    expectTrue (editorForV285.getWidth() == 830 && editorForV285.getHeight() == 704,
-                "v2.94.0 gained the console its height back and v2.95.0 brings it to 830 x 704, the EQ keeping its whole room");
+    expectTrue (editorForV285.getWidth() == 830 && editorForV285.getHeight() == 724,
+                "v2.94.0 gained the console its height back, v2.95.0 brings it to 830 x 704 and v2.98.0 grows it to 830 x 724, the EQ keeping its whole room");
 
     // ---- the trim rides the TOP MIDDLE, the cuts the QUINCUNX ----
     // the trim centred on the column's own axis with the cuts riding
@@ -9736,11 +9738,12 @@ void testV293AddFaces()
 // knob they serve (the PUNCH face into the WET GAIN, the COMP face
 // into the compressor's make-up), the gain staging in a single move -
 // and the console gains its height back: the filters in a quincunx,
-// the seams and the blocks breathing tighter, 830 x 704 since v2.95.0
+// the seams and the blocks breathing tighter, 830 x 704 since v2.95.0,
+// 830 x 724 since v2.98.0 (the character plates' own line)
 // ---------------------------------------------------------------------------
 void testV294AddClicks()
 {
-    beginTest ("v2.94.0: the one-click ADD - a click on the face folds its reading into its knob; the console at 830 x 704");
+    beginTest ("v2.94.0: the one-click ADD - a click on the face folds its reading into its knob; the console at 830 x 724");
 
     juce::MidiBuffer noMidi;
 
@@ -9760,16 +9763,16 @@ void testV294AddClicks()
         strip->getApvts().getParameterAsValue (id).setValue (value);
     };
 
-    // ---- the console itself: 830 x 704 (v2.94.0's quincunx and
-    // v2.95.0's meters, Clement's requests) ----
+    // ---- the console itself: 830 x 724 (v2.94.0's quincunx,
+    // v2.95.0's meters and v2.98.0's plates' line, Clement's requests) ----
     {
         CostesStrip stripForV294;
         stripForV294.prepareToPlay (48000.0, 512);
 
         CostesStripEditor editorForV294 (stripForV294);
 
-        expectTrue (editorForV294.getWidth() == 830 && editorForV294.getHeight() == 704,
-                    "the console stands 830 x 704 - the quincunx bought back 26 px and the shorter meters 40 more (v2.95.0)");
+        expectTrue (editorForV294.getWidth() == 830 && editorForV294.getHeight() == 724,
+                    "the console stands 830 x 724 - the quincunx bought back 26 px, the shorter meters 40 more (v2.95.0) and the plates' line 20 more (v2.98.0)");
     }
 
     CostesStripEditor editorForV294 (*strip);
@@ -10124,12 +10127,13 @@ void testV297CompCharacter()
                     "the parked GLUE is the parked VCA - the character never moves a parked stage");
     }
 
-    // ---- the GLUE's own voice: the same knobs, the feedback loop's
-    // settled curve. Threshold -20, ratio 10: the VCA reads its
-    // 0.9 x 10.97 = 9.87 down; the GLUE's loop settles at
-    // slope / (1 + slope) - 0.9 / 1.9 of the same over-threshold
-    // distance, 5.21 down, the gentler curve the real bus comps read
-    // with their engraved ratio ----
+    // ---- the GLUE's settled voice: the same knobs, the SAME curve.
+    // v2.98.0 (Clement's remark B): the loop is compensated (the loop
+    // gain rides ratio - 1), so the feedback's own arithmetic settles
+    // at k / (1 + k) = 1 - 1/r - exactly the VCA's curve. Threshold
+    // -20, ratio 10: both characters read the same 0.9 x 10.97 =
+    // 9.87 down; switching the lamp changes the grab, never the
+    // loudness, so the A/B is never biased ----
     setParam ("compThreshold", -20.0f);
     setParam ("compRatio", 10.0f);
 
@@ -10143,8 +10147,8 @@ void testV297CompCharacter()
             proc.processBlock (block, noMidi);
         }
 
-        expectNear (strip->getCompBalanceDb(), -5.21, 0.15,
-                    "the GLUE's loop settles at its own curve - 0.9 / 1.9 of the over-threshold distance, the bus comp's gentle truth");
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the GLUE settles the VCA's own curve - the compensated loop reads the same 9.87 down, the A/B never biased");
     }
 
     // the make-up lives OUTSIDE the loop: +6 dB moves the balance and
@@ -10161,16 +10165,15 @@ void testV297CompCharacter()
             proc.processBlock (block, noMidi);
         }
 
-        expectNear (strip->getCompBalanceDb(), 0.79, 0.15,
+        expectNear (strip->getCompBalanceDb(), -3.87, 0.15,
                     "the make-up rides outside the GLUE's loop - the balance moves six, the settled curve holds");
     }
 
     setParam ("compGain", 0.0f);
 
-    // ---- the emergent curve at ratio 2: the VCA reads its
-    // 0.5 x 10.97 = 5.49 down, the GLUE settles at 1/3 of the
-    // distance, 3.66 down. The knob keeps its word on the VCA; on the
-    // GLUE it says how hard the glue pushes ----
+    // ---- the parity at ratio 2: both characters read the same
+    // 0.5 x 10.97 = 5.49 down - the knob keeps its word on either
+    // lamp, and the character lives in the grab alone ----
     setParam ("compRatio", 2.0f);
 
     {
@@ -10183,8 +10186,8 @@ void testV297CompCharacter()
             proc.processBlock (block, noMidi);
         }
 
-        expectNear (strip->getCompBalanceDb(), -3.66, 0.15,
-                    "the GLUE at ratio 2 settles at 1/3 of the over-threshold distance - the ratio is loop gain, the curve emerges");
+        expectNear (strip->getCompBalanceDb(), -5.49, 0.15,
+                    "the GLUE at ratio 2 settles the VCA's own 5.49 down - the parity holds at every ratio");
     }
 
     setParam ("compStyle", 1.0f);
@@ -10200,13 +10203,14 @@ void testV297CompCharacter()
         }
 
         expectNear (strip->getCompBalanceDb(), -5.49, 0.15,
-                    "the VCA at the same knobs reads its own 0.5 x 10.97 - the character contrast, one lamp apart");
+                    "the VCA at the same knobs reads the same settled curve - the characters' parity, one lamp apart");
     }
 
     // ---- the LISTEN plate speaks the feedback signal itself: the
     // monitor hands the compressed tone (the loop's own output) to
-    // the output, 5.2 dB under the input, where the VCA's monitor
-    // reads its sidechain at unity ----
+    // the output, 9.9 dB under the input - the settled curve's own
+    // gain reduction, where the VCA's monitor reads its sidechain at
+    // unity ----
     setParam ("compStyle", 2.0f);
     setParam ("compRatio", 10.0f);
     setParam ("compListen", true);
@@ -10245,8 +10249,8 @@ void testV297CompCharacter()
 
         const double amp = 2.0 * std::sqrt (c * c + s * s) / (4.0 * 480.0);
 
-        expectNear (juce::Decibels::gainToDecibels (amp / 0.5), -5.2, 0.3,
-                    "the GLUE's LISTEN speaks the feedback signal - the compressed tone itself, 5.2 dB under the input");
+        expectNear (juce::Decibels::gainToDecibels (amp / 0.5), -9.9, 0.3,
+                    "the GLUE's LISTEN speaks the feedback signal - the compressed tone itself, 9.9 dB under the input");
     }
 
     setParam ("compListen", false);
@@ -10254,6 +10258,183 @@ void testV297CompCharacter()
     setParam ("compThreshold", 0.0f);
     setParam ("compRatio", 2.0f);
     setParam ("compOn", false);
+}
+
+// ---------------------------------------------------------------------------
+// v2.98.0 (Clement's remark B): the characters compare honestly - the
+// GLUE's compensated loop settles the VCA's own static curve at every
+// ratio (the loudness never biases the A/B), the grab is the only thing
+// that moves, and the dive the lagging feedback detector digs is
+// bounded - a real grab, never a runaway blackout
+// ---------------------------------------------------------------------------
+void testV298CompParity()
+{
+    beginTest ("v2.98.0: the characters compare honestly - the GLUE settles the VCA's curve, the grab is the character");
+
+    juce::MidiBuffer noMidi;
+
+    // ---- the parity at rest: the settled balance reads the same at
+    // ratio 10 and ratio 2 - the VCA measured first, then the GLUE,
+    // each from its own settled loop ----
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.toggleCostesStrip();
+
+        auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+        expectTrue (strip != nullptr, "the strip is hosted");
+
+        if (strip == nullptr)
+            return;
+
+        auto setParam = [strip] (const char* id, juce::var value)
+        {
+            strip->getApvts().getParameterAsValue (id).setValue (value);
+        };
+
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        auto settleAndRead = [&]() -> float
+        {
+            for (int i = 0; i < 240; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+            return strip->getCompBalanceDb();
+        };
+
+        setParam ("compOn", true);
+        setParam ("compThreshold", -20.0f);
+        setParam ("compRatio", 10.0f);
+
+        setParam ("compStyle", 1.0f);
+        const float vcaAtTen = settleAndRead();
+
+        setParam ("compStyle", 2.0f);
+        const float glueAtTen = settleAndRead();
+
+        expectNear (glueAtTen, vcaAtTen, 0.10,
+                    "the GLUE settles the VCA's own balance at ratio 10 - switching the character never biases the loudness");
+
+        setParam ("compStyle", 1.0f);
+        setParam ("compRatio", 2.0f);
+        const float vcaAtTwo = settleAndRead();
+
+        setParam ("compStyle", 2.0f);
+        const float glueAtTwo = settleAndRead();
+
+        expectNear (glueAtTwo, vcaAtTwo, 0.10,
+                    "the GLUE settles the VCA's own balance at ratio 2 - the parity holds at every ratio");
+    }
+
+    // ---- the grab is the character: from silence, the GLUE digs
+    // deeper than the VCA mid-attack - both onsets measured from the
+    // same rested start, the difference read at the fifth onset block
+    // ----
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.toggleCostesStrip();
+
+        auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+
+        if (strip == nullptr)
+            return;
+
+        auto setParam = [strip] (const char* id, juce::var value)
+        {
+            strip->getApvts().getParameterAsValue (id).setValue (value);
+        };
+
+        setParam ("compOn", true);
+        setParam ("compThreshold", -20.0f);
+        setParam ("compRatio", 10.0f);
+
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        // the detectors, the one-poles and the gain rest at home
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 1.0f);
+
+        float vcaOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                vcaOnset = strip->getCompBalanceDb();
+        }
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 2.0f);
+
+        float glueOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                glueOnset = strip->getCompBalanceDb();
+        }
+
+        expectTrue (vcaOnset - glueOnset > 1.5,
+                    "the GLUE digs deeper than the VCA mid-attack - the character lives in the grab, never in the loudness");
+    }
+
+    // ---- the grab is bounded: ratio 20, threshold -40, FAST attack -
+    // the dive never reads more than 4 dB below the settled curve
+    // (the 240 dB/s clamp on the attack side) ----
+    {
+        TheChannelStripAudioProcessor proc;
+        proc.prepareToPlay (48000.0, 512);
+        proc.toggleCostesStrip();
+
+        auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+
+        if (strip == nullptr)
+            return;
+
+        auto setParam = [strip] (const char* id, juce::var value)
+        {
+            strip->getApvts().getParameterAsValue (id).setValue (value);
+        };
+
+        setParam ("compOn", true);
+        setParam ("compThreshold", -40.0f);
+        setParam ("compRatio", 20.0f);
+        setParam ("compFastAttack", true);
+        setParam ("compStyle", 2.0f);
+
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        float deepest = 0.0f;
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+            deepest = juce::jmin (deepest, strip->getCompBalanceDb());
+        }
+
+        const float settled = strip->getCompBalanceDb();
+
+        expectTrue (deepest - settled > -4.0,
+                    "the GLUE's dive is bounded - the 240 dB/s clamp keeps the grab a grab, never a blackout");
+    }
 }
 } // namespace
 
@@ -10344,6 +10525,7 @@ int main (int argc, char* argv[])
     testV294AddClicks();
     testV295AveragedAdd();
     testV297CompCharacter();
+    testV298CompParity();
 
     if (integration)
         testIntegrationRealConsole();

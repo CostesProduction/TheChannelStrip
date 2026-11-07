@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.97.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.98.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,25 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.98.0** — *The characters compare honestly.*
+  - **The character plates stop biting the knobs (Clement's remark A).**
+    The console grows 20 px (830 x 724) and the COMP stage consumes its
+    character plates' line: FET, VCA, GLUE and OPTO ride level with the
+    COMP plate, and the knob field starts 20 px below the engraved names
+    instead of under them. The ladders keep the 226 px height both
+    stages share. The expander, the transient frame, the EQ and
+    the SHAPE block keep every pixel of their layout - the extra breath
+    sits at the panel's foot.
+  - **The GLUE rides the VCA's curve (Clement's remark B).** The feedback
+    loop is compensated: the loop gain is ratio - 1, so the loop's own
+    arithmetic settles at exactly the VCA's static curve
+    (k / (1 + k) = 1 - 1/r). Switching the character now changes the
+    grab - never the settled loudness - so an A/B between the characters
+    is never biased by volume. The GLUE's character lives in its grab:
+    the feedback detector runs one loop behind, digs deeper on the
+    transient, and the dive is bounded at 240 dB/s on the attack side
+    (a real grab, never a runaway blackout).
 
 - **2.97.0** — *The compressor takes a character.*
   - **Four engraved plates: FET, VCA, GLUE, OPTO (Clement's request).**
