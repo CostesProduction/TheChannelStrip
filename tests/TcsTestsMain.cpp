@@ -10448,10 +10448,12 @@ void testV298CompParity()
 // stage. It keeps the VCA's slope, its release and its make-up, so the
 // settled curve never moves (the v2.98 contract holds); the character
 // lives in the grab alone: the detector rides a two-gate window (two
-// cascaded 1.5 ms one-poles, five times faster to the word than the
-// VCA's single 10 ms window) and the attack rides the knob's own time
-// cut to its FET fraction (SLOW 30 ms reads 9 ms, FAST 3 ms reads
-// 0.9 ms) - the FET bites the word the VCA is still measuring
+// cascaded 3 ms one-poles (v2.99.1: slowed from 1.5 ms so the bass
+// word settles the same curve too), three times faster to the word
+// than the VCA's single 10 ms window) and the attack rides the
+// knob's own time cut to its FET fraction (SLOW 30 ms reads 9 ms,
+// FAST 3 ms reads 0.9 ms) - the FET bites the word the VCA is
+// still measuring
 // ---------------------------------------------------------------------------
 void testV299FetCharacter()
 {
@@ -10733,6 +10735,44 @@ void testV299FetCharacter()
         expectNear (vcaSettled, -9.87, 0.15,
                     "the VCA hands its settled curve back too - both characters ride the same word after the burst");
     }
+
+    // ---- v2.99.1 (Clement's listen report): his ears read a touch
+    // more GR on the FET over bass-rich words at the usual thresholds
+    // - the short window let the bass word's 2f ripple through and
+    // the attack/release asymmetry rectified it downward, so the FET
+    // settled deeper than the VCA; the gates slow to 3 ms each and
+    // the bass word settles the same curve. Threshold -30, ratio 3,
+    // a 100 Hz word - his own configuration, both characters measured
+    // from their own settled loops ----
+    setParam ("compThreshold", -30.0f);
+    setParam ("compRatio", 3.0f);
+
+    {
+        SineSource src (100.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        auto settle = [&]() -> float
+        {
+            for (int i = 0; i < 240; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            return strip->getCompBalanceDb();
+        };
+
+        setParam ("compStyle", 1.0f);
+        const float vcaBass = settle();
+        setParam ("compStyle", 0.0f);
+        const float fetBass = settle();
+
+        expectNear (fetBass, vcaBass, 0.10,
+                    "the FET reads the same settled curve on the bass word - the slowed gates keep the parity on every octave");
+    }
+
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
 
     // ---- the LISTEN plate speaks the sidechain at unity - the
     // feed-forward discipline the VCA reads ----

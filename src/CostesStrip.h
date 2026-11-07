@@ -453,8 +453,9 @@ private:
     float compFbPowerL     = 0.0f;
     float compFbPowerR     = 0.0f;
     // v2.99.0 (Clement's request, the FET character): the fast stage's
-    // own detector - two cascaded one-poles (1.5 ms each) fed by the
-    // same rectified word the VCA's single 10 ms window reads
+    // own detector - two cascaded one-poles (3 ms each, v2.99.1)
+    // fed by the same rectified word the VCA's single 10 ms window
+    // reads
     float compFetPower1L    = 0.0f;
     float compFetPower1R    = 0.0f;
     float compFetPower2L    = 0.0f;

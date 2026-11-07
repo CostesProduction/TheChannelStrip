@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.99.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.99.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,18 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.99.1** — *The FET holds the bass word honestly.*
+  - **The character window slows to two 3 ms gates (Clement's listen
+    report).** On bass-rich material the FET read a touch more GR
+    than the VCA: the short window let a bass word's 2f ripple
+    through, and the attack/release asymmetry rectified that ripple
+    downward - the FET settled deeper than the knobs said. The gates
+    slow from 1.5 ms to 3 ms each and every octave settles the VCA's
+    own curve: the parity reads within 0.02 dB on a 100 Hz word at
+    threshold -30, ratio 3. The grab keeps its word - the FET still
+    bites the word the VCA is still measuring, two dB deeper into a
+    burst, three dB ahead mid-attack.
 
 - **2.99.0** — *The FET takes the stage.*
   - **The FET plate goes live (position 0 of the character radio).** The

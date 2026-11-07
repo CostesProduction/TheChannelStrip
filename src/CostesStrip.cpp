@@ -3019,14 +3019,18 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // the feed-forward fast stage keeps the VCA's slope and its
     // release, so the settled curve never moves (the v2.98 contract);
     // its character lives in the grab alone: the detector rides a
-    // two-gate window (two cascaded one-poles, 1.5 ms each - five
-    // times faster to the word than the VCA's single 10 ms window)
+    // two-gate window (two cascaded one-poles, 3 ms each - three
+    // times faster to the word than the VCA's single 10 ms window;
+    // v2.99.1, Clement's listen report: the 1.5 ms gates let a bass
+    // word's 2f ripple through and the attack/release asymmetry
+    // rectified it downward - a touch more GR than the VCA read;
+    // the 3 ms gates keep every octave on the same settled curve)
     // and the attack rides the knob's own time cut to its FET
     // fraction, floored at half a millisecond (SLOW 30 ms reads
     // 9 ms, FAST 3 ms reads 0.9 ms) - the FET bites the word the VCA
     // is still measuring
     const float compFetDetectorCoef = 1.0f - std::exp (-1.0f
-        / (0.0015f * (float) currentSampleRate));
+        / (0.003f * (float) currentSampleRate));
     const float compFetAttackCoef   = 1.0f - std::exp (-1.0f
         / (juce::jmax (0.0005f, (compFastAttack->load() > 0.5f ? 0.003f
                                                               : 0.030f)
@@ -3609,7 +3613,7 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 
             // v2.99.0: the FET stage's own detector - the same
             // rectified word through a two-gate window (two cascaded
-            // 1.5 ms one-poles), always on while the character is
+            // 3 ms one-poles since v2.99.1), always on while the character is
             // FET, parked or not, so a character switch never
             // breathes; on a steady word both windows read the same
             // power, so the stage settles the VCA's own curve - the
