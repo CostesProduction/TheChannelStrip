@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.98.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.99.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,19 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.99.0** — *The FET takes the stage.*
+  - **The FET plate goes live (position 0 of the character radio).** The
+    classic fast stage: feed-forward like the VCA, it keeps the VCA's
+    slope, its release and its make-up, so the settled curve never
+    moves - switching the lamp changes the grab, never the loudness
+    (the v2.98 contract holds). Its detector rides a two-gate window
+    (two cascaded 1.5 ms one-poles, five times faster to the word
+    than the VCA's single 10 ms window) and its attack rides the
+    knob's own time cut to its FET fraction, floored at half a
+    millisecond: SLOW 30 ms reads 9 ms, FAST 3 ms reads 0.9 ms. The
+    FET bites the word the VCA is still measuring - the grab is the
+    character. OPTO stays engraved, dimmed and inert until v2.100.0.
 
 - **2.98.0** — *The characters compare honestly.*
   - **The character plates stop biting the knobs (Clement's remark A).**

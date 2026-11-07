@@ -10071,9 +10071,9 @@ void testV297CompCharacter()
 
     expectTrue (styleFet != nullptr && styleVca != nullptr
                     && styleGlue != nullptr && styleOpto != nullptr
-                    && ! styleFet->isEnabled() && styleVca->isEnabled()
+                    && styleFet->isEnabled() && styleVca->isEnabled()
                     && styleGlue->isEnabled() && ! styleOpto->isEnabled(),
-                "VCA and GLUE are live, FET and OPTO are inert engravings - no ghost buttons");
+                "VCA, FET and GLUE are live, OPTO the last inert engraving - no ghost buttons");
 
     // the radio follows the parameter within a frame: the sync the
     // timer owns, exercised directly
@@ -10084,7 +10084,8 @@ void testV297CompCharacter()
                 "the VCA's lamp is lit on the fresh strip - one lamp, the strip's own character");
 
     // a click on GLUE moves the parameter and the lamp follows; the
-    // inert FET and OPTO engravings move nothing; VCA takes it home
+    // FET moves it too (v2.99.0); the inert OPTO engraving moves
+    // nothing; VCA takes it home
     styleGlue->onClick();
     expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
                 "a click on the GLUE plate speaks the parameter");
@@ -10095,12 +10096,17 @@ void testV297CompCharacter()
                 "the GLUE's lamp takes the line - the radio moves");
 
     styleFet->onClick();
-    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
-                "the inert FET engraving never moves the radio - its character is not built yet");
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 0.0, 0.01,
+                "a click on the FET plate speaks the parameter - the v2.99.0 character is live");
+
+    editorForV297.timerCallback();
+
+    expectTrue (styleFet->getToggleState() && ! styleGlue->getToggleState(),
+                "the FET's lamp takes the line - the radio moves");
 
     styleOpto->onClick();
-    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
-                "the inert OPTO engraving never moves the radio either");
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 0.0, 0.01,
+                "the inert OPTO engraving never moves the radio - its character is not built yet");
 
     styleVca->onClick();
     expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 1.0, 0.01,
@@ -10436,6 +10442,347 @@ void testV298CompParity()
                     "the GLUE's dive is bounded - the 240 dB/s clamp keeps the grab a grab, never a blackout");
     }
 }
+
+// ---------------------------------------------------------------------------
+// v2.99.0 (Clement's request): the FET character - the feed-forward fast
+// stage. It keeps the VCA's slope, its release and its make-up, so the
+// settled curve never moves (the v2.98 contract holds); the character
+// lives in the grab alone: the detector rides a two-gate window (two
+// cascaded 1.5 ms one-poles, five times faster to the word than the
+// VCA's single 10 ms window) and the attack rides the knob's own time
+// cut to its FET fraction (SLOW 30 ms reads 9 ms, FAST 3 ms reads
+// 0.9 ms) - the FET bites the word the VCA is still measuring
+// ---------------------------------------------------------------------------
+void testV299FetCharacter()
+{
+    beginTest ("v2.99.0: the FET character - the fast window settles the VCA's own curve, the bite is the grab");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- the plate goes live: the FET engraving speaks the radio
+    // now, OPTO stays the last promise ----
+    CostesStripEditor editorForV299 (*strip);
+    editorForV299.setVisible (true);
+
+    auto* styleFet = editorForV299.getCompStylePlate (0);
+    auto* styleOpto = editorForV299.getCompStylePlate (3);
+
+    expectTrue (styleFet != nullptr && styleOpto != nullptr
+                    && styleFet->isEnabled() && ! styleOpto->isEnabled(),
+                "the FET plate is live, OPTO still engraved and inert - the v2.99.0 character");
+
+    // ---- the parked stage: the character never moves a parked strip
+    setParam ("compStyle", 0.0f);
+    setParam ("compOn", true);
+    setParam ("compThreshold", 0.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 60; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), 0.0, 0.05,
+                    "the parked FET is the parked VCA - the character never moves a parked stage");
+    }
+
+    // ---- the settled voice: threshold -20, ratio 10 - the two-gate
+    // window reads the same power the VCA's 10 ms window reads on a
+    // steady word, so the FET settles the same 9.87 down ----
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the FET settles the VCA's own curve - the fast window reads the same word, the A/B never biased");
+    }
+
+    // the make-up rides outside the detector: +6 dB moves the balance
+    // and leaves the settled curve untouched
+    setParam ("compGain", 6.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 120; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -3.87, 0.15,
+                    "the make-up rides outside the FET's window - the balance moves six, the settled curve holds");
+    }
+
+    setParam ("compGain", 0.0f);
+
+    // ---- the parity at ratio 2: the FET settles the VCA's own curve,
+    // then measured against the VCA at the same knobs ----
+    setParam ("compRatio", 2.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -5.49, 0.15,
+                    "the FET at ratio 2 settles the VCA's own 5.49 down - the parity holds at every ratio");
+    }
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        auto settle = [&]() -> float
+        {
+            for (int i = 0; i < 240; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            return strip->getCompBalanceDb();
+        };
+
+        setParam ("compStyle", 1.0f);
+        const float vcaAtTwo = settle();
+        setParam ("compStyle", 0.0f);
+        const float fetAtTwo = settle();
+
+        expectNear (fetAtTwo, vcaAtTwo, 0.10,
+                    "the FET settles the VCA's own balance at ratio 2 - switching the character never biases the loudness");
+    }
+
+    // ---- the parity at ratio 10 ----
+    setParam ("compRatio", 10.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        auto settle = [&]() -> float
+        {
+            for (int i = 0; i < 240; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            return strip->getCompBalanceDb();
+        };
+
+        setParam ("compStyle", 1.0f);
+        const float vcaAtTen = settle();
+        setParam ("compStyle", 0.0f);
+        const float fetAtTen = settle();
+
+        expectNear (fetAtTen, vcaAtTen, 0.10,
+                    "the FET settles the VCA's own balance at ratio 10 - the fast window never biases the loudness");
+    }
+
+    // ---- the grab: from silence, the FET is ON the word while the VCA
+    // is still measuring it - the difference read at the fifth onset
+    // block ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 1.0f);
+
+        float vcaOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                vcaOnset = strip->getCompBalanceDb();
+        }
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 0.0f);
+
+        float fetOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                fetOnset = strip->getCompBalanceDb();
+        }
+
+        expectTrue (vcaOnset - fetOnset > 1.5,
+                    "the FET grabs faster than the VCA - it bites the word the VCA is still measuring, the character lives in the grab");
+    }
+
+    // ---- the bite: a +6 dB burst over the settled word - the FET digs
+    // deeper into it, then hands the settled curve back ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        setParam ("compStyle", 1.0f);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        float vcaDeepest = 0.0f;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            src.fill (block);
+            block.applyGain (0, 0, block.getNumSamples(), 2.0f);
+            block.applyGain (1, 0, block.getNumSamples(), 2.0f);
+            proc.processBlock (block, noMidi);
+            vcaDeepest = juce::jmin (vcaDeepest, strip->getCompBalanceDb());
+        }
+
+        for (int i = 0; i < 150; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        const float vcaSettled = strip->getCompBalanceDb();
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 0.0f);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        float fetDeepest = 0.0f;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            src.fill (block);
+            block.applyGain (0, 0, block.getNumSamples(), 2.0f);
+            block.applyGain (1, 0, block.getNumSamples(), 2.0f);
+            proc.processBlock (block, noMidi);
+            fetDeepest = juce::jmin (fetDeepest, strip->getCompBalanceDb());
+        }
+
+        for (int i = 0; i < 150; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        const float fetSettled = strip->getCompBalanceDb();
+
+        expectTrue (vcaDeepest - fetDeepest > 1.5,
+                    "the FET digs deeper into the burst - the bite the fast window buys");
+
+        expectNear (fetSettled, -9.87, 0.15,
+                    "the FET hands the settled curve back after the burst - the grab never biases the loudness");
+
+        expectNear (vcaSettled, -9.87, 0.15,
+                    "the VCA hands its settled curve back too - both characters ride the same word after the burst");
+    }
+
+    // ---- the LISTEN plate speaks the sidechain at unity - the
+    // feed-forward discipline the VCA reads ----
+    setParam ("compListen", true);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        const double omega = juce::MathConstants<double>::twoPi * 1000.0 / 48000.0;
+        double filled = 0.0;
+
+        for (int i = 0; i < 236; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+            filled += 480.0;
+        }
+
+        double c = 0.0;
+        double s = 0.0;
+
+        for (int b = 0; b < 4; ++b)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            for (int i = 0; i < 480; ++i)
+            {
+                const double phase = omega * (filled + (double) b * 480.0 + (double) i);
+                c += block.getSample (0, i) * std::cos (phase);
+                s += block.getSample (0, i) * std::sin (phase);
+            }
+
+            filled += 480.0;
+        }
+
+        const double amp = 2.0 * std::sqrt (c * c + s * s) / (4.0 * 480.0);
+
+        expectNear (juce::Decibels::gainToDecibels (amp / 0.5), 0.0, 0.3,
+                    "the FET's LISTEN speaks its sidechain at unity - the feed-forward detector's own word");
+    }
+
+    setParam ("compListen", false);
+    setParam ("compStyle", 1.0f);
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compOn", false);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -10526,6 +10873,7 @@ int main (int argc, char* argv[])
     testV295AveragedAdd();
     testV297CompCharacter();
     testV298CompParity();
+    testV299FetCharacter();
 
     if (integration)
         testIntegrationRealConsole();
