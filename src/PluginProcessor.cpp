@@ -2801,8 +2801,33 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
     // [+30;-60]) -> 15, 6 (was [+18;-36]) -> 9; EQ 4 (was +/-18) -> 6,
     // 2 (was +/-9) -> 2. Anything off the ladder snaps to the closest
     // scale.
-    const bool legacyScales = xml->getStringAttribute ("version")
-                                 .compare ("2.51.0") < 0;
+    // v2.100.0's lesson: the gate compares the session's version
+    // NUMERICALLY. A plain string compare read "2.100.0" as OLDER
+    // than "2.51.0" ("1" sorts before "5"), so every 2.100.0 session
+    // rode the legacy remap and its saved EQ 4 dB/div reopened as 6
+    // - the state roundtrip and both fixed points broke. The major
+    // and minor numbers are compared as integers; a missing or
+    // unreadable version stays on the legacy side of the gate
+    const bool legacyScales = [] (const juce::String& v) -> bool
+    {
+        if (v.isEmpty())
+            return true;
+
+        const auto parts = juce::StringArray::fromTokens (v, ".", "");
+
+        if (parts.size() < 2
+            || ! parts[0].containsOnly ("0123456789")
+            || ! parts[1].containsOnly ("0123456789"))
+            return true;
+
+        const int major = parts[0].getIntValue();
+        const int minor = parts[1].getIntValue();
+
+        if (major != 2)
+            return major < 2;
+
+        return minor < 51;
+    } (xml->getStringAttribute ("version"));
 
     const auto ana = xml->getStringAttribute ("anaDbDiv");
     if (ana.isNotEmpty())

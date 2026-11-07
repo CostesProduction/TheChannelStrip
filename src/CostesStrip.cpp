@@ -2171,8 +2171,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // than the knob says, exactly like the real bus comps whose
     // engraved ratio never reads as a VCA ratio). FET (0) is built in
     // v2.99.0 - the fast feed-forward stage, its own short window
-    // riding the same settled curve; OPTO (3) stays engraved ahead of
-    // v2.100.0 - it parks on the VCA character until then
+    // riding the same settled curve; the OPTO (3) is built in
+    // v2.100.0 - the lamp and the cell, its own slow window riding
+    // the same settled curve. The radio is complete
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "compStyle", 1 }, "Compressor Character",
         juce::NormalisableRange<float> (0.0f, 3.0f, 1.0f), 1.0f,
@@ -2546,6 +2547,12 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     compFetPower1R     = 0.0f;
     compFetPower2L     = 0.0f;
     compFetPower2R     = 0.0f;
+    compOptoDetectorPowerL = 0.0f;   // v2.100.0: the OPTO's lamp and cells park with the rest
+    compOptoDetectorPowerR = 0.0f;
+    compOptoFastGainL = 0.0f;
+    compOptoFastGainR = 0.0f;
+    compOptoSlowGainL = 0.0f;
+    compOptoSlowGainR = 0.0f;
     detectorCoef      = 1.0f - std::exp (-1.0f / (0.010f * (float) currentSampleRate));
 
     // v2.65.0: the meters start at the detector's floor (an empty IN
@@ -3035,6 +3042,27 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         / (juce::jmax (0.0005f, (compFastAttack->load() > 0.5f ? 0.003f
                                                               : 0.030f)
              * 0.3f) * (float) currentSampleRate));
+    // v2.100.0 (Clement's request): the OPTO character's own
+    // constants - the lamp and the cell. The detector rides a slow
+    // 20 ms window (twice the VCA's - the smoothest read of the
+    // radio, and the bass word settles its own curve without a
+    // ripple); the attack is the knob's own time tripled (SLOW
+    // 30 ms reads 90 ms, FAST 3 ms reads 9 ms - the plate keeps its
+    // word), and the release is the famous double slope: the fast
+    // cell hands a quarter of the knob back, the slow cell the
+    // knob's own time quadrupled, and the stage speaks their 65/35
+    // blend - the cool-off of a lamp after the word has gone
+    const float compOptoDetectorCoef = 1.0f - std::exp (-1.0f
+        / (0.020f * (float) currentSampleRate));
+    const float compOptoAttackCoef   = 1.0f - std::exp (-1.0f
+        / ((compFastAttack->load() > 0.5f ? 0.003f : 0.030f)
+             * 3.0f * (float) currentSampleRate));
+    const float compOptoFastReleaseCoef = 1.0f - std::exp (-1.0f
+        / (juce::jmax (0.05f, compRelease->load()) * 0.25f
+             * (float) currentSampleRate));
+    const float compOptoSlowReleaseCoef = 1.0f - std::exp (-1.0f
+        / (juce::jmax (0.05f, compRelease->load()) * 4.0f
+             * (float) currentSampleRate));
 
     // v2.97.0 (Clement's request): the compressor's CHARACTER - the
     // four-position radio on the plates' line. The VCA (position 1,
@@ -3046,12 +3074,15 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // the grab is the only thing that moves. v2.99.0 (Clement's
     // request): the FET (position 0) is BUILT - the feed-forward fast
     // stage, its own short detector window riding the same settled
-    // curve; OPTO (3) stays engraved and parks on the VCA character
-    // until v2.100.0
+    // curve; and v2.100.0 (Clement's request): the OPTO (position 3)
+    // is BUILT too - the lamp and the cell, the smooth grab and the
+    // double-slope cool-off, its own slow window riding the same
+    // settled curve. The radio is complete
     const int compStyleIndex = juce::jlimit (0, 3,
                                      juce::roundToInt (compStyle->load()));
     const bool compGlue = compStyleIndex == 2;
     const bool compFet  = compStyleIndex == 0;
+    const bool compOpto = compStyleIndex == 3;
 
     // v2.72.0 (Clement's request): how far each channel's detector
     // leans towards the stereo-linked one - 0 (dual) to 1 (the full
@@ -3630,6 +3661,20 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                                     * compFetDetectorCoef;
             }
 
+            // v2.100.0: the OPTO's lamp - the same rectified word
+            // through a slow 20 ms window, always on while the
+            // character is OPTO, parked or not, so a character switch
+            // never breathes; the slow window reads the word's own
+            // average - on a steady word the same power every window
+            // converges to, and no 2f ripple on the bass
+            if (compOpto)
+            {
+                compOptoDetectorPowerL += (rectified[0] * rectified[0]
+                    - compOptoDetectorPowerL) * compOptoDetectorCoef;
+                compOptoDetectorPowerR += (rectified[1] * rectified[1]
+                    - compOptoDetectorPowerR) * compOptoDetectorCoef;
+            }
+
             // v2.67.0: the same honest IN level for the compressor - the
             // full-band sample entering the stage (the expander's
             // output), not the detector's filtered band
@@ -3677,20 +3722,34 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 // (ratio - 1) so the settled curve IS the VCA's own
                 // (k / (1 + k) = 1 - 1/r) and switching characters
                 // never biases the loudness; the VCA keeps reading
-                // its feed-forward detector, and v2.99.0: the FET
-                // reads its own two-gate window - on a steady word
-                // both read the same power, so every character
-                // settles the same curve
+                // its feed-forward detector, v2.99.0: the FET reads
+                // its own two-gate window, and v2.100.0: the OPTO
+                // reads its lamp's slow window - on a steady word
+                // every window converges to the same power, so every
+                // character settles the same curve
+                float levelPowerL = compDetectorPowerL;
+                float levelPowerR = compDetectorPowerR;
+
+                if (compGlue)
+                {
+                    levelPowerL = compFbPowerL;
+                    levelPowerR = compFbPowerR;
+                }
+                else if (compFet)
+                {
+                    levelPowerL = compFetPower2L;
+                    levelPowerR = compFetPower2R;
+                }
+                else if (compOpto)
+                {
+                    levelPowerL = compOptoDetectorPowerL;
+                    levelPowerR = compOptoDetectorPowerR;
+                }
+
                 const float levelDbL = 10.0f * std::log10 (
-                    juce::jmax (compGlue ? compFbPowerL
-                              : (compFet ? compFetPower2L
-                                         : compDetectorPowerL),
-                                detectorFloorPower));
+                    juce::jmax (levelPowerL, detectorFloorPower));
                 const float levelDbR = 10.0f * std::log10 (
-                    juce::jmax (compGlue ? compFbPowerR
-                              : (compFet ? compFetPower2R
-                                         : compDetectorPowerR),
-                                detectorFloorPower));
+                    juce::jmax (levelPowerR, detectorFloorPower));
 
                 // the stereo-linked level - the louder detector, the
                 // one the v2.64.0 strip always rode - and each
@@ -3724,10 +3783,43 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 const float previousGainDbL = compGainDbL;
                 const float previousGainDbR = compGainDbR;
 
-                compGainDbL += (targetDbL - compGainDbL)
-                    * ((targetDbL < compGainDbL) ? attackCoef : compReleaseCoef);
-                compGainDbR += (targetDbR - compGainDbR)
-                    * ((targetDbR < compGainDbR) ? attackCoef : compReleaseCoef);
+                // v2.100.0: the OPTO's two gain cells always track
+                // the target with their own coefs, the character
+                // parked or not, so a character switch never
+                // breathes; the attack is the knob's own time
+                // tripled, the fast cell releases at a quarter of
+                // the knob and the slow cell at four times it
+                compOptoFastGainL += (targetDbL - compOptoFastGainL)
+                    * ((targetDbL < compOptoFastGainL) ? compOptoAttackCoef
+                                                       : compOptoFastReleaseCoef);
+                compOptoSlowGainL += (targetDbL - compOptoSlowGainL)
+                    * ((targetDbL < compOptoSlowGainL) ? compOptoAttackCoef
+                                                       : compOptoSlowReleaseCoef);
+                compOptoFastGainR += (targetDbR - compOptoFastGainR)
+                    * ((targetDbR < compOptoFastGainR) ? compOptoAttackCoef
+                                                       : compOptoFastReleaseCoef);
+                compOptoSlowGainR += (targetDbR - compOptoSlowGainR)
+                    * ((targetDbR < compOptoSlowGainR) ? compOptoAttackCoef
+                                                       : compOptoSlowReleaseCoef);
+
+                // while the character is OPTO the stage speaks the
+                // 65/35 blend of the two cells - the double-slope
+                // cool-off of a lamp; the other characters keep the
+                // knob's own word
+                if (compOpto)
+                {
+                    compGainDbL = 0.65f * compOptoFastGainL
+                                + 0.35f * compOptoSlowGainL;
+                    compGainDbR = 0.65f * compOptoFastGainR
+                                + 0.35f * compOptoSlowGainR;
+                }
+                else
+                {
+                    compGainDbL += (targetDbL - compGainDbL)
+                        * ((targetDbL < compGainDbL) ? attackCoef : compReleaseCoef);
+                    compGainDbR += (targetDbR - compGainDbR)
+                        * ((targetDbR < compGainDbR) ? attackCoef : compReleaseCoef);
+                }
 
                 // v2.98.0 (Clement's remark B): the GLUE's grab is
                 // BOUNDED - the lagging fb detector times the loop
@@ -3761,6 +3853,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             {
                 compGainDbL = 0.0f;
                 compGainDbR = 0.0f;
+                compOptoFastGainL = 0.0f;
+                compOptoFastGainR = 0.0f;
+                compOptoSlowGainL = 0.0f;
+                compOptoSlowGainR = 0.0f;
             }
 
             float compOutLevel = 0.0f;
@@ -4450,9 +4546,9 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // character (the default, every existing session loads on it);
     // GLUE is the feedback bus style, the detector listening to the
     // stage's own output; the FET (position 0, v2.99.0) is the fast
-    // feed-forward stage - its plate is live; OPTO (v2.100.0) stays
-    // engraved but not built yet - its plate sits inert, no click
-    // and a dimmed paint, a promise rather than a ghost button
+    // feed-forward stage and the OPTO (position 3, v2.100.0) is the
+    // lamp and the cell - both plates are live, the radio is
+    // complete: four engraved names, four characters, one lamp
     compStylePlates[0].caption = "FET";
     compStylePlates[1].caption = "VCA";
     compStylePlates[2].caption = "GLUE";
@@ -4475,8 +4571,6 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
             param->setValueNotifyingHost (param->convertTo0to1 ((float) i));
         };
     }
-
-    compStylePlates[3].setEnabled (false);   // OPTO waits for v2.100.0
 
     // v2.88.0 (Clement's spec): the transient designer's CLIPPER
     // plate - lit amber "CLIPPER ON" while the wet half is bounded
@@ -5594,8 +5688,8 @@ void CostesStripEditor::resized()
 
         // v2.97.0: the four CHARACTER plates finish the plates' line -
         // engraved names in the air right of the ADD face, level with
-        // the COMP plate, one lamp between them (OPTO inert until
-        // its version)
+        // the COMP plate, one lamp between them (all four live
+        // since v2.100.0 - the radio is complete)
         const int styleX = compAddFace.getBounds().getRight() + 6;
 
         for (int i = 0; i < 4; ++i)
@@ -6495,9 +6589,9 @@ void CostesStripEditor::CompStyleToggle::paintButton (juce::Graphics& g,
     // v2.97.0 (Clement's request): the compressor's CHARACTER plate -
     // the same SSL plate language as the section plates, minus the
     // ON/OFF suffix: the engraved name says itself, the lamp says
-    // the radio's position. An inert plate (OPTO until its version)
-    // paints dimmed - the name reads as engraving on the
-    // panel, not as a button waiting to be pressed
+    // the radio's position. An inert plate would paint dimmed - the
+    // name reads as engraving on the panel, not as a button waiting
+    // to be pressed; since v2.100.0 every plate is live
     const bool on = getToggleState();
     const bool built = isEnabled();
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);

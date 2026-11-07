@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.99.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.100.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,23 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.100.0** — *The OPTO lights the lamp - the radio is complete.*
+  - **The OPTO plate goes live (position 3, the last engraving).**
+    The optical character: feed-forward like the VCA, it keeps the
+    slope, the release knob and the make-up, so the settled curve
+    never moves - switching the lamp changes the grab, never the
+    loudness. Its detector rides a slow 20 ms window (twice the
+    VCA's - the smoothest read of the radio, and the bass word
+    settles without a ripple), its attack is the knob's own time
+    tripled (SLOW 30 ms reads 90 ms, FAST 3 ms reads 9 ms), and its
+    release is the famous double slope: a fast cell hands a quarter
+    of the knob back, a slow cell the knob's own time quadrupled,
+    and the stage speaks their 65/35 blend - the cool-off of a
+    lamp after the word has gone. The OPTO takes its time to the
+    word and hands it back slower than any other character. Four
+    engraved names, four characters, one lamp: the radio is
+    complete.
 
 - **2.99.1** — *The FET holds the bass word honestly.*
   - **The character window slows to two 3 ms gates (Clement's listen

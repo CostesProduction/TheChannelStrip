@@ -460,6 +460,16 @@ private:
     float compFetPower1R    = 0.0f;
     float compFetPower2L    = 0.0f;
     float compFetPower2R    = 0.0f;
+    // v2.100.0 (Clement's request, the OPTO character): the lamp and
+    // the cell - a slow detector window (20 ms) and the two gain
+    // cells (fast and slow) whose 65/35 blend is the double-slope
+    // cool-off the optical stage is famous for
+    float compOptoDetectorPowerL = 0.0f;
+    float compOptoDetectorPowerR = 0.0f;
+    float compOptoFastGainL = 0.0f;
+    float compOptoFastGainR = 0.0f;
+    float compOptoSlowGainL = 0.0f;
+    float compOptoSlowGainR = 0.0f;
     Biquad compFbSidechainHp[2] = {};
     Biquad compFbSidechainLp[2] = {};
     float lastCompFbHpf   = -1.0f;

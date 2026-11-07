@@ -10051,8 +10051,8 @@ void testV297CompCharacter()
                 "the character parks on the strip's own VCA - the default");
 
     // ---- the plates: four engraved names finishing the plates' line,
-    // level with the COMP plate and its ADD face, FET and OPTO inert
-    // until their versions ----
+    // level with the COMP plate and its ADD face - all four live
+    // since v2.100.0, the full radio ----
     CostesStripEditor editorForV297 (*strip);
     editorForV297.setVisible (true);
 
@@ -10072,8 +10072,8 @@ void testV297CompCharacter()
     expectTrue (styleFet != nullptr && styleVca != nullptr
                     && styleGlue != nullptr && styleOpto != nullptr
                     && styleFet->isEnabled() && styleVca->isEnabled()
-                    && styleGlue->isEnabled() && ! styleOpto->isEnabled(),
-                "VCA, FET and GLUE are live, OPTO the last inert engraving - no ghost buttons");
+                    && styleGlue->isEnabled() && styleOpto->isEnabled(),
+                "all four characters are live - the full radio, no ghost buttons");
 
     // the radio follows the parameter within a frame: the sync the
     // timer owns, exercised directly
@@ -10084,8 +10084,8 @@ void testV297CompCharacter()
                 "the VCA's lamp is lit on the fresh strip - one lamp, the strip's own character");
 
     // a click on GLUE moves the parameter and the lamp follows; the
-    // FET moves it too (v2.99.0); the inert OPTO engraving moves
-    // nothing; VCA takes it home
+    // FET (v2.99.0) and the OPTO (v2.100.0) move it too; VCA takes
+    // it home
     styleGlue->onClick();
     expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
                 "a click on the GLUE plate speaks the parameter");
@@ -10105,8 +10105,13 @@ void testV297CompCharacter()
                 "the FET's lamp takes the line - the radio moves");
 
     styleOpto->onClick();
-    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 0.0, 0.01,
-                "the inert OPTO engraving never moves the radio - its character is not built yet");
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 3.0, 0.01,
+                "a click on the OPTO plate speaks the parameter - the v2.100.0 character is live");
+
+    editorForV297.timerCallback();
+
+    expectTrue (styleOpto->getToggleState() && ! styleFet->getToggleState(),
+                "the OPTO's lamp takes the line - the radio moves, complete");
 
     styleVca->onClick();
     expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 1.0, 0.01,
@@ -10476,8 +10481,8 @@ void testV299FetCharacter()
         strip->getApvts().getParameterAsValue (id).setValue (value);
     };
 
-    // ---- the plate goes live: the FET engraving speaks the radio
-    // now, OPTO stays the last promise ----
+    // ---- the plate goes live: the FET engraving speaks the radio,
+    // and since v2.100.0 the OPTO speaks with it - the full radio ----
     CostesStripEditor editorForV299 (*strip);
     editorForV299.setVisible (true);
 
@@ -10485,8 +10490,8 @@ void testV299FetCharacter()
     auto* styleOpto = editorForV299.getCompStylePlate (3);
 
     expectTrue (styleFet != nullptr && styleOpto != nullptr
-                    && styleFet->isEnabled() && ! styleOpto->isEnabled(),
-                "the FET plate is live, OPTO still engraved and inert - the v2.99.0 character");
+                    && styleFet->isEnabled() && styleOpto->isEnabled(),
+                "the FET plate is live and the OPTO with it since v2.100.0 - the full radio, no ghost buttons");
 
     // ---- the parked stage: the character never moves a parked strip
     setParam ("compStyle", 0.0f);
@@ -10823,6 +10828,342 @@ void testV299FetCharacter()
     setParam ("compOn", false);
 }
 
+// ---------------------------------------------------------------------------
+// v2.100.0 (Clement's request): the OPTO character - the lamp and the
+// cell, the last engraving. It keeps the VCA's slope, its release
+// knob and its make-up, so the settled curve never moves (the v2.98
+// contract holds); the character lives in the grab alone: the
+// detector rides a slow 20 ms window (twice the VCA's - the smoothest
+// read of the radio, and no 2f ripple on the bass word), the attack
+// is the knob's own time tripled (SLOW 30 ms reads 90 ms, FAST 3 ms
+// reads 9 ms), and the release is the famous double slope - a fast
+// cell hands a quarter of the knob back, a slow cell the knob's own
+// time quadrupled, and the stage speaks their 65/35 blend: the
+// cool-off of a lamp after the word has gone
+// ---------------------------------------------------------------------------
+void testV2100OptoCharacter()
+{
+    beginTest ("v2.100.0: the OPTO character - the slow window settles the VCA's own curve, the cool-off is the grab");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- the plate goes live: the last engraving speaks the radio,
+    // the radio is complete ----
+    CostesStripEditor editorForV2100 (*strip);
+    editorForV2100.setVisible (true);
+
+    auto* styleOpto = editorForV2100.getCompStylePlate (3);
+
+    expectTrue (styleOpto != nullptr && styleOpto->isEnabled(),
+                "the OPTO plate is live - the last engraving speaks, the radio is complete");
+
+    // ---- the parked stage: the character never moves a parked strip
+    setParam ("compStyle", 3.0f);
+    setParam ("compOn", true);
+    setParam ("compThreshold", 0.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 60; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), 0.0, 0.05,
+                    "the parked OPTO is the parked VCA - the character never moves a parked stage");
+    }
+
+    // ---- the settled voice: threshold -20, ratio 10 - the slow
+    // window reads the same power the VCA's window reads on a steady
+    // word, so the OPTO settles the same 9.87 down ----
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the OPTO settles the VCA's own curve - the slow window reads the same word, the A/B never biased");
+    }
+
+    // the make-up rides outside the lamp: +6 dB moves the balance
+    // and leaves the settled curve untouched
+    setParam ("compGain", 6.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 120; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -3.87, 0.15,
+                    "the make-up rides outside the OPTO's lamp - the balance moves six, the settled curve holds");
+    }
+
+    setParam ("compGain", 0.0f);
+
+    // ---- the parity at ratio 2 and ratio 10: the OPTO measured
+    // against the VCA at the same knobs, each from its own settled
+    // loop ----
+    setParam ("compRatio", 2.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -5.49, 0.15,
+                    "the OPTO at ratio 2 settles the VCA's own 5.49 down - the parity holds at every ratio");
+    }
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        auto settle = [&]() -> float
+        {
+            for (int i = 0; i < 240; ++i)
+            {
+                src.fill (block);
+                proc.processBlock (block, noMidi);
+            }
+
+            return strip->getCompBalanceDb();
+        };
+
+        setParam ("compStyle", 1.0f);
+        const float vcaAtTwo = settle();
+        setParam ("compStyle", 3.0f);
+        const float optoAtTwo = settle();
+
+        expectNear (optoAtTwo, vcaAtTwo, 0.10,
+                    "the OPTO settles the VCA's own balance at ratio 2 - switching the character never biases the loudness");
+
+        setParam ("compRatio", 10.0f);
+
+        setParam ("compStyle", 1.0f);
+        const float vcaAtTen = settle();
+        setParam ("compStyle", 3.0f);
+        const float optoAtTen = settle();
+
+        expectNear (optoAtTen, vcaAtTen, 0.10,
+                    "the OPTO settles the VCA's own balance at ratio 10 - the slow window never biases the loudness");
+
+        // ---- v2.99.1's lesson, held: the bass word. The slow window
+        // reads the word's own average with no 2f ripple, so the
+        // OPTO holds ITS OWN settled curve on the bass word - the
+        // balance at 100 Hz reads the balance at 1 kHz ----
+        SineSource bassSrc (100.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> bassBlock (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            bassSrc.fill (bassBlock);
+            proc.processBlock (bassBlock, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), optoAtTen, 0.10,
+                    "the OPTO holds its own settled curve on the bass word - the slow window never pumps");
+    }
+
+    // ---- the grab, inverted: from silence the OPTO takes its time
+    // to the word - three times the knob, the smoothest grab of the
+    // radio. The difference read at the fifth onset block ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 1.0f);
+
+        float vcaOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                vcaOnset = strip->getCompBalanceDb();
+        }
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 3.0f);
+
+        float optoOnset = 0.0f;
+
+        for (int i = 0; i < 6; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            if (i == 4)
+                optoOnset = strip->getCompBalanceDb();
+        }
+
+        expectTrue (optoOnset - vcaOnset > 1.5,
+                    "the OPTO takes its time to the word - the smoothest grab of the radio, the character lives in the grab");
+    }
+
+    // ---- the lamp cools: settled at the word, the word steps DOWN
+    // 14 dB - the VCA hands the curve back in one slope, the OPTO
+    // hands it back slower, the slow cell still holding its share.
+    // The difference read at the 80th step block, then both settled
+    // curves returned ----
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+        juce::AudioBuffer<float> silence (2, 480);
+        silence.clear();
+
+        setParam ("compStyle", 1.0f);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        float vcaCool = 0.0f;
+
+        for (int i = 0; i < 300; ++i)
+        {
+            src.fill (block);
+            block.applyGain (0, 0, block.getNumSamples(), 0.2f);
+            block.applyGain (1, 0, block.getNumSamples(), 0.2f);
+            proc.processBlock (block, noMidi);
+
+            if (i == 79)
+                vcaCool = strip->getCompBalanceDb();
+        }
+
+        for (int i = 0; i < 240; ++i)
+            proc.processBlock (silence, noMidi);
+
+        setParam ("compStyle", 3.0f);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        float optoCool = 0.0f;
+
+        for (int i = 0; i < 300; ++i)
+        {
+            src.fill (block);
+            block.applyGain (0, 0, block.getNumSamples(), 0.2f);
+            block.applyGain (1, 0, block.getNumSamples(), 0.2f);
+            proc.processBlock (block, noMidi);
+
+            if (i == 79)
+                optoCool = strip->getCompBalanceDb();
+        }
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectTrue (optoCool - vcaCool < -0.8,
+                    "the OPTO hands the curve back slower - the lamp cools off, the double slope is the character");
+
+        expectNear (strip->getCompBalanceDb(), -9.87, 0.15,
+                    "the OPTO hands the settled curve back at its own pace - the cool-off never biases the loudness");
+    }
+
+    // ---- the LISTEN plate speaks the sidechain at unity - the
+    // feed-forward discipline the VCA reads ----
+    setParam ("compListen", true);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        const double omega = juce::MathConstants<double>::twoPi * 1000.0 / 48000.0;
+        double filled = 0.0;
+
+        for (int i = 0; i < 236; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+            filled += 480.0;
+        }
+
+        double c = 0.0;
+        double s = 0.0;
+
+        for (int b = 0; b < 4; ++b)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            for (int i = 0; i < 480; ++i)
+            {
+                const double phase = omega * (filled + (double) b * 480.0 + (double) i);
+                c += block.getSample (0, i) * std::cos (phase);
+                s += block.getSample (0, i) * std::sin (phase);
+            }
+
+            filled += 480.0;
+        }
+
+        const double amp = 2.0 * std::sqrt (c * c + s * s) / (4.0 * 480.0);
+
+        expectNear (juce::Decibels::gainToDecibels (amp / 0.5), 0.0, 0.3,
+                    "the OPTO's LISTEN speaks its sidechain at unity - the feed-forward detector's own word");
+    }
+
+    setParam ("compListen", false);
+    setParam ("compStyle", 1.0f);
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compOn", false);
+}
+
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -10914,6 +11255,7 @@ int main (int argc, char* argv[])
     testV297CompCharacter();
     testV298CompParity();
     testV299FetCharacter();
+    testV2100OptoCharacter();
 
     if (integration)
         testIntegrationRealConsole();
