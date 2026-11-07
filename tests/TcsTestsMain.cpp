@@ -10455,9 +10455,9 @@ void testV298CompParity()
 // lives in the grab alone: the detector rides a two-gate window (two
 // cascaded 3 ms one-poles (v2.99.1: slowed from 1.5 ms so the bass
 // word settles the same curve too), three times faster to the word
-// than the VCA's single 10 ms window) and the attack rides the
-// knob's own time cut to its FET fraction (SLOW 30 ms reads 9 ms,
-// FAST 3 ms reads 0.9 ms) - the FET bites the word the VCA is
+// than the VCA's single 10 ms window) and the attack reads the
+// plate in the FET's own time (v2.101.0: 1 ms lit, 3 ms dark -
+// the FET has no slow word) - the FET bites the word the VCA is
 // still measuring
 // ---------------------------------------------------------------------------
 void testV299FetCharacter()
@@ -10835,8 +10835,9 @@ void testV299FetCharacter()
 // contract holds); the character lives in the grab alone: the
 // detector rides a slow 20 ms window (twice the VCA's - the smoothest
 // read of the radio, and no 2f ripple on the bass word), the attack
-// is the knob's own time tripled (SLOW 30 ms reads 90 ms, FAST 3 ms
-// reads 9 ms), and the release is the famous double slope - a fast
+// reads the plate in the OPTO's own time (v2.101.0: 10 ms lit,
+// 30 ms dark - the lamp hovers), and the release is the famous
+// double slope - a fast
 // cell hands a quarter of the knob back, a slow cell the knob's own
 // time quadrupled, and the stage speaks their 65/35 blend: the
 // cool-off of a lamp after the word has gone
@@ -11001,13 +11002,17 @@ void testV2100OptoCharacter()
     }
 
     // ---- the grab, inverted: from silence the OPTO takes its time
-    // to the word - three times the knob, the smoothest grab of the
-    // radio. The difference read at the fifth onset block ----
+    // to the word - the smoothest grab of the radio. Read at the
+    // plate's FAST word (v2.101.0's ladder: the VCA clamps at its
+    // own 3 ms, the lamp still hovers at its 10 ms and 20 ms
+    // window). The difference read at the fifth onset block ----
     {
         SineSource src (1000.0, 48000.0, 0.5f);
         juce::AudioBuffer<float> block (2, 480);
         juce::AudioBuffer<float> silence (2, 480);
         silence.clear();
+
+        setParam ("compFastAttack", true);
 
         for (int i = 0; i < 240; ++i)
             proc.processBlock (silence, noMidi);
@@ -11041,7 +11046,9 @@ void testV2100OptoCharacter()
                 optoOnset = strip->getCompBalanceDb();
         }
 
-        expectTrue (optoOnset - vcaOnset > 1.5,
+        setParam ("compFastAttack", false);
+
+        expectTrue (optoOnset - vcaOnset > 1.0,
                     "the OPTO takes its time to the word - the smoothest grab of the radio, the character lives in the grab");
     }
 

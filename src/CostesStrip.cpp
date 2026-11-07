@@ -1758,7 +1758,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
     // 100 to 24000 Hz, their rest positions a true bypass) and the
     // LISTEN plate. The compressor: threshold -60 to 0 dB, ratio 1 to
     // 20, release 0.05 to 1.5 s, the FAST ATTACK plate (3 ms lit /
-    // 30 ms dark), make-up gain 0 to +20 dB, mix, its own sidechain
+    // 30 ms dark on the VCA - each character reads its own time
+    // since v2.101.0: FET 1/3, GLUE 10/20, OPTO 10/30), make-up gain
+    // 0 to +20 dB, mix, its own sidechain
     // pair and LISTEN. The DEFAULTS are neutral (range 0, threshold 0,
     // every sidechain at rest): the process loop skips both halves
     // wholesale, so a parked strip is bit-for-bit v2.63. Sessions
@@ -2086,9 +2088,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
             .withStringFromValueFunction (sText)
             .withValueFromStringFunction (sParse)));
 
-    // the FAST ATTACK plate: 3 ms when lit (a transient clamped almost
-    // before it lands), the classic 30 ms when dark (a drum's point
-    // rides through untouched). Dark is the default
+    // the FAST ATTACK plate: the VCA's engraved word - 3 ms when lit
+    // (a transient clamped almost before it lands), the classic 30 ms
+    // when dark (a drum's point rides through untouched). Dark is the
+    // default. v2.101.0 (Clement's attack ladder): each character
+    // reads the plate in its own honest time - the FET at 1/3 ms, the
+    // VCA at the plate's own 3/30, the GLUE at 10/20, the OPTO at
+    // 10/30 - so the plate's word never changes, only the reading
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "compFastAttack", 1 }, "Compressor Fast Attack", false,
         juce::AudioParameterBoolAttributes()
@@ -3009,8 +3015,19 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                              && compThresholdDb < 0.0f
                              && compRatioValue > 1.0f
                              && compMixNorm > 0.0f;
+    // v2.101.0 (Clement's attack ladder): the FAST ATTACK plate
+    // keeps the VCA's engraved word - 3 ms lit, 30 ms dark - and
+    // every character reads it in its own honest time: the FET at
+    // 1/3 ms, the VCA at the plate's own 3/30, the GLUE at 10/20,
+    // the OPTO at 10/30. Four characters, four grabs, one settled
+    // curve
     const float compAttackCoef  = 1.0f - std::exp (-1.0f
         / ((compFastAttack->load() > 0.5f ? 0.003f : 0.030f) * (float) currentSampleRate));
+    // the GLUE's own reading of the plate (v2.101.0): 10 ms lit,
+    // 20 ms dark - the bus word, and the feedback loop stretches
+    // the grab further on its own
+    const float compGlueAttackCoef = 1.0f - std::exp (-1.0f
+        / ((compFastAttack->load() > 0.5f ? 0.010f : 0.020f) * (float) currentSampleRate));
     const float compReleaseCoef = 1.0f - std::exp (-1.0f
         / (juce::jmax (0.05f, compRelease->load()) * (float) currentSampleRate));
     const float compMakeupGain  = juce::Decibels::decibelsToGain (compGain->load());
@@ -3032,31 +3049,30 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     // word's 2f ripple through and the attack/release asymmetry
     // rectified it downward - a touch more GR than the VCA read;
     // the 3 ms gates keep every octave on the same settled curve)
-    // and the attack rides the knob's own time cut to its FET
-    // fraction, floored at half a millisecond (SLOW 30 ms reads
-    // 9 ms, FAST 3 ms reads 0.9 ms) - the FET bites the word the VCA
-    // is still measuring
+    // and the attack reads the plate in the FET's own time
+    // (v2.101.0): 1 ms lit, 3 ms dark - the FET has no slow word,
+    // it bites the word the VCA is still measuring
     const float compFetDetectorCoef = 1.0f - std::exp (-1.0f
         / (0.003f * (float) currentSampleRate));
     const float compFetAttackCoef   = 1.0f - std::exp (-1.0f
-        / (juce::jmax (0.0005f, (compFastAttack->load() > 0.5f ? 0.003f
-                                                              : 0.030f)
-             * 0.3f) * (float) currentSampleRate));
+        / ((compFastAttack->load() > 0.5f ? 0.001f : 0.003f)
+             * (float) currentSampleRate));
     // v2.100.0 (Clement's request): the OPTO character's own
     // constants - the lamp and the cell. The detector rides a slow
     // 20 ms window (twice the VCA's - the smoothest read of the
     // radio, and the bass word settles its own curve without a
-    // ripple); the attack is the knob's own time tripled (SLOW
-    // 30 ms reads 90 ms, FAST 3 ms reads 9 ms - the plate keeps its
-    // word), and the release is the famous double slope: the fast
+    // ripple); the attack reads the plate in the OPTO's own time
+    // (v2.101.0: 10 ms lit, 30 ms dark - the lamp hovers, its
+    // character lives in the cool-off), and the release is the
+    // famous double slope: the fast
     // cell hands a quarter of the knob back, the slow cell the
     // knob's own time quadrupled, and the stage speaks their 65/35
     // blend - the cool-off of a lamp after the word has gone
     const float compOptoDetectorCoef = 1.0f - std::exp (-1.0f
         / (0.020f * (float) currentSampleRate));
     const float compOptoAttackCoef   = 1.0f - std::exp (-1.0f
-        / ((compFastAttack->load() > 0.5f ? 0.003f : 0.030f)
-             * 3.0f * (float) currentSampleRate));
+        / ((compFastAttack->load() > 0.5f ? 0.010f : 0.030f)
+             * (float) currentSampleRate));
     const float compOptoFastReleaseCoef = 1.0f - std::exp (-1.0f
         / (juce::jmax (0.05f, compRelease->load()) * 0.25f
              * (float) currentSampleRate));
@@ -3766,13 +3782,14 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 const float targetSlope = compGlue ? compGlueLoopSlope
                                                     : compCurveSlope;
 
-                // v2.99.0: the FET's grab rides its own attack - the
-                // knob's time cut to its FET fraction (floored at
-                // half a millisecond); the VCA and the GLUE keep the
-                // knob's own word, and the release is every
-                // character's knob
+                // v2.101.0 (Clement's attack ladder): every character
+                // reads the plate in its own honest time - the FET at
+                // 1/3 ms, the VCA at the plate's engraved 3/30, the
+                // GLUE at 10/20, the OPTO at 10/30 (its cells below)
+                // - and the release is every character's knob
                 const float attackCoef = compFet ? compFetAttackCoef
-                                                 : compAttackCoef;
+                     : (compGlue ? compGlueAttackCoef
+                                 : compAttackCoef);
 
                 if (effDbL > compThresholdDb)
                     targetDbL = -(effDbL - compThresholdDb) * targetSlope;
@@ -3786,9 +3803,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 // v2.100.0: the OPTO's two gain cells always track
                 // the target with their own coefs, the character
                 // parked or not, so a character switch never
-                // breathes; the attack is the knob's own time
-                // tripled, the fast cell releases at a quarter of
-                // the knob and the slow cell at four times it
+                // breathes; their attack reads the plate in the
+                // OPTO's own 10/30 ms time (v2.101.0's ladder), the
+                // fast cell releases at a quarter of the knob and
+                // the slow cell at four times it
                 compOptoFastGainL += (targetDbL - compOptoFastGainL)
                     * ((targetDbL < compOptoFastGainL) ? compOptoAttackCoef
                                                        : compOptoFastReleaseCoef);
@@ -4527,8 +4545,9 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // "COMP ON" / "COMP OFF", the same plates as the EQ's global switch,
     // one per half - and each stage's FAST/SLOW attack plate (the
     // expander's own since v2.66.0, remark A: the two stages speak
-    // the same language, 1 ms fast / 30 ms slow on the gate, 3 ms /
-    // 30 ms on the compressor)
+    // the same language, 1 ms fast / 30 ms slow on the gate, and on
+    // the compressor the VCA's own 3/30 - each character reads the
+    // plate in its own time since v2.101.0)
     expOnButton.caption = "EXP";
     addAndMakeVisible (expOnButton);
     compOnButton.caption = "COMP";
@@ -6752,10 +6771,10 @@ void CostesStripEditor::FastAtkToggle::paintButton (juce::Graphics& g,
                                                     bool /*down*/)
 {
     // the compressor's attack plate (v2.64.0): the same SSL plate language
-    // as the BELL/SHELF switch - lit amber with a live LED for the 3 ms
-    // FAST attack that clamps a transient almost before it lands, dark
-    // with a dead LED for the classic 30 ms SLOW that lets a drum's
-    // point ride through
+    // as the BELL/SHELF switch - lit amber with a live LED for the FAST
+    // word (the VCA's own 3 ms; each character reads the plate in its
+    // own time since v2.101.0's ladder), dark with a dead LED for the
+    // classic 30 ms SLOW that lets a drum's point ride through
     const bool on = getToggleState();
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 

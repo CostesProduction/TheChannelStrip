@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.100.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.101.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,16 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.101.0** — *The attack ladder - four characters, four grabs, one plate.*
+  - **Every character reads the FAST ATTACK plate in its own honest
+    time.** The plate keeps the VCA's engraved word (3 ms lit, 30 ms
+    dark); the ladder translates it per character: the FET at 1/3 ms
+    (it has no slow word - it bites the word the VCA is still
+    measuring), the VCA at the plate's own 3/30 ms, the GLUE at
+    10/20 ms (the bus word), and the OPTO at 10/30 ms (the lamp
+    hovers, its character lives in the cool-off). The settled curve
+    never moves - the ladder changes the grab alone, never the
+    loudness.
 - **2.100.0** — *The OPTO lights the lamp - the radio is complete.*
   - **The OPTO plate goes live (position 3, the last engraving).**
     The optical character: feed-forward like the VCA, it keeps the
