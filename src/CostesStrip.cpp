@@ -1176,7 +1176,6 @@ CostesStrip::CostesStrip()
     highCutOn        = apvts.getRawParameterValue ("highCutOn");
     tiltDb           = apvts.getRawParameterValue ("tiltDb");
     driveDb          = apvts.getRawParameterValue ("driveDb");
-    driveOversampled = apvts.getRawParameterValue ("driveOversampled");
 
     // the IMAGE section (v2.84.0)
     phaseInvert   = apvts.getRawParameterValue ("phaseInvert");
@@ -1223,6 +1222,7 @@ CostesStrip::CostesStrip()
     compScLpf     = apvts.getRawParameterValue ("compScLpf");
     compListen    = apvts.getRawParameterValue ("compListen");
     compLink      = apvts.getRawParameterValue ("compLink");
+    compStyle     = apvts.getRawParameterValue ("compStyle");
 
     transOn      = apvts.getRawParameterValue ("transOn");
     transAttack  = apvts.getRawParameterValue ("transAttack");
@@ -1234,7 +1234,6 @@ CostesStrip::CostesStrip()
     jassert (trimInDb != nullptr && lowCutHz != nullptr && lowCutOrder != nullptr
              && lowCutOn != nullptr && highCutHz != nullptr && highCutOrder != nullptr
              && highCutOn != nullptr && tiltDb != nullptr && driveDb != nullptr
-             && driveOversampled != nullptr
              && phaseInvert != nullptr && stereoBalance != nullptr
              && stereoWidth != nullptr && monoMakerHz != nullptr
              && trimOutDb != nullptr
@@ -1252,7 +1251,7 @@ CostesStrip::CostesStrip()
              && compRelease != nullptr && compFastAttack != nullptr
              && compGain != nullptr && compMix != nullptr && compHpf != nullptr
              && compScLpf != nullptr && compListen != nullptr
-             && compLink != nullptr
+             && compLink != nullptr && compStyle != nullptr
              && transOn != nullptr
              && transAttack != nullptr && transSustain != nullptr
              && transGain != nullptr && transMix != nullptr
@@ -1278,6 +1277,31 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                    .replaceCharacter (',', '.')
                    .upToFirstOccurrenceOf (" ", false, true)
                    .getFloatValue();
+    };
+
+    // v2.97.0 (Clement's request): the drive's own readout speaks its
+    // truth - the 0 dB rest position is the stage's honest "off" (the
+    // drive block is skipped wholesale there, bit-exact), so the knob
+    // SAYS so; every position above it rides the automatic 2x
+    // oversampling
+    const auto driveText = [] (float value, int)
+    {
+        if (value < 0.5f)
+            return juce::String ("off");
+
+        return juce::String (value, 1) + " dB";
+    };
+
+    const auto driveParse = [] (const juce::String& text)
+    {
+        const juce::String t = text.trim();
+
+        if (t.equalsIgnoreCase ("off"))
+            return 0.0f;
+
+        return t.replaceCharacter (',', '.')
+                .upToFirstOccurrenceOf (" ", false, true)
+                .getFloatValue();
     };
 
     // v2.80.0 (Clement's remark 6): ONE Hz language for every corner
@@ -2135,6 +2159,50 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
                                      t.replaceCharacter (',', '.').getFloatValue());
             })));
 
+    // v2.97.0 (Clement's request): the compressor's CHARACTER - a
+    // four-position radio engraved on the plates' line: FET, VCA,
+    // GLUE, OPTO. VCA (position 1) is the strip's own character, the
+    // feed-forward design the strip has carried since the beginning,
+    // and the default, so every existing session loads exactly as it
+    // was saved; GLUE (position 2) is the feedback bus style: the
+    // detector listens to the stage's own output and the static curve
+    // emerges from the loop (the knob's slope is the loop's gain, and
+    // the curve it settles at reads slope / (1 + slope) - gentler
+    // than the knob says, exactly like the real bus comps whose
+    // engraved ratio never reads as a VCA ratio). FET (0) and OPTO
+    // (3) are engraved ahead of their versions (v2.98.0, v2.99.0) -
+    // they park on the VCA character until then
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "compStyle", 1 }, "Compressor Character",
+        juce::NormalisableRange<float> (0.0f, 3.0f, 1.0f), 1.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float value, int)
+            {
+                const int index = juce::jlimit (0, 3, juce::roundToInt (value));
+
+                static const char* const words[4] =
+                    { "FET", "VCA", "GLUE", "OPTO" };
+
+                return juce::String (words[index]);
+            })
+            .withValueFromStringFunction ([] (const juce::String& text)
+            {
+                auto t = text.trim();
+
+                if (t.containsIgnoreCase ("FET"))
+                    return 0.0f;
+                if (t.containsIgnoreCase ("VCA"))
+                    return 1.0f;
+                if (t.containsIgnoreCase ("GLUE"))
+                    return 2.0f;
+                if (t.containsIgnoreCase ("OPTO"))
+                    return 3.0f;
+
+                // a bare number speaks the position index
+                return juce::jlimit (0.0f, 3.0f,
+                                     t.replaceCharacter (',', '.').getFloatValue());
+            })));
+
     // the compressor's sidechain HPF (v2.66.0, Clement's remark D): the
     // range grows to the same 16 to 1600 Hz the expander's own selector
     // rides, and the flat 16 Hz rest position is the honest "off" the
@@ -2196,14 +2264,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout CostesStrip::createLayout()
         juce::ParameterID { "driveDb", 1 }, "Drive",
         makeSteppedRange (0.0f, 15.6f, 1.0f), 0.0f,
         juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (dbText)
-            .withValueFromStringFunction (dbParse)));
+            .withStringFromValueFunction (driveText)
+            .withValueFromStringFunction (driveParse)));
 
-    // the 2x oversampling toggle for the drive stage (polyphase IIR
-    // halfband: sub-sample latency, which the strip simply keeps at
-    // zero reported latency)
-    layout.add (std::make_unique<juce::AudioParameterBool> (
-        juce::ParameterID { "driveOversampled", 1 }, "Oversample 2x", false));
+    // v2.97.0 (Clement's request): the OS 2x switch is gone - the 2x
+    // oversampling follows the drive on its own (any position above
+    // the honest "off" rides the oversampled path, sub-sample latency
+    // kept at zero reported latency), so the layout carries no
+    // toggle for it. The freed slot goes to the compressor's
+    // character below
 
     // ------------------------------------------------------------------
     // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): four
@@ -2470,6 +2539,8 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     compDetectorPowerR = 0.0f;
     compGainDbL        = 0.0f;
     compGainDbR        = 0.0f;
+    compFbPowerL       = 0.0f;   // v2.97.0: the GLUE's feedback detector parks with the rest
+    compFbPowerR       = 0.0f;
     detectorCoef      = 1.0f - std::exp (-1.0f / (0.010f * (float) currentSampleRate));
 
     // v2.65.0: the meters start at the detector's floor (an empty IN
@@ -2538,6 +2609,12 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto& section : compSidechainLp)
         section.reset();
 
+    for (auto& section : compFbSidechainHp)   // v2.97.0: the GLUE's own pair
+        section.reset();
+
+    for (auto& section : compFbSidechainLp)
+        section.reset();
+
     for (auto& section : expSidechainHp)
         section.reset();
 
@@ -2546,6 +2623,8 @@ void CostesStrip::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     lastCompHpf   = -1.0f;
     lastCompScLpf = -1.0f;
+    lastCompFbHpf   = -1.0f;   // v2.97.0: the feedback pair's own caches
+    lastCompFbScLpf = -1.0f;
     lastExpScHpf  = -1.0f;
     lastExpScLpf  = -1.0f;
 
@@ -2925,6 +3004,22 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const float compMakeupGain  = juce::Decibels::decibelsToGain (compGain->load());
     const float compCurveSlope  = 1.0f - 1.0f / compRatioValue;
 
+    // v2.97.0 (Clement's request): the compressor's CHARACTER - the
+    // four-position radio on the plates' line. The VCA (position 1,
+    // the default) is the strip's own feed-forward character; the
+    // GLUE (position 2) is the feedback bus style: the detector
+    // listens to the stage's own output and the loop's own arithmetic
+    // bends the curve that emerges. The static slope stays the knob's
+    // own - the loop gain IS that slope (bounded below 1, always
+    // stable), and the settled curve reads slope / (1 + slope): a
+    // 10:1 knob reads as a gentle 1.9:1, exactly like the real bus
+    // comps whose engraved ratio never reads as a VCA ratio. FET (0)
+    // and OPTO (3) are engraved but not built yet - they park on the
+    // VCA character until their versions
+    const int compStyleIndex = juce::jlimit (0, 3,
+                                     juce::roundToInt (compStyle->load()));
+    const bool compGlue = compStyleIndex == 2;
+
     // v2.72.0 (Clement's request): how far each channel's detector
     // leans towards the stereo-linked one - 0 (dual) to 1 (the full
     // link, the strip's behaviour since v2.64.0)
@@ -3020,10 +3115,23 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     else
         restSidechain (compSidechain, lastCompHpf);
 
+    // v2.97.0: the GLUE's feedback detector carries its own mirrored
+    // pair - with its OWN caches, so a rebuild never leaves the
+    // feedback path riding a stale corner
+    if (compScHpfOn)
+        rebuildSidechain (compFbSidechainHp, compScHpfHz, lastCompFbHpf, true);
+    else
+        restSidechain (compFbSidechainHp, lastCompFbHpf);
+
     if (compScLpfOn)
         rebuildSidechain (compSidechainLp, compScLpfHz, lastCompScLpf, false);
     else
         restSidechain (compSidechainLp, lastCompScLpf);
+
+    if (compScLpfOn)
+        rebuildSidechain (compFbSidechainLp, compScLpfHz, lastCompFbScLpf, false);
+    else
+        restSidechain (compFbSidechainLp, lastCompFbScLpf);
 
     if (expScHpfOn)
         rebuildSidechain (expSidechainHp, expScHpfHz, lastExpScHpf, true);
@@ -3040,8 +3148,10 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     const bool compListenOn = compListen->load() > 0.5f;
     const bool expListenOn  = expListen->load() > 0.5f;
 
-    const bool useOS = drive > 0.0f && driveOversampled->load() > 0.5f
-                        && numSamples <= preparedMaxSamples;
+    // v2.97.0: the OS plate is gone - the 2x oversampling follows the
+    // drive on its own: any position above the honest "off" rides the
+    // oversampled path, the parked strip never pays for it
+    const bool useOS = drive > 0.0f && numSamples <= preparedMaxSamples;
 
     // ------------------------------------------------------------------
     // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): four
@@ -3468,17 +3578,58 @@ void CostesStrip::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
             compDetectorPowerR += (rectified[1] * rectified[1] - compDetectorPowerR)
                                     * detectorCoef;
 
-            // v2.67.0: the same honest IN level for the compressor -
-            // the full-band sample entering the stage (the expander's
+            // v2.67.0: the same honest IN level for the compressor - the
+            // full-band sample entering the stage (the expander's
             // output), not the detector's filtered band
             compInPower += (rawIn * rawIn - compInPower) * detectorCoef;
 
+            // v2.97.0, the GLUE character: the feedback detector - the
+            // sidechain listens to the stage's OWN output (the sample
+            // times the gain the PREVIOUS sample settled on, one
+            // sample of loop delay, the natural one), through the same
+            // SC filters on a mirrored pair of biquads and the same
+            // 10 ms ballistics. The path runs whenever the character
+            // is GLUE, parked or not: a parked gain reads unity, so
+            // the fb detector simply tracks the input and a character
+            // switch never breathes. The LISTEN monitor speaks the
+            // feedback signal itself - while compressing you hear
+            // what the GLUE actually did
+            if (compGlue)
+            {
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    float fb = channels[ch][i]
+                        * std::pow (10.0f,
+                              (ch == 0 ? compGainDbL : compGainDbR) * 0.05f);
+
+                    if (compScHpfOn)
+                        fb = compFbSidechainHp[ch].processSample (fb);
+
+                    if (compScLpfOn)
+                        fb = compFbSidechainLp[ch].processSample (fb);
+
+                    if (compListenOn)
+                        monitor[ch] = fb;
+
+                    if (ch == 0)
+                        compFbPowerL += (fb * fb - compFbPowerL) * detectorCoef;
+                    else
+                        compFbPowerR += (fb * fb - compFbPowerR) * detectorCoef;
+                }
+            }
+
             if (compActive)
             {
+                // v2.97.0: the GLUE feeds the SAME static curve from
+                // the feedback detector - the loop's own arithmetic
+                // bends the curve that emerges; the VCA keeps reading
+                // its feed-forward detector
                 const float levelDbL = 10.0f * std::log10 (
-                    juce::jmax (compDetectorPowerL, detectorFloorPower));
+                    juce::jmax (compGlue ? compFbPowerL : compDetectorPowerL,
+                                detectorFloorPower));
                 const float levelDbR = 10.0f * std::log10 (
-                    juce::jmax (compDetectorPowerR, detectorFloorPower));
+                    juce::jmax (compGlue ? compFbPowerR : compDetectorPowerR,
+                                detectorFloorPower));
 
                 // the stereo-linked level - the louder detector, the
                 // one the v2.64.0 strip always rode - and each
@@ -4137,15 +4288,11 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // glyphs any more - the stages read through their captions, their
     // knob colours and their ladders alone
 
-    // the oversampling switch, an SSL-style illuminated plate under the
-    // drive knob (v2.57.0, Clement's remark 2): dark plate with a dead
-    // LED and a dim caption when off, glowing amber plate with a lit LED
-    // and the caption spelled "OS 2x ON" when on - the state reads at a
-    // glance, where the old default checkbox tick was too quiet to see.
-    // v2.61.0: the caption moved into the plate painter, so the EQ's own
-    // on/off plate speaks the same language
-    oversampleButton.caption = "OS 2x";
-    addAndMakeVisible (oversampleButton);
+    // v2.97.0 (Clement's request): the OS 2x plate is gone from the
+    // SHAPE OUT column - the 2x oversampling follows the drive on its
+    // own (any position above the honest "off" rides the oversampled
+    // path), so there is nothing left to switch and the column's
+    // streets breathe again
 
     // the EQ's global on/off plate (v2.61.0): v2.78.0 (Clement's
     // remark 2) made it the section's own NAME - centred in the
@@ -4201,6 +4348,40 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
     // of its own plate, in the air between the ladders' head and
     // the knob field's corner
     addAndMakeVisible (compAddFace);
+
+    // v2.97.0 (Clement's request): the compressor's CHARACTER plates -
+    // four engraved names riding the plates' line: FET, VCA, GLUE,
+    // OPTO, one lit lamp between them. VCA is the strip's own
+    // character (the default, every existing session loads on it);
+    // GLUE is the feedback bus style, the detector listening to the
+    // stage's own output; FET (v2.98.0) and OPTO (v2.99.0) are
+    // engraved but not built yet - their plates sit inert, no click
+    // and a dimmed paint, a promise rather than a ghost button
+    compStylePlates[0].caption = "FET";
+    compStylePlates[1].caption = "VCA";
+    compStylePlates[2].caption = "GLUE";
+    compStylePlates[3].caption = "OPTO";
+
+    for (int i = 0; i < 4; ++i)
+    {
+        addAndMakeVisible (compStylePlates[i]);
+
+        compStylePlates[i].onClick = [this, i]()
+        {
+            if (! compStylePlates[i].isEnabled())
+                return;   // the engraving is not built yet
+
+            auto* param = owner.getApvts().getParameter ("compStyle");
+
+            if (param == nullptr)
+                return;
+
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) i));
+        };
+    }
+
+    compStylePlates[0].setEnabled (false);   // FET waits for v2.98.0
+    compStylePlates[3].setEnabled (false);   // OPTO waits for v2.99.0
 
     // v2.88.0 (Clement's spec): the transient designer's CLIPPER
     // plate - lit amber "CLIPPER ON" while the wet half is bounded
@@ -4269,8 +4450,9 @@ CostesStripEditor::CostesStripEditor (CostesStrip& ownerProcessor)
         owner.getApvts(), "driveDb", driveKnob);
     trimOutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         owner.getApvts(), "trimOutDb", trimOutKnob);
-    oversampleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-        owner.getApvts(), "driveOversampled", oversampleButton);
+    // v2.97.0: the character plates ride their parameter through
+    // their own onClick above (two of the four are inert engravings,
+    // so a single attachment cannot speak for the radio)
 
     // the IMAGE section's own attachments (v2.84.0): the phase plate
     // and the three knobs ride their parameters like every other
@@ -4463,7 +4645,6 @@ CostesStripEditor::~CostesStripEditor()
     highCutSlopeAttachment.reset();
     tiltAttachment.reset();
     driveAttachment.reset();
-    oversampleAttachment.reset();
     phaseAttachment.reset();
     balanceAttachment.reset();
     widthAttachment.reset();
@@ -4773,6 +4954,19 @@ void CostesStripEditor::timerCallback()
     compGrMeter.repaint();
     transGrBar.repaint();     // v2.90.0: the transient's horizontal GR bar
     compAddFace.repaint();   // v2.93.0: the compressor's ADD face
+
+    // v2.97.0: the character plates follow their parameter - one lit
+    // lamp, the active character, synced here within a frame of any
+    // change (a plate click, a session restore, an automation move)
+    const int compStyleNow = juce::jlimit (0, 3, juce::roundToInt (
+        owner.getApvts().getRawParameterValue ("compStyle")->load()));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        compStylePlates[i].setToggleState (i == compStyleNow,
+                                          juce::dontSendNotification);
+        compStylePlates[i].repaint();
+    }
 
     // v2.81.0 (Clement's remark 4): the outer bands' glyphs repaint
     // here too - they FOLLOW their BELL/SHELF plates (the shape is
@@ -5275,6 +5469,16 @@ void CostesStripEditor::resized()
         // between the ladders' head and the knob field's corner
         compAddFace.setBounds (compOnButton.getX() + compOnButton.getWidth() + 6,
                                 compOnButton.getY(), 76, 18);
+
+        // v2.97.0: the four CHARACTER plates finish the plates' line -
+        // engraved names in the air right of the ADD face, level with
+        // the COMP plate, one lamp between them (FET and OPTO inert
+        // until their versions)
+        const int styleX = compAddFace.getBounds().getRight() + 6;
+
+        for (int i = 0; i < 4; ++i)
+            compStylePlates[i].setBounds (styleX + i * 56,
+                                          compOnButton.getY(), 52, 18);
     }
 
     // v2.88.0 (Clement's spec, roadmap C4): the TRANSIENT DESIGNER's
@@ -5429,10 +5633,12 @@ void CostesStripEditor::resized()
                            .withBottom (tiltCaption.getBottom()));
 
     // the drive - the knob in the block's own 83 x 86 square now,
-    // its caption under it, the OS plate under the caption, the same
-    // per-knob pattern as the whole column. The OS plate belongs to
-    // the drive, so the drive's tile carries them BOTH
-    shapeBody.removeFromTop (2);
+    // its caption under it, the same per-knob pattern as the whole
+    // column. v2.97.0: the OS plate is gone (the 2x oversampling
+    // follows the drive on its own), so the drive's tile is the knob
+    // and its caption again and the freed street spreads over the
+    // column's breaths
+    shapeBody.removeFromTop (8);
     const auto driveKnobBounds = shapeBody.removeFromTop (84)
                                      .withSizeKeepingCentre (83, 84);
     driveKnob.setBounds (driveKnobBounds);
@@ -5443,17 +5649,14 @@ void CostesStripEditor::resized()
                                   .getStringWidth (driveLabel.getText());
     driveIcon.setBounds (driveCaption.getCentreX() - driveTextWidth / 2 - 16 - 4,
                          driveCaption.getY() + 1, 16, 16);
-    shapeBody.removeFromTop (1);
-    oversampleButton.setBounds (shapeBody.removeFromTop (18)
-                                    .withSizeKeepingCentre (110, 18));
     driveZone.setBounds (driveKnobBounds.expanded (6, 0)
-                            .withBottom (oversampleButton.getBounds().getBottom()));
+                            .withBottom (driveLabel.getBounds().getBottom()));
 
     // the TRIM OUT, the block's last knob - the gain the signal rides
     // on its way out, the fader glyph at its caption's left. A
-    // FOUR-breath street after the OS plate keeps the drive's own
-    // zone together and sets the trim out apart
-    shapeBody.removeFromTop (3);
+    // SIXTEEN-breath street after the drive's caption keeps the
+    // drive's own zone together and sets the trim out apart
+    shapeBody.removeFromTop (16);
     const auto trimOutKnobBounds = shapeBody.removeFromTop (84)
                                        .withSizeKeepingCentre (83, 84);
     trimOutKnob.setBounds (trimOutKnobBounds);
@@ -6110,8 +6313,7 @@ void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
 
     // the plate itself carries the state: lit amber when the section
-    // processes ("OS 2x" oversampling, the whole EQ), dark cream-panel
-    // shadow when it is off
+    // processes (the whole EQ), dark cream-panel shadow when it is off
     g.setColour (on ? valueArc.withMultipliedAlpha (0.85f)
                     : plateFill);
     g.fillRoundedRectangle (bounds, 5.0f);
@@ -6159,6 +6361,51 @@ void CostesStripEditor::PlateToggle::paintButton (juce::Graphics& g,
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawText (caption + (on ? " ON" : " OFF"), bounds,
                 juce::Justification::centred);
+}
+
+void CostesStripEditor::CompStyleToggle::paintButton (juce::Graphics& g,
+                                                      bool highlighted,
+                                                      bool /*down*/)
+{
+    // v2.97.0 (Clement's request): the compressor's CHARACTER plate -
+    // the same SSL plate language as the section plates, minus the
+    // ON/OFF suffix: the engraved name says itself, the lamp says
+    // the radio's position. An inert plate (FET and OPTO until their
+    // versions) paints dimmed - the name reads as engraving on the
+    // panel, not as a button waiting to be pressed
+    const bool on = getToggleState();
+    const bool built = isEnabled();
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    g.setColour (on ? valueArc.withMultipliedAlpha (0.85f) : plateFill);
+    g.fillRoundedRectangle (bounds, 5.0f);
+
+    g.setColour (on ? valueArc.brighter (0.12f)
+                    : (built && highlighted ? knobBezel : engravingDim));
+    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+    const auto ledArea = bounds.removeFromLeft (16.0f);
+    const auto led = ledArea.withSizeKeepingCentre (7.0f, 7.0f);
+
+    if (on)
+    {
+        g.setColour (valueArc.withMultipliedAlpha (0.40f));
+        g.fillEllipse (led.expanded (2.5f));
+        g.setColour (valueArc.brighter (0.35f));
+        g.fillEllipse (led);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff17150f));
+        g.fillEllipse (led);
+    }
+
+    // the caption: dark engraving on the lit plate, the panel's own
+    // cream text on the dark one - dimmed to a whisper when the
+    // character is not built yet
+    g.setColour ((on ? engraving : plateText).withMultipliedAlpha (built ? 1.0f : 0.45f));
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    g.drawText (caption, bounds, juce::Justification::centred);
 }
 
 void CostesStripEditor::ShelfModeToggle::paintButton (juce::Graphics& g,

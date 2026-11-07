@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.96.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.97.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,23 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.97.0** — *The compressor takes a character.*
+  - **Four engraved plates: FET, VCA, GLUE, OPTO (Clement's request).**
+    The compressor's line now carries a four-position character radio.
+    VCA (the default) is the strip's own feed-forward design, untouched;
+    GLUE is the feedback bus style: the detector listens to the stage's
+    own output, so the attack grabs what the loop actually did, and the
+    static curve emerges from the feedback - the knob's slope is the
+    loop's gain, so a 10:1 knob reads as a gentle 1.9:1, exactly like
+    the real bus comps whose engraved ratio never reads as a VCA ratio.
+    FET and OPTO are engraved ahead of their versions and sit inert -
+    no ghost buttons, just the promise.
+  - **The drive speaks its truth.** The OS 2x plate is gone: the drive's
+    0 dB rest position reads "off" (the stage is skipped wholesale
+    there, bit-exact), and the 2x oversampling follows the drive on its
+    own - any position above "off" rides the oversampled path, the
+    parked strip never pays for it.
 
 - **2.96.0** — *The top end stops cramping.*
   - **The de-cramped top end (Clement's report).** The RBJ/bilinear

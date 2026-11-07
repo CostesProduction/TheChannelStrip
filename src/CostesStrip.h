@@ -305,7 +305,6 @@ private:
     std::atomic<float>* highCutOn         = nullptr; // 0.0 / 1.0 (v2.59.0)
     std::atomic<float>* tiltDb            = nullptr;
     std::atomic<float>* driveDb           = nullptr;
-    std::atomic<float>* driveOversampled  = nullptr; // 0.0 / 1.0
 
     // the IMAGE section (v2.84.0, Clement's remarks 3 to 6): the
     // phase plate, the stereo balance, the stereo width and the mono
@@ -369,6 +368,7 @@ private:
     std::atomic<float>* compScLpf     = nullptr;  // v2.66.0
     std::atomic<float>* compListen    = nullptr;  // 0.0 / 1.0 (v2.66.0)
     std::atomic<float>* compLink      = nullptr;  // 0-3: dual/50/80/link (v2.72.0)
+    std::atomic<float>* compStyle     = nullptr;  // 0-3: FET/VCA/GLUE/OPTO (v2.97.0)
 
     // the transient designer (v2.88.0, Clement's spec, roadmap C4):
     // the attack and sustain knobs read in dB of envelope lead, the
@@ -446,6 +446,16 @@ private:
     float lastCompHpf      = -1.0f;   // the sidechain corner's cache
     Biquad compSidechainLp[2] = {};   // the SC LPF, one per channel (v2.66.0)
     float lastCompScLpf    = -1.0f;
+    // v2.97.0 (Clement's request, the GLUE character): the feedback
+    // detector's own state - the GLUE's sidechain listens to the
+    // stage's OUTPUT, so it carries its own mirrored biquads (and
+    // their own caches - a shared cache would never see a rebuild)
+    float compFbPowerL     = 0.0f;
+    float compFbPowerR     = 0.0f;
+    Biquad compFbSidechainHp[2] = {};
+    Biquad compFbSidechainLp[2] = {};
+    float lastCompFbHpf   = -1.0f;
+    float lastCompFbScLpf = -1.0f;
     Biquad expSidechainHp[2] = {};    // the expander's own pair (v2.66.0)
     Biquad expSidechainLp[2] = {};
     float lastExpScHpf     = -1.0f;
@@ -1110,6 +1120,29 @@ public:
     // v2.93.0: the compressor's ADD face for the offline harness
     CompAddFace* getCompAddFace()  { return &compAddFace; }
 
+    // v2.97.0 (Clement's request): the compressor's CHARACTER plates -
+    // four engraved names riding the plates' line (FET, VCA, GLUE,
+    // OPTO), one lit lamp between them. The strip's own VCA and the
+    // GLUE feedback style are live; FET (v2.98.0) and OPTO (v2.99.0)
+    // are engraved but not built yet, so their plates sit inert (no
+    // click, a dimmed paint) - a promise, not a ghost button.
+    // Public like ShelfModeToggle further down, so the harness can read
+    // the caption - and the accessor's return type needs the full name
+    // declared here, a return type is not inside the complete-class
+    // context
+    struct CompStyleToggle : public juce::ToggleButton
+    {
+        juce::String caption;
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
+    // v2.97.0: the compressor's character plates for the offline harness
+    CompStyleToggle* getCompStylePlate (int index)
+    {
+        return &compStylePlates[juce::jlimit (0, 3, index)];
+    }
+
     // v2.73.0: the dynamics plates in stable order - the expander's
     // FAST ATK and LISTEN, then the compressor's - so the offline
     // harness can pin their stacked geometry
@@ -1337,7 +1370,10 @@ private:
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
     };
 
-    PlateToggle oversampleButton;
+    // v2.97.0: the four character plates themselves - the engraved
+    // CompStyleToggle moved up to the public harness section (the
+    // accessor's return type needs the declared name up there)
+    CompStyleToggle compStylePlates[4];
     PlateToggle eqOnButton;   // v2.61.0
     PlateToggle transClipButton;   // v2.88.0: the transient's CLIP plate
     PlateToggle punchOnButton;   // v2.89.0: the PUNCH plate, lit by default
@@ -1468,7 +1504,6 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> highCutSlopeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tiltAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> oversampleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lowCutOnAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> highCutOnAttachment;
 

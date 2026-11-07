@@ -4945,33 +4945,39 @@ void testCostesStripAudio()
 
         expectNear (juce::Decibels::gainToDecibels (driveH3 / driveFund), -18.0, 9.0,
                     "full drive generates a strong third harmonic");
+
+        // v2.97.0: the drive's own readout language - the 0 dB rest
+        // position is the stage's honest "off" (the drive block is
+        // skipped wholesale there, bit-exact), and the parser takes
+        // the word back
+        auto* driveParam = dynamic_cast<juce::RangedAudioParameter*> (
+            strip->getApvts().getParameter ("driveDb"));
+        expectTrue (driveParam != nullptr,
+                    "the drive parameter is a ranged parameter");
+
+        if (driveParam != nullptr)
+        {
+            expectNear (driveParam->convertFrom0to1 (driveParam->getValueForText ("off")), 0.0, 0.01,
+                        "the drive's rest position spells itself off");
+
+            expectNear (driveParam->convertFrom0to1 (driveParam->getValueForText ("3 dB")), 3.0, 0.01,
+                        "a typed 3 dB drive parses to 3.0");
+        }
         expectNear (juce::Decibels::gainToDecibels (driveFund / cleanFund), 1.0, 1.5,
                     "the auto-makeup holds the loudness near unity at full drive");
 
-        // oversampling: a 7 kHz tone at full drive folds its fifth
-        // harmonic (35 kHz) onto 13 kHz when the tanh runs at the base
-        // rate; the 2x oversampled path must push it far down
-        strip->getApvts().getParameterAsValue ("driveOversampled").setValue (false);
-        const double aliasFundOff = measureAmplitude (7000.0, 7000.0);
-        const double aliasOff = measureAmplitude (7000.0, 13000.0);
-        expectTrue (juce::Decibels::gainToDecibels (aliasOff / aliasFundOff) > -45.0,
-                    "without oversampling the drive aliases onto 13 kHz");
-
-        strip->getApvts().getParameterAsValue ("driveOversampled").setValue (true);
-        const double aliasFundOn = measureAmplitude (7000.0, 7000.0);
-        const double aliasOn = measureAmplitude (7000.0, 13000.0);
-
-        expectNear (juce::Decibels::gainToDecibels (aliasFundOn / aliasFundOff), 0.0, 1.0,
-                    "oversampling leaves the fundamental untouched");
-        expectTrue (juce::Decibels::gainToDecibels (aliasOn / aliasFundOn) <= -60.0,
-                    "the oversampled drive pushes the alias below -60 dB");
-        expectTrue (juce::Decibels::gainToDecibels (aliasOff / aliasFundOff)
-                        - juce::Decibels::gainToDecibels (aliasOn / aliasFundOn) >= 20.0,
-                    "oversampling reduces the aliasing by at least 20 dB");
+        // v2.97.0: the OS 2x plate is gone - the 2x oversampling follows
+        // the drive on its own (any position above the honest "off"
+        // rides the oversampled path), so the alias the old base-rate
+        // tanh once folded onto 13 kHz stays far down with no switch
+        // to remember
+        const double aliasFund = measureAmplitude (7000.0, 7000.0);
+        const double alias = measureAmplitude (7000.0, 13000.0);
+        expectTrue (juce::Decibels::gainToDecibels (alias / aliasFund) <= -60.0,
+                    "the drive's automatic 2x oversampling keeps the alias below -60 dB");
 
         // back to the parked defaults
         strip->getApvts().getParameterAsValue ("driveDb").setValue (0.0f);
-        strip->getApvts().getParameterAsValue ("driveOversampled").setValue (false);
     }
 
     // ------------------------------------------------------------------
@@ -5036,7 +5042,6 @@ void testCostesStripSession()
     strip->getApvts().getParameterAsValue ("highCutOn").setValue (true);
     strip->getApvts().getParameterAsValue ("tiltDb").setValue (3.0f);
     strip->getApvts().getParameterAsValue ("driveDb").setValue (6.0f);
-    strip->getApvts().getParameterAsValue ("driveOversampled").setValue (true);
 
     // the EQ section (v2.61.0): a recognisable position on every band -
     // a moved corner on band 1, a gain and a bandwidth on band 2, and
@@ -5055,6 +5060,7 @@ void testCostesStripSession()
     strip->getApvts().getParameterAsValue ("compRatio").setValue (4.0f);
     strip->getApvts().getParameterAsValue ("compFastAttack").setValue (true);
     strip->getApvts().getParameterAsValue ("compMix").setValue (60.0f);
+    strip->getApvts().getParameterAsValue ("compStyle").setValue (2.0f);
 
     juce::MemoryBlock state;
     proc.getStateInformation (state);
@@ -5093,8 +5099,6 @@ void testCostesStripSession()
                     "tilt restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("driveDb")->load(), 6.0, 0.01,
                     "drive restores");
-        expectNear (rehosted->getApvts().getRawParameterValue ("driveOversampled")->load(), 1.0, 0.01,
-                    "the oversampling switch restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq1Hz")->load(), 250.0, 0.1,
                     "the EQ band 1 corner restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("eq2Gain")->load(), -3.5, 0.01,
@@ -5113,6 +5117,8 @@ void testCostesStripSession()
                     "the compressor's FAST ATTACK plate restores");
         expectNear (rehosted->getApvts().getRawParameterValue ("compMix")->load(), 60.0, 0.01,
                     "the compressor mix restores");
+        expectNear (rehosted->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
+                    "the compressor's character restores - the GLUE position");
     }
 
     expectTrue (restored.getHostedStrip().getRelayedParameterCount() == 56,
@@ -9008,10 +9014,9 @@ void testV287ZoneTilesAndCaptionBreath()
     }
 
     // ---- Clement's remark 3: every caption hugs ITS OWN knob ----
-    // ONE breath under its own knob's feet, a TWO-breath street
-    // before the next knob; the OS plate keeps its own one-breath
-    // slot under the drive's caption, and the trim out sits a
-    // three-breath street below it
+    // ONE breath under its own knob's feet, a street before the next
+    // knob: EIGHT breaths before the drive (v2.97.0: the OS plate is
+    // gone, the freed street spreads), SIXTEEN before the trim out
     expectTrue (imageKnobs[0] != nullptr && imageKnobs[1] != nullptr
                     && imageKnobs[2] != nullptr && phaseBtn != nullptr
                     && imageKnobs[0]->getBounds().getY() == phaseBtn->getBounds().getBottom() + 2
@@ -9022,11 +9027,11 @@ void testV287ZoneTilesAndCaptionBreath()
 
     expectTrue (sliders[3] != nullptr && sliders[4] != nullptr
                     && sliders[33] != nullptr && captions[1] != nullptr
-                    && sliders[4]->getBounds().getY() == captions[1]->getBounds().getBottom() + 2
+                    && sliders[4]->getBounds().getY() == captions[1]->getBounds().getBottom() + 8
                     && sliders[33]->getBounds().getY()
-                           == sliders[4]->getBounds().getBottom() + (1 + 16 + 1 + 18 + 3)
+                           == sliders[4]->getBounds().getBottom() + (1 + 16 + 16)
                     && outCaps[3]->getBounds().getBottom() <= reserved[1].getBottom(),
-                "the SHAPE OUT captions hug their own knobs too - the drive keeps its OS plate's slot, the trim out rides a three-breath street below");
+                "the SHAPE OUT captions hug their own knobs too - the drive rides an eight-breath street, the trim out a sixteen-breath one (the OS plate's street spread since v2.97.0)");
 
     // ---- Clement's remark 4: the AMEK-style zone tiles ---- two
     // warm beiges, both LIGHT like the cream front: tone A - a
@@ -9090,7 +9095,7 @@ void testV287ZoneTilesAndCaptionBreath()
                     && captionRidesTheTile (tiles[4], captions[1])
                     && tiles[5]->getBounds().contains (sliders[4]->getBounds())
                     && tiles[5]->getBounds().getBottom()
-                           == sliders[4]->getBounds().getBottom() + (1 + 16 + 1 + 18)
+                           == sliders[4]->getBounds().getBottom() + (1 + 16)
                     && tiles[6]->getBounds().contains (sliders[33]->getBounds())
                     && captionRidesTheTile (tiles[6], outCaps[3]),
                 "every tile carries its whole zone - knob, plates, caption words - grown past the knob's sides, flush with its zone's floor");
@@ -10009,6 +10014,247 @@ void testV295AveragedAdd()
     setParam ("compRatio", 2.0f);
     setParam ("compGain", 0.0f);
 }
+
+// ------------------------------------------------------------------
+// v2.97.0 (Clement's request): the compressor takes a character - four
+// engraved plates (FET, VCA, GLUE, OPTO) on the plates' line with the
+// GLUE feedback style live, and the drive speaks its truth ("off" at
+// 0 dB, the 2x oversampling following it automatically)
+void testV297CompCharacter()
+{
+    beginTest ("v2.97.0: the compressor's character - four engraved plates, the GLUE feedback style live");
+
+    juce::MidiBuffer noMidi;
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    proc.toggleCostesStrip();
+
+    auto* strip = dynamic_cast<CostesStrip*> (proc.getHostedStrip().getActivePlugin());
+    expectTrue (strip != nullptr, "the strip is hosted");
+
+    if (strip == nullptr)
+        return;
+
+    auto setParam = [strip] (const char* id, juce::var value)
+    {
+        strip->getApvts().getParameterAsValue (id).setValue (value);
+    };
+
+    // ---- the parameter itself: VCA by default, so every existing
+    // session loads exactly as it was saved ----
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 1.0, 0.01,
+                "the character parks on the strip's own VCA - the default");
+
+    // ---- the plates: four engraved names finishing the plates' line,
+    // level with the COMP plate and its ADD face, FET and OPTO inert
+    // until their versions ----
+    CostesStripEditor editorForV297 (*strip);
+    editorForV297.setVisible (true);
+
+    auto* styleFet = editorForV297.getCompStylePlate (0);
+    auto* styleVca = editorForV297.getCompStylePlate (1);
+    auto* styleGlue = editorForV297.getCompStylePlate (2);
+    auto* styleOpto = editorForV297.getCompStylePlate (3);
+
+    expectTrue (styleFet != nullptr && styleVca != nullptr
+                    && styleGlue != nullptr && styleOpto != nullptr
+                    && styleFet->getBounds() == juce::Rectangle<int> (430, 448, 52, 18)
+                    && styleVca->getBounds() == juce::Rectangle<int> (486, 448, 52, 18)
+                    && styleGlue->getBounds() == juce::Rectangle<int> (542, 448, 52, 18)
+                    && styleOpto->getBounds() == juce::Rectangle<int> (598, 448, 52, 18),
+                "the four character plates ride the plates' line - engraved names in the air right of the ADD face");
+
+    expectTrue (styleFet != nullptr && styleVca != nullptr
+                    && styleGlue != nullptr && styleOpto != nullptr
+                    && ! styleFet->isEnabled() && styleVca->isEnabled()
+                    && styleGlue->isEnabled() && ! styleOpto->isEnabled(),
+                "VCA and GLUE are live, FET and OPTO are inert engravings - no ghost buttons");
+
+    // the radio follows the parameter within a frame: the sync the
+    // timer owns, exercised directly
+    editorForV297.timerCallback();
+
+    expectTrue (styleVca->getToggleState() && ! styleFet->getToggleState()
+                    && ! styleGlue->getToggleState() && ! styleOpto->getToggleState(),
+                "the VCA's lamp is lit on the fresh strip - one lamp, the strip's own character");
+
+    // a click on GLUE moves the parameter and the lamp follows; the
+    // inert FET and OPTO engravings move nothing; VCA takes it home
+    styleGlue->onClick();
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
+                "a click on the GLUE plate speaks the parameter");
+
+    editorForV297.timerCallback();
+
+    expectTrue (styleGlue->getToggleState() && ! styleVca->getToggleState(),
+                "the GLUE's lamp takes the line - the radio moves");
+
+    styleFet->onClick();
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
+                "the inert FET engraving never moves the radio - its character is not built yet");
+
+    styleOpto->onClick();
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 2.0, 0.01,
+                "the inert OPTO engraving never moves the radio either");
+
+    styleVca->onClick();
+    expectNear (strip->getApvts().getRawParameterValue ("compStyle")->load(), 1.0, 0.01,
+                "a click on the VCA plate takes the character home");
+
+    // ---- the GLUE parks like the VCA: the character moves nothing
+    // while the stage is parked (the feedback path tracks, the gain
+    // stays unity) ----
+    setParam ("compStyle", 2.0f);
+    setParam ("compOn", true);
+    setParam ("compThreshold", 0.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 60; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), 0.0, 0.05,
+                    "the parked GLUE is the parked VCA - the character never moves a parked stage");
+    }
+
+    // ---- the GLUE's own voice: the same knobs, the feedback loop's
+    // settled curve. Threshold -20, ratio 10: the VCA reads its
+    // 0.9 x 10.97 = 9.87 down; the GLUE's loop settles at
+    // slope / (1 + slope) - 0.9 / 1.9 of the same over-threshold
+    // distance, 5.21 down, the gentler curve the real bus comps read
+    // with their engraved ratio ----
+    setParam ("compThreshold", -20.0f);
+    setParam ("compRatio", 10.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -5.21, 0.15,
+                    "the GLUE's loop settles at its own curve - 0.9 / 1.9 of the over-threshold distance, the bus comp's gentle truth");
+    }
+
+    // the make-up lives OUTSIDE the loop: +6 dB moves the balance and
+    // leaves the loop's settled gain untouched
+    setParam ("compGain", 6.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 120; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), 0.79, 0.15,
+                    "the make-up rides outside the GLUE's loop - the balance moves six, the settled curve holds");
+    }
+
+    setParam ("compGain", 0.0f);
+
+    // ---- the emergent curve at ratio 2: the VCA reads its
+    // 0.5 x 10.97 = 5.49 down, the GLUE settles at 1/3 of the
+    // distance, 3.66 down. The knob keeps its word on the VCA; on the
+    // GLUE it says how hard the glue pushes ----
+    setParam ("compRatio", 2.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -3.66, 0.15,
+                    "the GLUE at ratio 2 settles at 1/3 of the over-threshold distance - the ratio is loop gain, the curve emerges");
+    }
+
+    setParam ("compStyle", 1.0f);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        for (int i = 0; i < 240; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+        }
+
+        expectNear (strip->getCompBalanceDb(), -5.49, 0.15,
+                    "the VCA at the same knobs reads its own 0.5 x 10.97 - the character contrast, one lamp apart");
+    }
+
+    // ---- the LISTEN plate speaks the feedback signal itself: the
+    // monitor hands the compressed tone (the loop's own output) to
+    // the output, 5.2 dB under the input, where the VCA's monitor
+    // reads its sidechain at unity ----
+    setParam ("compStyle", 2.0f);
+    setParam ("compRatio", 10.0f);
+    setParam ("compListen", true);
+
+    {
+        SineSource src (1000.0, 48000.0, 0.5f);
+        juce::AudioBuffer<float> block (2, 480);
+
+        const double omega = juce::MathConstants<double>::twoPi * 1000.0 / 48000.0;
+        double filled = 0.0;
+
+        for (int i = 0; i < 236; ++i)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+            filled += 480.0;
+        }
+
+        double c = 0.0;
+        double s = 0.0;
+
+        for (int b = 0; b < 4; ++b)
+        {
+            src.fill (block);
+            proc.processBlock (block, noMidi);
+
+            for (int i = 0; i < 480; ++i)
+            {
+                const double phase = omega * (filled + (double) b * 480.0 + (double) i);
+                c += block.getSample (0, i) * std::cos (phase);
+                s += block.getSample (0, i) * std::sin (phase);
+            }
+
+            filled += 480.0;
+        }
+
+        const double amp = 2.0 * std::sqrt (c * c + s * s) / (4.0 * 480.0);
+
+        expectNear (juce::Decibels::gainToDecibels (amp / 0.5), -5.2, 0.3,
+                    "the GLUE's LISTEN speaks the feedback signal - the compressed tone itself, 5.2 dB under the input");
+    }
+
+    setParam ("compListen", false);
+    setParam ("compStyle", 1.0f);
+    setParam ("compThreshold", 0.0f);
+    setParam ("compRatio", 2.0f);
+    setParam ("compOn", false);
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -10097,6 +10343,7 @@ int main (int argc, char* argv[])
     testV293AddFaces();
     testV294AddClicks();
     testV295AveragedAdd();
+    testV297CompCharacter();
 
     if (integration)
         testIntegrationRealConsole();
