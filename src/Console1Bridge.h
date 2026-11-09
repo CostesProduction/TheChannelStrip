@@ -97,33 +97,57 @@ inline int c1RoleForCc (int cc)
 }
 
 // ---- layer 2: name synonyms -----------------------------------------------
+//
+// v2.103.1: the in-situ pass of 2026-11-09 (a real MK2 against the
+// Costes console) showed six knobs working and twenty resolving
+// nothing or the wrong parameter: the Costes console registers
+// "Trim In", "Expander Threshold", the numbered EQ ("EQ 2
+// Width") and the "Compressor *" knobs, none of which the generic
+// patterns knew. The exact normalised Costes names are pinned
+// below. Two field-found collisions are settled by pattern length:
+// the punch knob takes "Transient Attack" (15 chars) over "Punch
+// On" (5), and the character knob is the tilt - the generic
+// "character" pattern is gone because on the Costes console it
+// grabbed "Compressor Character" (9) and the tilt (4) could never
+// win. A hosted console that really exposes a character knob can
+// get a pinned pattern the day one exists.
 
 namespace Console1Detail
 {
-    inline const char* const wInputGain[]     = { "inputgain", "inputtrim", "intrim", "inputlevel", "inlevel", nullptr };
+    inline const char* const wInputGain[]     = { "inputgain", "inputtrim", "intrim", "inputlevel", "inlevel",
+                                                 "trimin", nullptr };
     inline const char* const wHighCut[]       = { "highcut", "hpf", "highpasscut", nullptr };
     inline const char* const wLowCut[]        = { "lowcut", "inputlowcut", "lowcutfilter", nullptr };
-    inline const char* const wGateThreshold[] = { "gatethreshold", "gatethresh", "gatelevel", "gategain", "gate", nullptr };
-    inline const char* const wGateRelease[]  = { "gaterelease", "shaperelease", nullptr };
+    inline const char* const wGateThreshold[] = { "gatethreshold", "gatethresh", "gatelevel", "gategain", "gate",
+                                                 "expanderthreshold", nullptr };
+    inline const char* const wGateRelease[]  = { "gaterelease", "shaperelease", "expanderrelease", nullptr };
     inline const char* const wSustain[]      = { "sustain", nullptr };
-    inline const char* const wPunch[]         = { "punch", nullptr };
-    inline const char* const wEqLowFreq[]    = { "lowfreq", "lowfrequency", "lffreq", "bassfreq", "lowbandfreq", nullptr };
-    inline const char* const wEqLowGain[]    = { "lowgain", "lfgain", "bassgain", "lowbandgain", nullptr };
-    inline const char* const wEqLoMidQ[]     = { "lowmidq", "lmcue", "lowmidcue", nullptr };
-    inline const char* const wEqLoMidFreq[]  = { "lowmidfreq", "lowmidfrequency", "lmfreq", "midlowfreq", nullptr };
-    inline const char* const wEqLoMidGain[]  = { "lowmidgain", "lmgain", "midlowgain", nullptr };
-    inline const char* const wEqHiMidQ[]     = { "highmidq", "hmcue", "highmidcue", nullptr };
-    inline const char* const wEqHiMidFreq[]  = { "highmidfreq", "highmidfrequency", "hmfreq", "midhighfreq", nullptr };
-    inline const char* const wEqHiMidGain[]  = { "highmidgain", "hmgain", "midhighgain", nullptr };
-    inline const char* const wEqHighFreq[]   = { "highfreq", "highfrequency", "hffreq", "treblefreq", "highbandfreq", nullptr };
-    inline const char* const wEqHighGain[]   = { "highgain", "hfgain", "treblegain", "highbandgain", nullptr };
-    inline const char* const wCompRatio[]    = { "ratio", "compratio", "compressionratio", nullptr };
-    inline const char* const wCompDryWet[]   = { "parallel", "drywet", "mix", "blend", nullptr };
-    inline const char* const wCompAttack[]   = { "attack", "attacktime", "compattack", nullptr };
-    inline const char* const wCompRelease[]  = { "release", "releasetime", "comprelease", nullptr };
-    inline const char* const wCompThreshold[]= { "threshold", "thresh", "compthreshold", "compressionthreshold", nullptr };
+    inline const char* const wPunch[]         = { "punch", "transientattack", nullptr };
+    inline const char* const wEqLowFreq[]    = { "lowfreq", "lowfrequency", "lffreq", "bassfreq", "lowbandfreq",
+                                                 "eq1frequency", nullptr };
+    inline const char* const wEqLowGain[]    = { "lowgain", "lfgain", "bassgain", "lowbandgain", "eq1gain", nullptr };
+    inline const char* const wEqLoMidQ[]     = { "lowmidq", "lmcue", "lowmidcue", "eq2width", nullptr };
+    inline const char* const wEqLoMidFreq[]  = { "lowmidfreq", "lowmidfrequency", "lmfreq", "midlowfreq",
+                                                 "eq2frequency", nullptr };
+    inline const char* const wEqLoMidGain[]  = { "lowmidgain", "lmgain", "midlowgain", "eq2gain", nullptr };
+    inline const char* const wEqHiMidQ[]     = { "highmidq", "hmcue", "highmidcue", "eq3width", nullptr };
+    inline const char* const wEqHiMidFreq[]  = { "highmidfreq", "highmidfrequency", "hmfreq", "midhighfreq",
+                                                 "eq3frequency", nullptr };
+    inline const char* const wEqHiMidGain[]  = { "highmidgain", "hmgain", "midhighgain", "eq3gain", nullptr };
+    inline const char* const wEqHighFreq[]   = { "highfreq", "highfrequency", "hffreq", "treblefreq", "highbandfreq",
+                                                 "eq4frequency", nullptr };
+    inline const char* const wEqHighGain[]   = { "highgain", "hfgain", "treblegain", "highbandgain", "eq4gain", nullptr };
+    inline const char* const wCompRatio[]    = { "ratio", "compratio", "compressionratio", "compressorratio", nullptr };
+    inline const char* const wCompDryWet[]   = { "parallel", "drywet", "mix", "blend", "compressormix", nullptr };
+    inline const char* const wCompAttack[]   = { "attack", "attacktime", "compattack", "compressorfastattack", nullptr };
+    inline const char* const wCompRelease[]  = { "release", "releasetime", "comprelease", "compressorrelease", nullptr };
+    inline const char* const wCompThreshold[]= { "threshold", "thresh", "compthreshold", "compressionthreshold",
+                                                 "compressorthreshold", nullptr };
     inline const char* const wDrive[]        = { "drive", "saturation", "saturationdrive", nullptr };
-    inline const char* const wCharacter[]    = { "character", "char", nullptr };
+    // v2.103.1: the tilt, not the generic "character" - that pattern
+    // always grabbed "Compressor Character" (9 chars) and the tilt
+    // (4 chars) could never win the greedy assignment.
+    inline const char* const wCharacter[]    = { "tilt", nullptr };
     inline const char* const wPan[]          = { "pan", "balance", "panorama", "panpot", nullptr };
     inline const char* const wOutput[]       = { "output", "outputlevel", "channelvolume", "volume",
                                                  "outlevel", "outtrim", "trimout", "mastervolume", nullptr };

@@ -11500,13 +11500,15 @@ static void testV2103Console1Knobs()
 
     // 26 realistic knob names, deliberately NOT in hardware order - the
     // resolution must be by name, not by position ("Input Gain" sits
-    // last on purpose).
+    // last on purpose). v2.103.1: the fixture wears a "Tilt" where the
+    // character knob lands - the generic "character" pattern is gone
+    // (see the Costes mapping test below).
     const std::vector<juce::String> sslNames = {
         "High Cut", "Low Cut", "Gate Threshold", "Gate Release", "Sustain",
         "Punch", "Low Freq", "Low Gain", "Low Mid Q", "Low Mid Freq",
         "Low Mid Gain", "High Mid Q", "High Mid Freq", "High Mid Gain",
         "High Freq", "High Gain", "Ratio", "Parallel", "Attack", "Release",
-        "Threshold", "Drive", "Character", "Pan", "Output", "Input Gain"
+        "Threshold", "Drive", "Tilt", "Pan", "Output", "Input Gain"
     };
     // indices: highCut 0, lowCut 1, gate 2/3, sustain 4, punch 5,
     // low 6/7, loMid 8/9/10, hiMid 11/12/13, high 14/15, comp 16..20,
@@ -11650,6 +11652,90 @@ static void testV2103Console1Knobs()
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// v2.103.1 (the hands, part 2): the in-situ pass of 2026-11-09 on a real
+// Console 1 MK2 against the Costes console showed six knobs working and
+// twenty resolving nothing or the wrong parameter - the Costes console
+// names its knobs "Trim In", "Expander Threshold", "EQ 2 Width" and the
+// generic synonym table did not know them. The synonyms are extended (see
+// Console1Bridge.h) and this test freezes the exact mapping: the real 56
+// Costes parameter names, in the real registration order, because ties in
+// the greedy assignment are broken by parameter order. The mapping can
+// never regress offline again.
+// ---------------------------------------------------------------------------
+static void testV21031CostesKnobMapping()
+{
+    beginTest ("v2.103.1: the 26 knobs drive the Costes console");
+
+    // The exact names CostesStrip registers, in the exact order.
+    const std::vector<juce::String> costesNames = {
+        "Trim In", "Low Cut", "Low Cut Slope", "Low Cut On", "High Cut",
+        "High Cut Slope", "High Cut On", "EQ On",
+        "EQ 1 Frequency", "EQ 1 Gain", "EQ 1 Mode",
+        "EQ 2 Frequency", "EQ 2 Gain", "EQ 2 Width",
+        "EQ 3 Frequency", "EQ 3 Gain", "EQ 3 Width",
+        "EQ 4 Frequency", "EQ 4 Gain", "EQ 4 Mode",
+        "Expander On", "Expander Threshold", "Expander Range",
+        "Expander Fast Attack", "Expander Release", "Expander Ratio",
+        "Expander Knee", "Expander Mix", "Expander SC HPF",
+        "Expander SC LPF", "Expander Listen",
+        "Compressor On", "Compressor Threshold", "Compressor Ratio",
+        "Compressor Release", "Compressor Fast Attack", "Compressor Gain",
+        "Compressor Mix", "Compressor Link", "Compressor Character",
+        "Compressor SC HPF", "Compressor SC LPF", "Compressor Listen",
+        "Tilt", "Drive", "Phase Invert", "Stereo Balance", "Stereo Width",
+        "Mono Maker", "Trim Out",
+        "Transient Attack", "Transient Sustain", "Punch On",
+        "Transient Gain", "Transient Mix", "Transient Clipper"
+    };
+
+    Console1Bridge bridge;
+    MockConsole costes (true, 0, costesNames);
+    bridge.retargetPlugin (&costes);
+
+    expectTrue (bridge.getMatchedRoleCount() == 26,
+                "every hardware knob finds its Costes parameter");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 0
+                    && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 4
+                    && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 1,
+                "the input section: gain drives Trim In, the cuts stay");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 21
+                    && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 24
+                    && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 51
+                    && bridge.getTargetIndexForRole (int (C1Role::punch)) == 50,
+                "the shape section: the gate drives the expander pair, punch drives the transient attack");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 8
+                    && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 9
+                    && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 13
+                    && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 11
+                    && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 12,
+                "the EQ low roles: EQ 1 frequency and gain, the EQ 2 trio");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 16
+                    && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 14
+                    && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 15
+                    && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 17
+                    && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 18,
+                "the EQ high roles: the EQ 3 trio, the EQ 4 frequency and gain");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 33
+                    && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 37
+                    && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 35
+                    && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 34
+                    && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 32,
+                "the compressor: ratio, mix, fast attack, release, threshold");
+
+    expectTrue (bridge.getTargetIndexForRole (int (C1Role::drive)) == 44
+                    && bridge.getTargetIndexForRole (int (C1Role::character)) == 43
+                    && bridge.getTargetIndexForRole (int (C1Role::pan)) == 46
+                    && bridge.getTargetIndexForRole (int (C1Role::output)) == 49,
+                "the output section: drive, tilt, balance, trim out");
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -11750,6 +11836,7 @@ int main (int argc, char* argv[])
     testV2100OptoCharacter();
     testV2102AutomationBridge();
     testV2103Console1Knobs();
+    testV21031CostesKnobMapping();
 
     if (integration)
         testIntegrationRealConsole();

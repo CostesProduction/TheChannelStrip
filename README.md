@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.103.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.103.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,21 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.103.1** — *The hands, mapped.*
+  - **The 26 knobs now land on the Costes console.** The first in-situ
+    pass with a real MK2 showed six knobs working; the twenty others
+    resolved nothing or the wrong parameter, because the Costes console
+    registers its knobs under names the generic synonym table did not
+    know (« Trim In », « Expander Threshold », the numbered EQ, the
+    « Compressor » knobs, « Tilt »). The role resolution is extended
+    with those exact names: input gain drives Trim In, the shape gate
+    pair drives the expander threshold and release, punch drives the
+    transient attack (not the Punch on/off switch), the ten EQ knobs
+    drive the four EQ bands, the compressor knobs drive the compressor
+    (threshold included, no longer stolen by the expander), and the
+    character knob drives the Tilt. Third-party consoles keep their
+    generic synonyms, roles a console does not expose stay idle, and
+    the full Costes mapping is frozen in the offline test suite.
 - **2.103.0** — *The hands.*
   - **The Console 1 hardware finally drives the console.** Since the 2026
     Console 1 software update the MK1/MK2 units can act as plain MIDI
