@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.103.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.103.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,22 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.103.2** — *The hands, corrected.*
+  - **Five knobs came back from the field silent — the frozen CC table
+    was wrong for them.** The in-situ pass of 2.103.1 against the
+    Costes console showed 21 of the 26 knobs working; the compressor
+    ratio, parallel dry/wet, attack and release, and the character
+    knob moved nothing. The role matching was proven good on the spot
+    (the Doctor report read « roles matched: 26/26 »), so the silence
+    lived in layer 1: the 2026-11-09 capture had been decoded from the
+    CoreMIDI display names, and the « General Purpose #n (fine) »
+    controllers were read as 33-36 when the MIDI spec places that
+    family at 48-51 (fine mirrors coarse at +32, and GP #1-4 coarse
+    are 16-19). The expert-mode hex re-capture settled it byte for
+    byte: release B0 30 (48), ratio B0 31 (49), parallel B0 32 (50),
+    attack B0 33 (51), character B0 12 (18). The frozen table now
+    matches the hardware exactly, and the offline suite pins the five
+    corrections.
 - **2.103.1** — *The hands, mapped.*
   - **The 26 knobs now land on the Costes console.** The first in-situ
     pass with a real MK2 showed six knobs working; the twenty others

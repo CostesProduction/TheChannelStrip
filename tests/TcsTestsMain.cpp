@@ -11480,17 +11480,17 @@ static void testV2103Console1Knobs()
                     && c1CcForRole (int (C1Role::eqHighFreq)) == 83
                     && c1CcForRole (int (C1Role::eqHighGain)) == 82,
                 "the EQ high half: the high-mid trio 87/86/85 and 83/82");
-    expectTrue (c1CcForRole (int (C1Role::compRatio)) == 34
-                    && c1CcForRole (int (C1Role::compDryWet)) == 35
-                    && c1CcForRole (int (C1Role::compAttack)) == 36
-                    && c1CcForRole (int (C1Role::compRelease)) == 33
+    expectTrue (c1CcForRole (int (C1Role::compRatio)) == 49
+                    && c1CcForRole (int (C1Role::compDryWet)) == 50
+                    && c1CcForRole (int (C1Role::compAttack)) == 51
+                    && c1CcForRole (int (C1Role::compRelease)) == 48
                     && c1CcForRole (int (C1Role::compThreshold)) == 47,
-                "the compressor: ratio 34, parallel 35, attack 36, release 33, threshold 47");
+                "v2.103.2: the compressor re-captured - ratio 49, parallel 50, attack 51, release 48, threshold 47");
     expectTrue (c1CcForRole (int (C1Role::drive)) == 15
-                    && c1CcForRole (int (C1Role::character)) == 3
+                    && c1CcForRole (int (C1Role::character)) == 18
                     && c1CcForRole (int (C1Role::pan)) == 10
                     && c1CcForRole (int (C1Role::output)) == 7,
-                "the output section: drive 15, character 3, pan 10, volume 7");
+                "v2.103.2: the output re-captured - drive 15, character 18, pan 10, volume 7");
 
     expectTrue (c1RoleForCc (64) == -1 && c1CcForRole (26) == -1,
                 "an unmapped CC and an out-of-range role read as no-match");
@@ -11635,20 +11635,20 @@ static void testV2103Console1Knobs()
         expectTrue (proc.getConsole1Bridge().getMatchedRoleCount() == 1,
                     "the attack ladder resolves exactly one role (compAttack)");
 
-        proc.getConsole1Bridge().postController (36, 0);
+        proc.getConsole1Bridge().postController (51, 0);
         proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 0,
-                    "CC 36 at 0 lands on the first rung");
+                    "CC 51 at 0 lands on the first rung");
 
-        proc.getConsole1Bridge().postController (36, 127);
+        proc.getConsole1Bridge().postController (51, 127);
         proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 4,
-                    "CC 36 at 127 lands on the last rung");
+                    "CC 51 at 127 lands on the last rung");
 
-        proc.getConsole1Bridge().postController (36, 63);
+        proc.getConsole1Bridge().postController (51, 63);
         proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 2,
-                    "CC 36 at 63 snaps to the middle rung");
+                    "CC 51 at 63 snaps to the middle rung");
     }
 }
 

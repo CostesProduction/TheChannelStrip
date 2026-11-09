@@ -73,6 +73,18 @@ constexpr int c1NumRoles = static_cast<int> (C1Role::numRoles);
 // CCs carry exotic CoreMIDI names on the MK2 ("Tremolo Depth" is the low
 // band frequency, "General Purpose 2 (fine)" is the ratio) - the numbers
 // below are what the hardware actually sends.
+//
+// v2.103.2: five of those numbers were wrong, and the field found
+// them. The capture had been decoded from the CoreMIDI display names
+// and the "General Purpose #n (fine)" family was read as 33-36, but
+// the fine controllers mirror the coarse ones at +32 and GP #1..4
+// coarse are 16-19, so GP #1..4 (fine) are 48-51. The character knob
+// had been decoded the same broken way (3 instead of GP #2 coarse,
+// 18). The expert-mode hex re-capture of 2026-11-09 settled it byte
+// for byte: release B0 30 (48), ratio B0 31 (49), parallel B0 32
+// (50), attack B0 33 (51), character B0 12 (18). The table below is
+// byte-exact with the hardware now, and the offline suite freezes
+// the five corrections.
 inline int c1CcForRole (int role)
 {
     static const int ccs[c1NumRoles] = {
@@ -82,8 +94,8 @@ inline int c1CcForRole (int role)
         90,  89,  88,        // eqLoMidQ, eqLoMidFreq, eqLoMidGain
         87,  86,  85,        // eqHiMidQ, eqHiMidFreq, eqHiMidGain
         83,  82,             // eqHighFreq, eqHighGain
-        34,  35,  36,  33, 47, // compRatio, compDryWet, compAttack, compRelease, compThreshold
-        15,   3,  10,   7    // drive, character, pan, output
+        49,  50,  51,  48, 47, // compRatio, compDryWet, compAttack, compRelease, compThreshold
+        15,  18,  10,   7    // drive, character, pan, output
     };
     return (role >= 0 && role < c1NumRoles) ? ccs[role] : -1;
 }
