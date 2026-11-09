@@ -143,6 +143,19 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
     for (int i = 0; i < AutomationProxyBank::numSlots; ++i)
         addParameter (automationBank->takeProxy (i).release());
 
+    // v2.103.0 (the hands): the Console 1 bridge starts with the shell -
+    // hardware auto-detection on the bridge's own thread with a 2 s
+    // retry. The hardware FIFO is drained from processBlock. No
+    // juce::Timer anywhere: the first two builds of v2.103.0 carried a
+    // 60 Hz juce::Timer here and segfaulted in the concurrent
+    // swap-storm test - in JUCE 8 a timer is not a message-loop feature
+    // anymore, startTimerHz launches a shared high-priority background
+    // thread that does not belong in this shell (see the bridge
+    // header). Roles resolve when a console takes the slot (see the
+    // swap callback).
+    console1 = std::make_unique<Console1Bridge>();
+    console1->start();
+
     loadKnownPluginList();
 
     // v2.47.0 (the EQ-Verite curve) -> v2.49.0: when the hosted console's
@@ -175,6 +188,11 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
                 p->addListener (this);
 
         automationBank->retarget (active);
+
+        // v2.103.0 (the hands): the hardware roles re-resolve on the same
+        // contract as the automation bank - the callback fires while the
+        // outgoing console is still alive.
+        console1->retargetPlugin (active);
         updateHostDisplay (juce::AudioProcessor::ChangeDetails().withParameterInfoChanged (true));
     };
 
@@ -209,6 +227,10 @@ TheChannelStripAudioProcessor::~TheChannelStripAudioProcessor()
     // proxies let go of the console before the members tear down.
     hostedStrip.onActivePluginChanged = nullptr;
     automationBank->retarget (nullptr);
+
+    // v2.103.0 (the hands): the bridge lets go of the hosted parameters
+    // before the members tear down.
+    console1->retargetPlugin (nullptr);
 }
 
 juce::String TheChannelStripAudioProcessor::identFor (const juce::PluginDescription& d)
@@ -381,7 +403,7 @@ juce::String TheChannelStripAudioProcessor::getShellIntegrityLine() const
 // v2.34.1 mojibake fix).
 juce::String TheChannelStripAudioProcessor::getSidebarStatusLines() const
 {
-    return getChannelReadout()
+    juce::String lines = getChannelReadout()
          + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 crossfade: "))
          + (hostedStrip.isCrossfading() ? "active" : "idle")
          + "\nlatency: "
@@ -389,6 +411,15 @@ juce::String TheChannelStripAudioProcessor::getSidebarStatusLines() const
                                      hostedStrip.getReportedLatency()))
          + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 sentinel: "))
          + (silenceWarned.load (std::memory_order_relaxed) ? "fired" : "armed");
+
+    // v2.103.0 (the hands): the hardware line appears only when a Console 1
+    // device is open, so the offline tests (no MIDI hardware) see the same
+    // sidebar as before.
+    if (console1 != nullptr && console1->isDeviceOpen())
+        lines << juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 C1: "))
+              << console1->getMatchedRoleCount() << "/" << c1NumRoles;
+
+    return lines;
 }
 
 // ---- v2.33 (roadmap idea 4): the Doctor report ------------------------------
@@ -436,6 +467,16 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
                        : juce::String ("-- (no gated signal yet)"))
                << "\n";
     }
+
+    // v2.103.0 (the hands): the hardware line - device, roles matched on
+    // the active console. Absent hardware reads "--", not an error.
+    report << "console 1: "
+           << ((console1 != nullptr && console1->isDeviceOpen())
+                   ? console1->getDeviceName()
+                   : juce::String ("-- (no device detected)"))
+           << " - roles matched: "
+           << (console1 != nullptr ? console1->getMatchedRoleCount() : 0)
+           << "/" << c1NumRoles << "\n";
 
     report << "\n"
            << "hosted console:\n";
@@ -634,6 +675,13 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const auto cpuBlockStart = std::chrono::steady_clock::now();
     const bool cpuFreshWindow = (cpuBlockStart - cpuLastBlockEnd)
                                     > std::chrono::milliseconds (500);
+
+    // v2.103.0 (the hands): the hardware FIFO is drained on the audio
+    // thread - empty when no Console 1 is plugged (two atomic loads),
+    // and a knob event rides the same setValueNotifyingHost path the
+    // v2.102 automation proxies already take from this very thread.
+    if (console1 != nullptr)
+        console1->drainNow();
 
     // v2.8: the LUFS meters and spectrum analysers feed the editor only.
     // When no editor is open they are skipped entirely, so a session full

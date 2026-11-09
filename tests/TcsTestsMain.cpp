@@ -398,7 +398,8 @@ juce::AudioProcessor::BusesLayout makeLayout (bool mono)
 class MockConsole : public juce::AudioProcessor
 {
 public:
-    explicit MockConsole (bool acceptsMonoLayout, int parameterCount = 0)
+    explicit MockConsole (bool acceptsMonoLayout, int parameterCount = 0,
+                           const std::vector<juce::String>& namedParameters = {})
         : AudioProcessor (BusesProperties()
                             .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
                             .withOutput ("Main", juce::AudioChannelSet::stereo(), true)),
@@ -407,11 +408,27 @@ public:
         // v2.102.0: optional hosted parameters for the automation-bridge
         // suite - a console the DAW side can automate. Defaults to none,
         // so every existing mock-based test is untouched.
-        for (int i = 0; i < parameterCount; ++i)
-            addParameter (new juce::AudioParameterFloat (
-                juce::ParameterID { "mockKnob" + juce::String (i), 1 },
-                "Mock Knob " + juce::String (i + 1),
-                juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+        //
+        // v2.103.0 (the hands): optional NAMED parameters instead - the
+        // Console 1 role resolution matches hosted parameters by name, so
+        // the bridge suite needs consoles whose knobs wear realistic
+        // names ("High Cut", "Gate Threshold"...).
+        if (! namedParameters.empty())
+        {
+            for (int i = 0; i < (int) namedParameters.size(); ++i)
+                addParameter (new juce::AudioParameterFloat (
+                    juce::ParameterID { "mockNamed" + juce::String (i), 1 },
+                    namedParameters[(size_t) i],
+                    juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+        }
+        else
+        {
+            for (int i = 0; i < parameterCount; ++i)
+                addParameter (new juce::AudioParameterFloat (
+                    juce::ParameterID { "mockKnob" + juce::String (i), 1 },
+                    "Mock Knob " + juce::String (i + 1),
+                    juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+        }
     }
 
     std::atomic<float> gain { 1.0f };
@@ -852,6 +869,65 @@ public:
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockSilenceConsole)
+};
+
+// ---------------------------------------------------------------------------
+// MockChoiceConsole: v2.103.0 (the hands) - a console with ONE discrete
+// parameter, a five-rung attack ladder. The Console 1 bridge snaps 7-bit
+// hardware values to the parameter's steps, and this mock is how the
+// offline harness proves the snapping without real hardware.
+// ---------------------------------------------------------------------------
+class MockChoiceConsole : public juce::AudioProcessor
+{
+public:
+    MockChoiceConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {
+        attackChoice = new juce::AudioParameterChoice (
+            juce::ParameterID { "mockAttack", 1 }, "Attack",
+            { "0.1 ms", "0.4 ms", "3 ms", "10 ms", "30 ms" }, 2);
+        addParameter (attackChoice);
+    }
+
+    const juce::String getName() const override { return "MockChoiceConsole"; }
+
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        return layouts.getMainInputChannelSet() == layouts.getMainOutputChannelSet()
+            && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.clear();
+    }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+    // Raw on purpose: the base class owns the parameter, the tests keep a
+    // handle to read the chosen rung after the bridge moves it.
+    juce::AudioParameterChoice* attackChoice = nullptr;
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockChoiceConsole)
 };
 
 // ---------------------------------------------------------------------------
@@ -11358,6 +11434,222 @@ void testV2102AutomationBridge()
                 "slot 0 wears the strip's first parameter name");
 }
 
+
+// ---------------------------------------------------------------------------
+// v2.103.0 (the hands): the Console 1 bridge - the frozen CC table, the
+// name-based role resolution, the MIDI dispatch and the discrete snap.
+// ---------------------------------------------------------------------------
+static void testV2103Console1Knobs()
+{
+    // ---- the frozen CC table --------------------------------------------
+    beginTest ("v2.103.0: the frozen Console 1 CC table");
+
+    expectTrue (c1NumRoles == 26, "26 knob roles captured from the hardware");
+
+    bool inRange = true, unique = true, roundtrip = true;
+    for (int r = 0; r < 26; ++r)
+    {
+        const int cc = c1CcForRole (r);
+        if (cc < 0 || cc > 127) inRange = false;
+        if (c1RoleForCc (cc) != r) roundtrip = false;
+        for (int s = r + 1; s < 26; ++s)
+            if (c1CcForRole (s) == cc) unique = false;
+    }
+    expectTrue (inRange, "every captured CC lives in 0..127");
+    expectTrue (unique, "no two roles share a CC");
+    expectTrue (roundtrip, "the reverse lookup returns the role for all 26");
+
+    expectTrue (c1CcForRole (int (C1Role::inputGain)) == 107
+                    && c1CcForRole (int (C1Role::highCut)) == 105
+                    && c1CcForRole (int (C1Role::lowCut)) == 103,
+                "the input section: gain 107, high cut 105, low cut 103");
+    expectTrue (c1CcForRole (int (C1Role::gateThreshold)) == 54
+                    && c1CcForRole (int (C1Role::gateRelease)) == 56
+                    && c1CcForRole (int (C1Role::sustain)) == 55
+                    && c1CcForRole (int (C1Role::punch)) == 57,
+                "the shape section: gate 54/56, sustain 55, punch 57");
+    expectTrue (c1CcForRole (int (C1Role::eqLowFreq)) == 92
+                    && c1CcForRole (int (C1Role::eqLowGain)) == 91
+                    && c1CcForRole (int (C1Role::eqLoMidQ)) == 90
+                    && c1CcForRole (int (C1Role::eqLoMidFreq)) == 89
+                    && c1CcForRole (int (C1Role::eqLoMidGain)) == 88,
+                "the EQ low half: 92/91 and the low-mid trio 90/89/88");
+    expectTrue (c1CcForRole (int (C1Role::eqHiMidQ)) == 87
+                    && c1CcForRole (int (C1Role::eqHiMidFreq)) == 86
+                    && c1CcForRole (int (C1Role::eqHiMidGain)) == 85
+                    && c1CcForRole (int (C1Role::eqHighFreq)) == 83
+                    && c1CcForRole (int (C1Role::eqHighGain)) == 82,
+                "the EQ high half: the high-mid trio 87/86/85 and 83/82");
+    expectTrue (c1CcForRole (int (C1Role::compRatio)) == 34
+                    && c1CcForRole (int (C1Role::compDryWet)) == 35
+                    && c1CcForRole (int (C1Role::compAttack)) == 36
+                    && c1CcForRole (int (C1Role::compRelease)) == 33
+                    && c1CcForRole (int (C1Role::compThreshold)) == 47,
+                "the compressor: ratio 34, parallel 35, attack 36, release 33, threshold 47");
+    expectTrue (c1CcForRole (int (C1Role::drive)) == 15
+                    && c1CcForRole (int (C1Role::character)) == 3
+                    && c1CcForRole (int (C1Role::pan)) == 10
+                    && c1CcForRole (int (C1Role::output)) == 7,
+                "the output section: drive 15, character 3, pan 10, volume 7");
+
+    expectTrue (c1RoleForCc (64) == -1 && c1CcForRole (26) == -1,
+                "an unmapped CC and an out-of-range role read as no-match");
+
+    // ---- role resolution by name -----------------------------------------
+    beginTest ("v2.103.0: roles resolve by name on a realistic console");
+
+    // 26 realistic knob names, deliberately NOT in hardware order - the
+    // resolution must be by name, not by position ("Input Gain" sits
+    // last on purpose).
+    const std::vector<juce::String> sslNames = {
+        "High Cut", "Low Cut", "Gate Threshold", "Gate Release", "Sustain",
+        "Punch", "Low Freq", "Low Gain", "Low Mid Q", "Low Mid Freq",
+        "Low Mid Gain", "High Mid Q", "High Mid Freq", "High Mid Gain",
+        "High Freq", "High Gain", "Ratio", "Parallel", "Attack", "Release",
+        "Threshold", "Drive", "Character", "Pan", "Output", "Input Gain"
+    };
+    // indices: highCut 0, lowCut 1, gate 2/3, sustain 4, punch 5,
+    // low 6/7, loMid 8/9/10, hiMid 11/12/13, high 14/15, comp 16..20,
+    // drive 21, character 22, pan 23, output 24, inputGain 25.
+
+    Console1Bridge bridge;
+    {
+        MockConsole realistic (true, 0, sslNames);
+        bridge.retargetPlugin (&realistic);
+
+        expectTrue (bridge.getMatchedRoleCount() == 26,
+                    "a full SSL-style name set resolves all 26 roles");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 25
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 2
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == 5,
+                    "input and shape roles find their knobs by name");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 6
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 7
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 9
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 10,
+                    "the EQ low roles resolve");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 11
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 13
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 14
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 15,
+                    "the EQ high roles resolve");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 16
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 17
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 18
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 20,
+                    "the compressor roles resolve");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::drive)) == 21
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 22
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 24,
+                    "the output section roles resolve");
+
+        // The key conflict: "Gate Threshold" must go to the gate (its
+        // "gatethreshold" pattern is 13 chars) and leave "Threshold" to
+        // the compressor (9 chars). The longest pattern wins globally.
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 2
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 20,
+                    "gate threshold beats compressor threshold on the longer name");
+    }
+    {
+        MockConsole sparse (true, 0, { "Low Cut", "Threshold" });
+        bridge.retargetPlugin (&sparse);
+
+        expectTrue (bridge.getMatchedRoleCount() == 2
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == -1,
+                    "a sparse console: exposed roles resolve, the rest stay idle");
+    }
+    {
+        bridge.retargetPlugin (nullptr);
+        expectTrue (bridge.getMatchedRoleCount() == 0,
+                    "an emptied slot empties every role");
+    }
+
+    // ---- MIDI dispatch through the whole shell ----------------------------
+    beginTest ("v2.103.0: MIDI CC moves reach the hosted console");
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000, 512);
+
+    {
+        auto hosted = std::make_unique<MockConsole> (true, 0, sslNames);
+        auto* lowCutParam     = hosted->getParameters() [1];
+        auto* thresholdParam  = hosted->getParameters() [20];
+        proc.getHostedStrip().setPlugin (std::move (hosted));
+
+        expectTrue (proc.getConsole1Bridge().getMatchedRoleCount() == 26,
+                    "hosting the console resolves the roles via the swap callback");
+
+        proc.getConsole1Bridge().postController (103, 64);   // low cut
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (std::abs (lowCutParam->getValue() - 64.0f / 127.0f) < 1.0e-6f,
+                    "CC 103 at 64 puts the low cut at 64/127");
+
+        proc.getConsole1Bridge().postController (47, 127);   // comp threshold
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (std::abs (thresholdParam->getValue() - 1.0f) < 1.0e-6f,
+                    "CC 47 at 127 puts the threshold at full");
+
+        const float before = lowCutParam->getValue();
+        proc.getConsole1Bridge().postController (64, 100);   // not one of the 26
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (std::abs (lowCutParam->getValue() - before) < 1.0e-6f,
+                    "an unmapped CC changes nothing");
+
+        // end-to-end with v2.102: the proxy slot wears the hardware move,
+        // so the DAW automation lane reads it too.
+        expectTrue (std::abs (proc.getAutomationBank().getProxy (1)->getValue()
+                                 - 64.0f / 127.0f) < 1.0e-6f,
+                    "the automation proxy slot carries the hardware move");
+
+        proc.getConsole1Bridge().postController (103, 32);
+        proc.getConsole1Bridge().postController (103, 96);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (std::abs (lowCutParam->getValue() - 96.0f / 127.0f) < 1.0e-6f,
+                    "the FIFO keeps its order: the last value wins");
+
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (std::abs (lowCutParam->getValue() - 96.0f / 127.0f) < 1.0e-6f,
+                    "draining an empty FIFO changes nothing");
+    }
+
+    // ---- discrete parameters snap to steps ---------------------------------
+    beginTest ("v2.103.0: discrete console parameters snap to steps");
+
+    {
+        auto hosted = std::make_unique<MockChoiceConsole>();
+        auto* attackParam = hosted->attackChoice;
+        proc.getHostedStrip().setPlugin (std::move (hosted));
+
+        expectTrue (proc.getConsole1Bridge().getMatchedRoleCount() == 1,
+                    "the attack ladder resolves exactly one role (compAttack)");
+
+        proc.getConsole1Bridge().postController (36, 0);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (attackParam->getIndex() == 0,
+                    "CC 36 at 0 lands on the first rung");
+
+        proc.getConsole1Bridge().postController (36, 127);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (attackParam->getIndex() == 4,
+                    "CC 36 at 127 lands on the last rung");
+
+        proc.getConsole1Bridge().postController (36, 63);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (attackParam->getIndex() == 2,
+                    "CC 36 at 63 snaps to the middle rung");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -11366,6 +11658,12 @@ void testV2102AutomationBridge()
 int main (int argc, char* argv[])
 {
     const bool integration = (argc > 1 && juce::String (argv[1]) == "--integration");
+
+    // v2.103.0 (the hands): this binary must stay deterministic even on a
+    // machine with a real Console 1 plugged in - the bridge keeps its
+    // hardware detection off in the offline harness. The plugin binary
+    // keeps it on (default).
+    Console1Bridge::setHardwareEnabled (false);
 
     // The hosting code (formats, plugin instantiation) needs the JUCE
     // messaging system. A console app provides its own main, so the RAII
@@ -11451,6 +11749,7 @@ int main (int argc, char* argv[])
     testV299FetCharacter();
     testV2100OptoCharacter();
     testV2102AutomationBridge();
+    testV2103Console1Knobs();
 
     if (integration)
         testIntegrationRealConsole();

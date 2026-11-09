@@ -108,6 +108,21 @@ public:
     // -----------------------------------------------------------------
     std::function<void (juce::AudioProcessor*)> onActivePluginChanged;
 
+    // -----------------------------------------------------------------
+    // v2.103.0: the swap callbacks above walk the active plugin's
+    // parameters (knob listeners, automation bank, Console 1 roles)
+    // while the retire threads destroy superseded slots on background
+    // threads. The callbacks run under this guard and every destroy
+    // takes it too, so a destructor can never overlap an in-flight
+    // callback - a timing margin alone proved insufficient (the
+    // v2.51.1 storm test). It is a shared_ptr because the retire
+    // lambdas outlive the strip (Thread::launch plus the 150 ms
+    // grace), and a juce::CriticalSection because it must be lockable
+    // from the instantiation and retire threads alike.
+    // -----------------------------------------------------------------
+    std::shared_ptr<juce::CriticalSection> swapCallbackGuard =
+        std::make_shared<juce::CriticalSection>();
+
     // Test/support hook: how many hosted parameters currently carry
     // the change relay (the flush test asserts the listener wiring
     // without touching the console's audio).

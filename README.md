@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.102.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.103.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,21 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.103.0** — *The hands.*
+  - **The Console 1 hardware finally drives the console.** Since the 2026
+    Console 1 software update the MK1/MK2 units can act as plain MIDI
+    controllers (mode set from the On-Screen Display menus). The shell
+    now listens to that stream: 26 knob roles (input, shape, the full
+    five-band EQ, the compressor, the output section) are frozen to
+    their CC numbers from the hardware capture, and each role resolves
+    itself on the hosted console by name, with no mapping file to
+    maintain. Turn a hardware knob and the console follows, with the
+    whole v2.102 path riding along: the editor, the EQ-Verite curve,
+    the GR meters, the DAW automation lane. The device is
+    auto-detected by name at launch (and retried every 2 s), values
+    are absolute 7-bit snapped to discrete parameters, and roles the
+    hosted console does not expose simply stay idle. Knobs only for
+    now; the 40 buttons are the next step.
 - **2.102.0** — *The shell speaks to the automation lanes.*
   - **The DAW finally sees the knobs.** Since v2.6 the shell exposed
     zero parameter to the host, so Studio One's automation had

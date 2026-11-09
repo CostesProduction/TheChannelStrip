@@ -21,13 +21,29 @@ HostedStrip::~HostedStrip()
     // half-destroyed shell. Message thread (processor teardown).
     detachRelayFromAll();
 
-    retireOutgoingNow();
-
-    if (auto* active = activeSlot.exchange (nullptr, std::memory_order_acq_rel))
+    // v2.103.0: teardown is synchronous under the guard. The processor
+    // nulls the swap callback before its members die, so no NEW
+    // callback can start, but one already in flight on an
+    // instantiation thread may still be walking a plugin - the guard
+    // waits it out. The outgoing slot now dies inline exactly like the
+    // active one, instead of on a detached thread that could outlive
+    // the process exit.
     {
-        if (active->plugin != nullptr)
-            active->plugin->releaseResources();
-        delete active;
+        const juce::ScopedLock lock (*swapCallbackGuard);
+
+        if (auto* out = outgoingSlot.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            if (out->plugin != nullptr)
+                out->plugin->releaseResources();
+            delete out;
+        }
+
+        if (auto* active = activeSlot.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            if (active->plugin != nullptr)
+                active->plugin->releaseResources();
+            delete active;
+        }
     }
 }
 
@@ -127,8 +143,16 @@ void HostedStrip::setPlugin (std::unique_ptr<juce::AudioProcessor> newPlugin)
     // v2.102.0: the automation bank re-targets at the console that just
     // took the slot (see AutomationProxyBank.h and the processor's
     // onActivePluginChanged wiring).
-    if (onActivePluginChanged)
-        onActivePluginChanged (raw->plugin.get());
+    // v2.103.0: the swap callbacks walk the new console's parameters
+    // (knob listeners, automation bank, Console 1 role matching) and
+    // every retire destroy takes the same guard, so the pointer stays
+    // alive for the whole callback on any thread.
+    {
+        const juce::ScopedLock lock (*swapCallbackGuard);
+
+        if (onActivePluginChanged)
+            onActivePluginChanged (raw->plugin.get());
+    }
 }
 
 void HostedStrip::clearPlugin()
@@ -152,8 +176,14 @@ void HostedStrip::clearPlugin()
 
     // v2.102.0: an emptied slot empties the automation bank too - every
     // proxy returns to its idle name.
-    if (onActivePluginChanged)
-        onActivePluginChanged (nullptr);
+    // v2.103.0: same guard as setPlugin - one uniform contract for
+    // every callback invocation.
+    {
+        const juce::ScopedLock lock (*swapCallbackGuard);
+
+        if (onActivePluginChanged)
+            onActivePluginChanged (nullptr);
+    }
 }
 
 void HostedStrip::retireActiveIntoOutgoing (HostedSlot* oldActive)
@@ -171,10 +201,15 @@ void HostedStrip::retireActiveIntoOutgoing (HostedSlot* oldActive)
         // thread after a grace period so in-flight audio has drained.
         // Capture the raw pointer and take ownership inside the lambda so
         // the lambda stays copyable for std::function.
-        juce::Thread::launch ([prev] ()
+        juce::Thread::launch ([prev, guard = swapCallbackGuard] ()
         {
             std::unique_ptr<HostedSlot> obj (prev);
             juce::Thread::sleep (150);
+
+            // v2.103.0: a swap callback on another thread may still be
+            // walking this plugin's parameters - the destroy waits for
+            // every in-flight callback first.
+            const juce::ScopedLock lock (*guard);
 
             if (obj->plugin != nullptr)
             {
@@ -192,11 +227,25 @@ void HostedStrip::retireOutgoingNow()
         return;
 
     // Destroy the retired plugin on a background thread: destructors of
-    // hosted plugins can be arbitrarily slow. Raw-pointer capture keeps the
-    // lambda copyable.
-    juce::Thread::launch ([old] ()
+    // hosted plugins can be arbitrarily slow. Shared-ptr capture keeps
+    // the lambda copyable and lets it outlive the strip.
+    //
+    // v2.103.0: this path used to destroy with NO grace at all, unlike
+    // retireActiveIntoOutgoing's 150 ms. The v2.51.1 storm test made
+    // that latent race deterministic: with active already cleared, a
+    // second clearPlugin destroyed the outgoing slot while a swap
+    // callback on another churn thread was still walking its
+    // parameters (v2.103.0 gave the callbacks real parameter work -
+    // the Console 1 name matching - and the wider window turned a
+    // never-lost race into a three-build segfault). The destroy now
+    // pays the same 150 ms grace and takes the same guard as the
+    // callbacks, so it can never overlap one regardless of timing.
+    juce::Thread::launch ([old, guard = swapCallbackGuard] ()
     {
         std::unique_ptr<HostedSlot> obj (old);
+        juce::Thread::sleep (150);
+
+        const juce::ScopedLock lock (*guard);
 
         if (obj->plugin != nullptr)
         {

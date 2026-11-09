@@ -9,6 +9,7 @@
 #include "HostedStrip.h"
 #include "GRForwarder.h"
 #include "AutomationProxyBank.h"
+#include "Console1Bridge.h"
 
 // v2.54.0: the version string comes from the build system (CMakeLists
 // injects TCS_VERSION on every target). The fallback keeps the
@@ -337,6 +338,7 @@ public:
     // v2.102.0: the automation bank (one proxy slot per hosted
     // parameter position). Test hook for the bridge suite.
     AutomationProxyBank& getAutomationBank() { return *automationBank; }
+    Console1Bridge& getConsole1Bridge() { return *console1; }
     juce::AudioParameterChoice* getTiltParameter() const { return tiltParam; }
 
     // ---- v2.8: analyser display options (persisted with the state) ----
@@ -602,6 +604,12 @@ private:
     // bank keeps non-owning proxy pointers for forwarding.
     juce::AudioParameterChoice* tiltParam = nullptr;
     std::unique_ptr<AutomationProxyBank> automationBank;
+
+    // v2.103.0 (the hands): the Console 1 bridge - MIDI in, the frozen
+    // 26-role CC table, name-based resolution onto the hosted console.
+    // Declared after the bank so it is destroyed first: no hosted
+    // parameter pointer can outlive the console it points into.
+    std::unique_ptr<Console1Bridge> console1;
 
     // ---- v2.11: per-console settings memory (see the editor API above) ----
     // v2.27: mutable - the current-preset getters take the lock too.
