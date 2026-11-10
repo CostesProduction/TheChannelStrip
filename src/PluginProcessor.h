@@ -157,6 +157,12 @@ public:
     // out of range; reports to the status line if the plugin is not
     // installed.
     void selectConsole (int consoleIndex);
+
+    // v2.104.0 (the buttons): applies a Track Select press parked by
+    // the Console 1 bridge. Message thread only (the editor heartbeat):
+    // a console swap must never run on the audio thread. Track 1 is
+    // the internal Costes strip, Tracks 2..10 the nine console slots.
+    void consumeConsole1Selection();
     void clearHostedPlugin();
 
     // ---- v2.55.0 (roadmap C1): the internal Costes channel strip ----

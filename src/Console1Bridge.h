@@ -23,6 +23,15 @@
 //   3. value: absolute 7-bit, value / 127, snapped to the parameter's
 //      steps when it is discrete (2..128 steps).
 //
+// v2.104.0 (the buttons): the MK2's momentary buttons ride the same
+// three layers with their own frozen CC table. A press (7F, or 3F when
+// the button owns a middle state, the CUT BELL SHELF pair) flips the
+// switch the button resolved by name - a 2-state parameter toggles, a
+// multi-state one cycles a step - and the Track Select range (CC
+// 21..30, Track 1..10) parks console selections that the editor
+// heartbeat applies on the message thread, because a console swap can
+// never run on the audio thread.
+//
 // Everything is applied through setValueNotifyingHost, so the whole
 // v2.102 path follows for free: the editor knob, the EQ-Verite flush,
 // the GR forwarder, the DAW automation lane and the preset star.
@@ -108,6 +117,61 @@ inline int c1RoleForCc (int cc)
     return -1;
 }
 
+// ---- layer 1, part 2: the frozen button CC table (v2.104.0) -----------
+//
+// The knobs carry absolute values; the buttons are momentary presses -
+// the MK2 sends 7F on press (3F when the button owns a middle state,
+// the CUT BELL SHELF pair), 00 on release. Any nonzero value is one
+// press; the release is ignored. The capture of 2026-11-09, expert
+// mode, channel 1:
+//   Phase Invert         B0 6C -> 108
+//   Filters to comp      B0 3D ->  61 (no Costes target; generic
+//                                  patterns for third-party consoles)
+//   Hard Gate            B0 3B ->  59
+//   SHAPE                B0 35 ->  53
+//   EQUALIZER            B0 50 ->  80
+//   Cut Bell Shelf low   B0 5D ->  93
+//   Cut Bell Shelf high  B0 41 ->  65
+//   COMPRESSOR           B0 2E ->  46
+//   Order                B0 0E ->  14 (no Costes target either)
+// Track Select is a RANGE, not one CC: B0 15..1E -> CC 21..30 for
+// Track 1..10. Track 1 selects the internal Costes strip, Tracks
+// 2..10 the nine console slots - but a console swap can never run on
+// the audio thread, so those presses park in an atomic and the editor
+// heartbeat (message thread) applies them.
+
+enum class C1Button
+{
+    phaseInvert, filtersToComp, hardGate, shapeOn,
+    eqOn, lowMode, highMode, compOn, order,
+    numButtons
+};
+
+constexpr int c1NumButtons = static_cast<int> (C1Button::numButtons);
+
+inline int c1CcForButton (int button)
+{
+    static const int ccs[c1NumButtons] = {
+        108,  61,  59,  53,   // phaseInvert, filtersToComp, hardGate, shapeOn
+        80,  93,  65,  46, 14 // eqOn, lowMode, highMode, compOn, order
+    };
+    return (button >= 0 && button < c1NumButtons) ? ccs[button] : -1;
+}
+
+inline int c1ButtonForCc (int cc)
+{
+    for (int i = 0; i < c1NumButtons; ++i)
+        if (c1CcForButton (i) == cc)
+            return i;
+    return -1;
+}
+
+// Track Select: CC 21..30 for Track 1..10, zero-based; -1 outside.
+inline int c1TrackIndexForCc (int cc)
+{
+    return (cc >= 21 && cc <= 30) ? cc - 21 : -1;
+}
+
 // ---- layer 2: name synonyms -----------------------------------------------
 //
 // v2.103.1: the in-situ pass of 2026-11-09 (a real MK2 against the
@@ -177,6 +241,32 @@ namespace Console1Detail
     };
 }
 
+// The button synonyms (v2.104.0) - resolved in a SECOND greedy pass,
+// over the parameters the knobs did not claim (one parameter, one
+// driver, so a button can never fight a knob for a target). On the
+// Costes console: Phase Invert, Expander Fast Attack (the Hard Gate
+// button), Expander On (SHAPE), EQ On, EQ 1/4 Mode (the CUT BELL
+// SHELF pair) and Compressor On. "Filters to compressor" and "Order"
+// carry generic patterns for third-party consoles and stay idle on
+// the Costes console.
+namespace Console1ButtonDetail
+{
+    inline const char* const wBPhaseInvert[]   = { "phaseinvert", "polarity", "invert", "phase", nullptr };
+    inline const char* const wBFiltersToComp[] = { "filtertocompressor", "filtertocomp", "filtertocmp", nullptr };
+    inline const char* const wBHardGate[]      = { "expanderfastattack", "hardgate", "gatefastattack", nullptr };
+    inline const char* const wBShapeOn[]       = { "expanderon", "shapeon", "gateon", nullptr };
+    inline const char* const wBEqOn[]          = { "eqon", "equalizeron", nullptr };
+    inline const char* const wBLowMode[]      = { "eq1mode", "lowbell", "lowshelf", "lowmode", nullptr };
+    inline const char* const wBHighMode[]     = { "eq4mode", "highbell", "highshelf", "highmode", nullptr };
+    inline const char* const wBCompOn[]       = { "compressoron", "compon", nullptr };
+    inline const char* const wBOrder[]        = { "chainorder", "routingorder", "signalorder", nullptr };
+
+    inline const char* const* const words[c1NumButtons] = {
+        wBPhaseInvert, wBFiltersToComp, wBHardGate, wBShapeOn,
+        wBEqOn, wBLowMode, wBHighMode, wBCompOn, wBOrder
+    };
+}
+
 // Lowercase alphanumerics only - case, spaces, punctuation and units are
 // stripped so "High Cut", "high-cut" and "HIGHCUT" all read the same.
 inline juce::String c1Normalise (const juce::String& name)
@@ -204,6 +294,19 @@ inline int c1LongestMatch (int role, const juce::String& normalisedName)
     if (role < 0 || role >= c1NumRoles)
         return 0;
     const char* const* w = Console1Detail::words[role];
+    int best = 0;
+    for (int i = 0; w[i] != nullptr; ++i)
+        if (normalisedName.contains (juce::String (w[i])))
+            best = juce::jmax (best, (int) std::strlen (w[i]));
+    return best;
+}
+
+// The button twin of c1LongestMatch.
+inline int c1LongestButtonMatch (int button, const juce::String& normalisedName)
+{
+    if (button < 0 || button >= c1NumButtons)
+        return 0;
+    const char* const* w = Console1ButtonDetail::words[button];
     int best = 0;
     for (int i = 0; w[i] != nullptr; ++i)
         if (normalisedName.contains (juce::String (w[i])))
@@ -272,6 +375,9 @@ public:
         // Score every (role, parameter) pair before taking the lock.
         std::vector<std::vector<int>> scores ((size_t) c1NumRoles,
                                               std::vector<int> ((size_t) n, 0));
+        // v2.104.0: the button twin, filled in the same pass.
+        std::vector<std::vector<int>> buttonScores ((size_t) c1NumButtons,
+                                                    std::vector<int> ((size_t) n, 0));
         if (n > 0)
         {
             std::vector<juce::String> names ((size_t) n);
@@ -281,6 +387,11 @@ public:
             for (int r = 0; r < c1NumRoles; ++r)
                 for (int i = 0; i < n; ++i)
                     scores[(size_t) r][(size_t) i] = c1LongestMatch (r, names[(size_t) i]);
+
+            for (int b = 0; b < c1NumButtons; ++b)
+                for (int i = 0; i < n; ++i)
+                    buttonScores[(size_t) b][(size_t) i] =
+                        c1LongestButtonMatch (b, names[(size_t) i]);
         }
 
         // Greedy global assignment: the longest pattern wins first, so
@@ -316,6 +427,37 @@ public:
             used[(size_t) bestParam]   = 1;
         }
 
+        // v2.104.0 (the buttons): a second greedy pass over what the
+        // knobs left behind - one parameter, one driver.
+        std::array<int, c1NumButtons> buttonAssigned;
+        buttonAssigned.fill (-1);
+
+        for (;;)
+        {
+            int bestScore = 0, bestButton = -1, bestParam = -1;
+            for (int b = 0; b < c1NumButtons; ++b)
+            {
+                if (buttonAssigned[(size_t) b] >= 0)
+                    continue;
+                for (int i = 0; i < n; ++i)
+                {
+                    if (used[(size_t) i] != 0)
+                        continue;
+                    const int s = buttonScores[(size_t) b][(size_t) i];
+                    if (s > bestScore)
+                    {
+                        bestScore = s;
+                        bestButton = b;
+                        bestParam  = i;
+                    }
+                }
+            }
+            if (bestScore <= 0)
+                break;
+            buttonAssigned[(size_t) bestButton] = bestParam;
+            used[(size_t) bestParam] = 1;
+        }
+
         // Swap the resolved table under the lock. idx >= 0 can only
         // happen when active was non-null, so getUnchecked is in
         // range by construction.
@@ -325,6 +467,12 @@ public:
             const int idx = assigned[(size_t) r];
             targetIndices[(size_t) r] = idx;
             targets[(size_t) r] = (idx >= 0) ? params.getUnchecked (idx) : nullptr;
+        }
+        for (int b = 0; b < c1NumButtons; ++b)
+        {
+            const int idx = buttonAssigned[(size_t) b];
+            buttonTargetIndices[(size_t) b] = idx;
+            buttonTargets[(size_t) b] = (idx >= 0) ? params.getUnchecked (idx) : nullptr;
         }
     }
 
@@ -380,29 +528,96 @@ public:
         return targetIndices[(size_t) role];
     }
 
+    // v2.104.0 (the buttons): the twin introspection.
+    int getMatchedButtonCount() const
+    {
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        int count = 0;
+        for (int b = 0; b < c1NumButtons; ++b)
+            if (buttonTargets[(size_t) b] != nullptr)
+                ++count;
+        return count;
+    }
+
+    // The parameter index this button resolved to on the active
+    // console, or -1 when the console does not expose it.
+    int getButtonTargetIndexForRole (int button) const
+    {
+        if (button < 0 || button >= c1NumButtons)
+            return -1;
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        return buttonTargetIndices[(size_t) button];
+    }
+
+    // v2.104.0 (the buttons): the Track Select presses park here (the
+    // audio thread can never swap consoles). The editor heartbeat,
+    // on the message thread, takes the latest selection: -1 = idle,
+    // 0 = Track 1 (the internal Costes strip), 1..9 = the console
+    // slots 1..9. Consume-and-forget: the exchange reads it once.
+    int consumePendingConsoleSelection()
+    {
+        return pendingConsoleSelection.exchange (-1, std::memory_order_acq_rel);
+    }
+
 private:
     // ---- layer 3: value ---------------------------------------------------
 
     void applyEvent (int cc, int value)
     {
+        // v2.104.0 (the buttons): Track Select first - a CC range, not
+        // a role. A press (7F, or 3F on a middle-state button) parks
+        // the selection; the release (00) parks nothing.
+        const int track = c1TrackIndexForCc (cc);
+        if (track >= 0)
+        {
+            if (value > 0)
+                pendingConsoleSelection.store (track, std::memory_order_release);
+            return;
+        }
+
         const int role = c1RoleForCc (cc);
-        if (role < 0)
-            return; // not one of the 26 captured knobs
+        if (role >= 0)
+        {
+            const juce::SpinLock::ScopedLockType lock (targetLock);
+            auto* param = targets[(size_t) role];
+            if (param == nullptr)
+                return; // the active console does not expose this role
+
+            float v = (float) value / 127.0f;
+
+            // Discrete parameters (2..128 steps) snap to the nearest step,
+            // so a 5-rung attack ladder lands on rungs, not between them.
+            const int steps = param->getNumSteps();
+            if (param->isDiscrete() && steps >= 2 && steps <= 128)
+                v = (float) juce::roundToInt (v * (float) (steps - 1)) / (float) (steps - 1);
+
+            param->setValueNotifyingHost (v);
+            return;
+        }
+
+        // v2.104.0 (the buttons): a momentary press flips the target -
+        // a 2-state switch toggles, a multi-state discrete parameter
+        // cycles one step at a time.
+        const int button = c1ButtonForCc (cc);
+        if (button < 0 || value <= 0)
+            return; // not one of the captured buttons, or the release
 
         const juce::SpinLock::ScopedLockType lock (targetLock);
-        auto* param = targets[(size_t) role];
+        auto* param = buttonTargets[(size_t) button];
         if (param == nullptr)
-            return; // the active console does not expose this role
+            return; // the active console does not expose this button
 
-        float v = (float) value / 127.0f;
-
-        // Discrete parameters (2..128 steps) snap to the nearest step, so
-        // a 5-rung attack ladder lands on rungs, not between them.
         const int steps = param->getNumSteps();
-        if (param->isDiscrete() && steps >= 2 && steps <= 128)
-            v = (float) juce::roundToInt (v * (float) (steps - 1)) / (float) (steps - 1);
-
-        param->setValueNotifyingHost (v);
+        if (param->isDiscrete() && steps > 2 && steps <= 128)
+        {
+            const int current = juce::roundToInt (param->getValue() * (float) (steps - 1));
+            const int next = (current + 1) % steps;
+            param->setValueNotifyingHost ((float) next / (float) (steps - 1));
+        }
+        else
+        {
+            param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
+        }
     }
 
     // ---- the hardware ------------------------------------------------------
@@ -468,6 +683,10 @@ private:
     mutable juce::SpinLock targetLock;
     std::array<juce::AudioProcessorParameter*, c1NumRoles> targets {};
     std::array<int, c1NumRoles> targetIndices {};
+
+    std::array<juce::AudioProcessorParameter*, c1NumButtons> buttonTargets {};
+    std::array<int, c1NumButtons> buttonTargetIndices {};
+    std::atomic<int> pendingConsoleSelection { -1 };
 
     std::unique_ptr<juce::MidiInput> midiInput;
     juce::String deviceName;

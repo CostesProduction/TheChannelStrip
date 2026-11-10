@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.103.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.104.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,24 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.104.0** — *The buttons.*
+  - **The MK2 buttons now drive the console switches.** The capture of
+    2026-11-09 (expert-mode hex, channel 1) is frozen into a button
+    table beside the knob table: momentary presses — 7F on press, 3F on
+    the mid-state of the « CUT BELL SHELF » pair, 00 on release — flip
+    the switch they resolve by name, in a second pass over the
+    parameters the knobs did not claim. On the Costes console: Phase
+    Invert, Hard Gate (the expander fast attack), SHAPE (expander on),
+    EQUALIZER (EQ on), both CUT BELL SHELF buttons (EQ 1/4 mode, bell
+    or shelf) and COMPRESSOR (compressor on). « Filters to compressor »
+    and « Order » stay idle on the Costes console — their generic
+    patterns wait for a third-party console that exposes them. Track
+    Select (CC 21..30) selects the consoles: Track 1 is the internal
+    Costes strip, Tracks 2..10 the nine console slots; the swap is
+    applied on the message thread by the editor heartbeat, because a
+    console swap can never run on the audio thread. The Doctor report
+    and the sidebar now read the buttons too (« roles matched: 26/26 -
+    buttons matched: 7/9 »).
 - **2.103.2** — *The hands, corrected.*
   - **Five knobs came back from the field silent — the frozen CC table
     was wrong for them.** The in-situ pass of 2.103.1 against the

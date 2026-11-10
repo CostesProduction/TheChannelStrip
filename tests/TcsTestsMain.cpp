@@ -11736,6 +11736,164 @@ static void testV21031CostesKnobMapping()
                 "the output section: drive, tilt, balance, trim out");
 }
 
+// ---------------------------------------------------------------------------
+// v2.104.0 (the hands, part 3): the BUTTONS. The MK2's momentary buttons
+// (7F on press, 3F when the button owns a middle state, 00 on release)
+// drive the console switches by name in a second greedy pass over the
+// parameters the knobs did not claim, and the Track Select range (CC
+// 21..30, Track 1..10) parks console selections for the message thread
+// (Track 1 = the Costes strip, Tracks 2..10 = the nine console slots).
+// The capture and the exact Costes targets are frozen here.
+// ---------------------------------------------------------------------------
+static void testV21040Console1Buttons()
+{
+    // the same 56 exact names as testV21031CostesKnobMapping
+    const std::vector<juce::String> costesNames = {
+        "Trim In", "Low Cut", "Low Cut Slope", "Low Cut On", "High Cut",
+        "High Cut Slope", "High Cut On", "EQ On",
+        "EQ 1 Frequency", "EQ 1 Gain", "EQ 1 Mode",
+        "EQ 2 Frequency", "EQ 2 Gain", "EQ 2 Width",
+        "EQ 3 Frequency", "EQ 3 Gain", "EQ 3 Width",
+        "EQ 4 Frequency", "EQ 4 Gain", "EQ 4 Mode",
+        "Expander On", "Expander Threshold", "Expander Range",
+        "Expander Fast Attack", "Expander Release", "Expander Ratio",
+        "Expander Knee", "Expander Mix", "Expander SC HPF",
+        "Expander SC LPF", "Expander Listen",
+        "Compressor On", "Compressor Threshold", "Compressor Ratio",
+        "Compressor Release", "Compressor Fast Attack", "Compressor Gain",
+        "Compressor Mix", "Compressor Link", "Compressor Character",
+        "Compressor SC HPF", "Compressor SC LPF", "Compressor Listen",
+        "Tilt", "Drive", "Phase Invert", "Stereo Balance", "Stereo Width",
+        "Mono Maker", "Trim Out",
+        "Transient Attack", "Transient Sustain", "Punch On",
+        "Transient Gain", "Transient Mix", "Transient Clipper"
+    };
+
+    // ---- the frozen button CC table --------------------------------------
+    beginTest ("v2.104.0: the frozen button CC table");
+
+    expectTrue (c1NumButtons == 9, "nine button roles captured from the hardware");
+
+    bool inRange = true, unique = true, clearOfKnobs = true;
+    for (int b = 0; b < c1NumButtons; ++b)
+    {
+        const int cc = c1CcForButton (b);
+        if (cc < 0 || cc > 127) inRange = false;
+        for (int s = b + 1; s < c1NumButtons; ++s)
+            if (c1CcForButton (s) == cc) unique = false;
+        for (int r = 0; r < c1NumRoles; ++r)
+            if (c1CcForRole (r) == cc) clearOfKnobs = false;
+        if (c1TrackIndexForCc (cc) >= 0) clearOfKnobs = false;
+    }
+    expectTrue (inRange, "every button CC lives in 0..127");
+    expectTrue (unique, "no two buttons share a CC");
+    expectTrue (clearOfKnobs, "no button CC collides with a knob CC or the track range");
+
+    expectTrue (c1CcForButton (int (C1Button::phaseInvert)) == 108
+                    && c1CcForButton (int (C1Button::filtersToComp)) == 61
+                    && c1CcForButton (int (C1Button::hardGate)) == 59
+                    && c1CcForButton (int (C1Button::shapeOn)) == 53,
+                "the capture: phase invert 108, filters-to-comp 61, hard gate 59, shape 53");
+    expectTrue (c1CcForButton (int (C1Button::eqOn)) == 80
+                    && c1CcForButton (int (C1Button::lowMode)) == 93
+                    && c1CcForButton (int (C1Button::highMode)) == 65
+                    && c1CcForButton (int (C1Button::compOn)) == 46
+                    && c1CcForButton (int (C1Button::order)) == 14,
+                "the capture: EQ 80, cut-bell-shelf 93/65, compressor 46, order 14");
+    expectTrue (c1TrackIndexForCc (21) == 0 && c1TrackIndexForCc (30) == 9
+                    && c1TrackIndexForCc (20) == -1 && c1TrackIndexForCc (31) == -1,
+                "Track Select is the CC 21..30 range, Track 1..10 zero-based");
+
+    // ---- button resolution by name on the Costes console -----------------
+    beginTest ("v2.104.0: buttons resolve by name on the Costes console");
+
+    {
+        MockConsole costes (true, 0, costesNames);
+        Console1Bridge bridge;
+        bridge.retargetPlugin (&costes);
+
+        expectTrue (bridge.getMatchedRoleCount() == 26,
+                    "the knobs still claim their 26 - the button pass disturbs nothing");
+        expectTrue (bridge.getMatchedButtonCount() == 7,
+                    "seven of the nine buttons find a Costes parameter");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 45
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 23
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 20,
+                    "phase invert 45, hard gate = expander fast attack 23, shape = expander on 20");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 7
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 10
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 19
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 31,
+                    "EQ on 7, cut-bell-shelf = EQ 1/4 mode 10/19, compressor on 31");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == -1,
+                    "filters-to-comp and order stay idle on the Costes console");
+    }
+
+    // ---- a press flips, a release does nothing ---------------------------
+    beginTest ("v2.104.0: a button press flips the switch, a release does nothing");
+
+    {
+        MockConsole costes (true, 0, costesNames);
+        Console1Bridge bridge;
+        bridge.retargetPlugin (&costes);
+
+        auto* phaseParam = costes.getParameters()[45];
+        const float phaseStart = phaseParam->getValue();
+
+        bridge.postController (108, 0); // the release
+        bridge.drainNow();
+        expectTrue (std::abs (phaseParam->getValue() - phaseStart) < 1.0e-6f,
+                    "a 00 release changes nothing");
+
+        bridge.postController (108, 127); // the press
+        bridge.drainNow();
+        expectTrue (phaseParam->getValue() > 0.99f,
+                    "a 7F press flips the switch on");
+
+        bridge.postController (108, 127);
+        bridge.drainNow();
+        expectTrue (phaseParam->getValue() < 0.01f,
+                    "the next press flips it back off");
+
+        bridge.postController (108, 63); // 3F: the mid-state value is a press too
+        bridge.drainNow();
+        expectTrue (phaseParam->getValue() > 0.99f,
+                    "a 3F mid-state press flips as well");
+
+        auto* shapeParam = costes.getParameters()[20];
+        bridge.postController (53, 127);
+        bridge.drainNow();
+        expectTrue (shapeParam->getValue() > 0.99f,
+                    "the SHAPE button flips the expander on switch");
+    }
+
+    // ---- Track Select parks the selection --------------------------------
+    beginTest ("v2.104.0: Track Select parks a console selection");
+
+    {
+        Console1Bridge bridge;
+        bridge.retargetPlugin (nullptr); // no console: the tracks park anyway
+
+        bridge.postController (21, 127); // Track 1 press
+        bridge.drainNow();
+        expectTrue (bridge.consumePendingConsoleSelection() == 0,
+                    "Track 1 parks the Costes strip");
+        expectTrue (bridge.consumePendingConsoleSelection() == -1,
+                    "the parked selection reads once");
+
+        bridge.postController (30, 127); // Track 10 press
+        bridge.drainNow();
+        expectTrue (bridge.consumePendingConsoleSelection() == 9,
+                    "Track 10 parks console slot 9");
+
+        bridge.postController (25, 0); // a release parks nothing
+        bridge.drainNow();
+        expectTrue (bridge.consumePendingConsoleSelection() == -1,
+                    "a 00 release never parks a selection");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -11837,6 +11995,7 @@ int main (int argc, char* argv[])
     testV2102AutomationBridge();
     testV2103Console1Knobs();
     testV21031CostesKnobMapping();
+    testV21040Console1Buttons();
 
     if (integration)
         testIntegrationRealConsole();

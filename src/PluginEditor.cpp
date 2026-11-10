@@ -2671,6 +2671,11 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     // when something actually changed.
     proc.drainPresetDirtyFlag();
 
+    // v2.104.0 (the buttons): the Track Select presses parked by the
+    // Console 1 bridge are console swaps - they can only be applied
+    // here, on the message thread.
+    proc.consumeConsole1Selection();
+
     if (proc.getCurrentPluginIdent() != lastSyncedPresetIdent
         || proc.getCurrentPresetName() != lastSyncedPresetName
         || proc.isCurrentPresetModified() != lastSyncedPresetModified)

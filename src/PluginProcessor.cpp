@@ -417,7 +417,8 @@ juce::String TheChannelStripAudioProcessor::getSidebarStatusLines() const
     // sidebar as before.
     if (console1 != nullptr && console1->isDeviceOpen())
         lines << juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 C1: "))
-              << console1->getMatchedRoleCount() << "/" << c1NumRoles;
+              << console1->getMatchedRoleCount() << "/" << c1NumRoles
+              << " +" << console1->getMatchedButtonCount() << " btn";
 
     return lines;
 }
@@ -476,7 +477,10 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
                    : juce::String ("-- (no device detected)"))
            << " - roles matched: "
            << (console1 != nullptr ? console1->getMatchedRoleCount() : 0)
-           << "/" << c1NumRoles << "\n";
+           << "/" << c1NumRoles
+           << " - buttons matched: "
+           << (console1 != nullptr ? console1->getMatchedButtonCount() : 0)
+           << "/" << c1NumButtons << "\n";
 
     report << "\n"
            << "hosted console:\n";
@@ -1056,6 +1060,22 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
 
     logHostStatus ("Instantiating '" + slot.desc.name + "'...");
     juce::Thread::launch ([this, desc = slot.desc] () { instantiateHosted (desc, false); });
+}
+
+// v2.104.0 (the buttons): the Track Select presses parked by the Console 1
+// bridge are console swaps, and a swap can never run on the audio thread -
+// the bridge parks them and the editor heartbeat applies the latest one
+// here, on the message thread. Track 1 is the internal Costes strip;
+// Tracks 2..10 are the nine console slots.
+void TheChannelStripAudioProcessor::consumeConsole1Selection()
+{
+    const int track = console1 != nullptr
+                          ? console1->consumePendingConsoleSelection()
+                          : -1;
+    if (track == 0)
+        selectCostesStrip();
+    else if (track >= 1 && track <= numConsoles)
+        selectConsole (track - 1);
 }
 
 void TheChannelStripAudioProcessor::clearHostedPlugin()
