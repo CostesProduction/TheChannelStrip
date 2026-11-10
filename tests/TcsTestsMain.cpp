@@ -400,7 +400,8 @@ class MockConsole : public juce::AudioProcessor
 public:
     explicit MockConsole (bool acceptsMonoLayout, int parameterCount = 0,
                            const std::vector<juce::String>& namedParameters = {},
-                           const juce::String& consoleName = "MockConsole")
+                           const juce::String& consoleName = "MockConsole",
+                           bool realExpanderRatioRange = false)
         : AudioProcessor (BusesProperties()
                             .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
                             .withOutput ("Main", juce::AudioChannelSet::stereo(), true)),
@@ -422,10 +423,22 @@ public:
         if (! namedParameters.empty())
         {
             for (int i = 0; i < (int) namedParameters.size(); ++i)
-                addParameter (new juce::AudioParameterFloat (
-                    juce::ParameterID { "mockNamed" + juce::String (i), 1 },
-                    namedParameters[(size_t) i],
-                    juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+            {
+                // v2.105.1: the hard-gate toggle test needs the one mock
+                // parameter that can span 2..10 - the real expRatio lives
+                // on 1.2..12 (default 2:1). Every other mock knob stays a
+                // plain 0..1 float.
+                if (realExpanderRatioRange && namedParameters[(size_t) i] == "Expander Ratio")
+                    addParameter (new juce::AudioParameterFloat (
+                        juce::ParameterID { "mockNamed" + juce::String (i), 1 },
+                        namedParameters[(size_t) i],
+                        juce::NormalisableRange<float> (1.2f, 12.0f), 2.0f));
+                else
+                    addParameter (new juce::AudioParameterFloat (
+                        juce::ParameterID { "mockNamed" + juce::String (i), 1 },
+                        namedParameters[(size_t) i],
+                        juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f));
+            }
         }
         else
         {
@@ -11728,9 +11741,9 @@ static void testV21031CostesKnobMapping()
 
     expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 21
                     && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 24
-                    && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 51
+                    && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 22
                     && bridge.getTargetIndexForRole (int (C1Role::punch)) == 50,
-                "the shape section: the gate drives the expander pair, punch drives the transient attack");
+                "the shape section: the gate drives the expander pair, sustain the expander range, punch the transient attack");
 
     expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 8
                     && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 9
@@ -11841,9 +11854,9 @@ static void testV21040Console1Buttons()
         expectTrue (bridge.getMatchedButtonCount() == 7,
                     "seven of the nine buttons find a Costes parameter");
         expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 45
-                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 23
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 25
                         && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 20,
-                    "phase invert 45, hard gate = expander fast attack 23, shape = expander on 20");
+                    "phase invert 45, hard gate = expander ratio 25, shape = expander on 20");
         expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 7
                         && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 10
                         && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 19
@@ -11953,9 +11966,9 @@ static void testV21040Console1Buttons()
                     "AMEK 9099: 24 knobs, 9 buttons, input 3, low cut 17, high cut 20");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 72
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 75
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 74
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 71
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "AMEK 9099: gate threshold 72, release 75, sustain 74, punch -1");
+                    "AMEK 9099: gate threshold 72, release 75, sustain 71 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 26
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 27
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 33
@@ -12004,17 +12017,17 @@ static void testV21040Console1Buttons()
         MockConsole console (true, 0, names, "bx_console SSL 4000 E");
         bridge.retargetPlugin (&console);
 
-        expectTrue (bridge.getMatchedRoleCount() == 23
+        expectTrue (bridge.getMatchedRoleCount() == 24
                         && bridge.getMatchedButtonCount() == 8
                         && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
                         && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
                         && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
-                    "SSL 4000 E: 23 knobs, 8 buttons, input 3, low cut 12, high cut 15");
+                    "SSL 4000 E: 24 knobs, 8 buttons, input 3, low cut 12, high cut 15");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 30
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 32
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 29
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "SSL 4000 E: gate threshold 30, release 32, sustain -1, punch -1");
+                    "SSL 4000 E: gate threshold 30, release 32, sustain 29 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 49
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 48
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 47
@@ -12063,17 +12076,17 @@ static void testV21040Console1Buttons()
         MockConsole console (true, 0, names, "bx_console SSL 4000 G");
         bridge.retargetPlugin (&console);
 
-        expectTrue (bridge.getMatchedRoleCount() == 23
+        expectTrue (bridge.getMatchedRoleCount() == 24
                         && bridge.getMatchedButtonCount() == 8
                         && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
                         && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
                         && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
-                    "SSL 4000 G: 23 knobs, 8 buttons, input 3, low cut 12, high cut 15");
+                    "SSL 4000 G: 24 knobs, 8 buttons, input 3, low cut 12, high cut 15");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 30
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 32
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 29
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "SSL 4000 G: gate threshold 30, release 32, sustain -1, punch -1");
+                    "SSL 4000 G: gate threshold 30, release 32, sustain 29 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 51
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 50
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 48
@@ -12131,9 +12144,9 @@ static void testV21040Console1Buttons()
                     "SSL 9000 J: 24 knobs, 8 buttons, input 3, low cut 15, high cut 18");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 31
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 34
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 33
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 30
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "SSL 9000 J: gate threshold 31, release 34, sustain 33, punch -1");
+                    "SSL 9000 J: gate threshold 31, release 34, sustain 30 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 48
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 47
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 45
@@ -12182,17 +12195,17 @@ static void testV21040Console1Buttons()
         MockConsole console (true, 0, names, "bx_console N");
         bridge.retargetPlugin (&console);
 
-        expectTrue (bridge.getMatchedRoleCount() == 23
+        expectTrue (bridge.getMatchedRoleCount() == 24
                         && bridge.getMatchedButtonCount() == 7
                         && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
                         && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
                         && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
-                    "bx_console N: 23 knobs, 7 buttons, input 3, low cut 12, high cut 15");
+                    "bx_console N: 24 knobs, 7 buttons, input 3, low cut 12, high cut 15");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 32
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 36
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 34
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "bx_console N: gate threshold 32, release 36, sustain -1, punch -1");
+                    "bx_console N: gate threshold 32, release 36, sustain 34 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 39
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 41
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 44
@@ -12240,17 +12253,17 @@ static void testV21040Console1Buttons()
         MockConsole console (true, 0, names, "Lindell 80 Channel");
         bridge.retargetPlugin (&console);
 
-        expectTrue (bridge.getMatchedRoleCount() == 19
+        expectTrue (bridge.getMatchedRoleCount() == 20
                         && bridge.getMatchedButtonCount() == 5
                         && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 1
                         && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
                         && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 13,
-                    "Lindell 80: 19 knobs, 5 buttons, input 1, low cut 12, high cut 13");
+                    "Lindell 80: 20 knobs, 5 buttons, input 1, low cut 12, high cut 13");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 28
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 30
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 29
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "Lindell 80: gate threshold 28, release 30, sustain -1, punch -1");
+                    "Lindell 80: gate threshold 28, release 30, sustain 29 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 10
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 11
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == -1
@@ -12301,17 +12314,17 @@ static void testV21040Console1Buttons()
         MockConsole console (true, 0, names, "Lindell 50 Channel");
         bridge.retargetPlugin (&console);
 
-        expectTrue (bridge.getMatchedRoleCount() == 18
+        expectTrue (bridge.getMatchedRoleCount() == 19
                         && bridge.getMatchedButtonCount() == 8
                         && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 0
                         && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 6
                         && bridge.getTargetIndexForRole (int (C1Role::highCut)) == -1,
-                    "Lindell 50: 18 knobs, 8 buttons, input 0, low cut 6, high cut -1");
+                    "Lindell 50: 19 knobs, 8 buttons, input 0, low cut 6, high cut -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 56
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 58
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 57
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "Lindell 50: gate threshold 56, release 58, sustain -1, punch -1");
+                    "Lindell 50: gate threshold 56, release 58, sustain 57 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 18
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 19
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == -1
@@ -12370,9 +12383,9 @@ static void testV21040Console1Buttons()
                     "Focusrite SC: 24 knobs, 6 buttons, input 3, low cut 12, high cut 15");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 37
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 40
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 38
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "Focusrite SC: gate threshold 37, release 40, sustain 39, punch -1");
+                    "Focusrite SC: gate threshold 37, release 40, sustain 38 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 48
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 49
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 54
@@ -12432,9 +12445,9 @@ static void testV21040Console1Buttons()
                     "AMEK 200: 24 knobs, 7 buttons, input 8, low cut 19, high cut 21");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 50
                         && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 57
-                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 54
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 52
                         && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
-                    "AMEK 200: gate threshold 50, release 57, sustain 54, punch -1");
+                    "AMEK 200: gate threshold 50, release 57, sustain 52 (the gate range), punch -1");
         expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 25
                         && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 27
                         && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 30
@@ -12480,6 +12493,55 @@ static void testV21040Console1Buttons()
                         && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 1
                         && bridge.getTargetIndexForRole (int (C1Role::output)) == 2,
                     "the AMEK 200 pins (19, 21) sit past the 3-parameter list, so the greedy claims stand");
+    }
+
+    // ---- v2.105.1: the hard gate snaps the expander ratio -------------
+    beginTest ("v2.105.1: the hard gate snaps the expander ratio between 2:1 and 10:1");
+    {
+        // the compressor ratio takes the knob pass, so the expander
+        // ratio stays free for the hard-gate button - the one parameter
+        // wearing its real range (1.2..12, default 2:1). The mock also
+        // wears a Stereo Balance: build 2 failed because with only two
+        // parameters the greedy pan pattern ("pan" hides inside
+        // "exPANder") stole the expander ratio before the button pass.
+        // The real Costes console never hits this - its balance feeds
+        // the pan knob first - so the mock must be as real.
+        Console1Bridge bridge;
+        MockConsole exp (true, 0, { "Compressor Ratio", "Expander Ratio", "Stereo Balance" },
+                        "MockConsole", true);
+        bridge.retargetPlugin (&exp);
+
+        expectTrue (bridge.getMatchedRoleCount() == 2
+                        && bridge.getMatchedButtonCount() == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == 2
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 1,
+                    "the knobs take the compressor ratio and the balance, the hard gate takes the expander ratio");
+
+        // v2.105.1 build 2: juce marks getValue() PRIVATE on
+        // AudioParameterFloat, so every read goes through the base
+        // AudioProcessorParameter pointer; convertTo0to1 stays public
+        // on the RangedAudioParameter hierarchy.
+        auto* const ratioParam = exp.getParameters()[(size_t) 1];
+        auto* const ratio = dynamic_cast<juce::AudioParameterFloat*> (ratioParam);
+        const float soft = ratio->convertTo0to1 (2.0f);
+        const float hard = ratio->convertTo0to1 (10.0f);
+        expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
+                    "the mock starts at the 2:1 default");
+
+        bridge.postController (59, 127); // the press
+        bridge.drainNow();
+        expectTrue (std::abs (ratioParam->getValue() - hard) < 1.0e-4f,
+                    "a press snaps the expander ratio to 10:1");
+
+        bridge.postController (59, 127);
+        bridge.drainNow();
+        expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
+                    "the next press snaps it back to 2:1");
+
+        bridge.postController (59, 0); // the release
+        bridge.drainNow();
+        expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
+                    "a 00 release changes nothing");
     }
 }
 

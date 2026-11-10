@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.105.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.105.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,26 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.105.1** — *The sustain is a range.*
+  - **The SUSTAIN knob now drives the gate/expander RANGE** - the one
+    depth control all nine hosted consoles and the Costes expander
+    expose, where the gate hold it chased before exists on four at
+    best. On the Costes console the knob moves from the transient
+    sustain to Expander Range. Knob right = a deeper floor, which
+    reads as LESS sustain - the direction stays native so the
+    hardware knob and the plugin GUI always agree. The SSL 4000 E,
+    SSL 4000 G, bx_console N, Lindell 80 and Lindell 50 consoles each
+    gain one knob: 24/26, 24/26, 24/26, 20/26 and 19/26.
+  - **The HARD GATE button on the Costes console now snaps the
+    expander ratio between 2:1 (soft) and 10:1 (hard)** instead of
+    flipping the fast-attack switch - "hard" finally means hard. The
+    expander fast attack returns to GUI and automation; on the
+    third-party consoles the button keeps selecting the gate/expander
+    mode, pinned to the Gate/Exp switch on the AMEK 200 where its own
+    "Expander Ratio" would otherwise steal the button.
+  - **All buttons stay two-state**, as they always were: a press is a
+    press, whatever value the hardware sends, and a release is a
+    release. Nothing needed changing there.
 - **2.105.0** — *The nine consoles.*
   - **The 26 MK2 knobs and the 9 buttons now resolve on all nine hosted
     consoles**, frozen against the doctor reports captured on 2026-11-10:

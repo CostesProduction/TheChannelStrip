@@ -200,7 +200,14 @@ namespace Console1Detail
                                                  "expanderthreshold", "gethreshold", "expthresh", nullptr };
     inline const char* const wGateRelease[]  = { "gaterelease", "shaperelease", "expanderrelease", "gerelease",
                                                  "exprelease", nullptr };
-    inline const char* const wSustain[]      = { "sustain", "gatehold", nullptr };
+    // v2.105.1: the sustain knob drives the gate/expander RANGE - the
+    // one depth control every hosted console exposes. "gatehold" is gone:
+    // only four consoles carry a hold, and the range is the universal
+    // knob. The reading inverts - knob right = a deeper floor = LESS
+    // sustain - kept native so the hardware knob and the plugin GUI
+    // always agree.
+    inline const char* const wSustain[]      = { "sustain", "gaterange", "gerange", "exprange",
+                                                 "expanderrange", nullptr };
     inline const char* const wPunch[]         = { "punch", "transientattack", nullptr };
     inline const char* const wEqLowFreq[]    = { "lowfreq", "lowfrequency", "lffreq", "bassfreq", "lowbandfreq",
                                                  "eq1frequency", nullptr };
@@ -267,7 +274,10 @@ namespace Console1ButtonDetail
     inline const char* const wBPhaseInvert[]   = { "phaseinvert", "polarity", "phase", nullptr };
     inline const char* const wBFiltersToComp[] = { "filtertocompressor", "filtertocomp", "filtertocmp",
                                                   "fltposition", "filterposition", nullptr };
-    inline const char* const wBHardGate[]      = { "expanderfastattack", "hardgate", "gatefastattack",
+    // v2.105.1: on the Costes console the hard-gate button drives the
+    // expander RATIO - a press snaps 2:1 <-> 10:1 (see applyEvent) -
+    // and the fast attack returns to GUI and automation only.
+    inline const char* const wBHardGate[]      = { "expanderratio", "hardgate", "gatefastattack",
                                                   "gemode", "expandermode", "gateexpander", "gatefast",
                                                   nullptr };
     // v2.105.0: no bare "gatein" - it hides inside "Gate Invert(ed)";
@@ -317,6 +327,7 @@ namespace Console1PinDetail
         { "bx_console AMEK 200",     (int) C1Role::lowCut,                  19 },
         { "bx_console AMEK 200",     (int) C1Role::highCut,                 21 },
         { "bx_console AMEK 200",     (int) C1Role::compRelease,             -1 },
+        { "bx_console AMEK 200",     c1NumRoles + (int) C1Button::hardGate, 49 },
         { "Lindell 50 Channel",      (int) C1Role::compDryWet,              -1 },
         { "Lindell 50 Channel",      (int) C1Role::pan,                     -1 },
         { "Lindell 50 Channel",      c1NumRoles + (int) C1Button::hardGate, 60 },
@@ -702,6 +713,24 @@ private:
         }
         else
         {
+            // v2.105.1: on the Costes console the hard-gate button lands
+            // on the expander RATIO, a continuous parameter - so a press
+            // snaps between soft (2:1) and hard (10:1) instead of slamming
+            // the raw 0..1 ends. A continuous target that cannot span the
+            // pair (a plain 0..1 mock) keeps the plain flip below.
+            if (button == (int) C1Button::hardGate)
+            {
+                if (auto* const continuous = dynamic_cast<juce::AudioParameterFloat*> (param))
+                {
+                    const float soft = continuous->convertTo0to1 (2.0f);
+                    const float hard = continuous->convertTo0to1 (10.0f);
+                    if (soft >= 0.0f && hard > soft + 1.0e-4f && hard <= 1.0f)
+                    {
+                        param->setValueNotifyingHost (param->getValue() < hard - 1.0e-4f ? hard : soft);
+                        return;
+                    }
+                }
+            }
             param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
         }
     }
