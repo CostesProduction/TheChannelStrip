@@ -894,10 +894,12 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// MockChoiceConsole: v2.103.0 (the hands) - a console with ONE discrete
-// parameter, a five-rung attack ladder. The Console 1 bridge snaps 7-bit
-// hardware values to the parameter's steps, and this mock is how the
-// offline harness proves the snapping without real hardware.
+// MockChoiceConsole: v2.103.0 (the hands) - a console with discrete
+// parameters: a five-rung attack ladder, and since v2.106.0 a
+// three-state section switch for the multi-state button toggle. The
+// Console 1 bridge snaps 7-bit hardware values to the parameter's
+// steps, and this mock is how the offline harness proves the snapping
+// without real hardware.
 // ---------------------------------------------------------------------------
 class MockChoiceConsole : public juce::AudioProcessor
 {
@@ -911,6 +913,14 @@ public:
             juce::ParameterID { "mockAttack", 1 }, "Attack",
             { "0.1 ms", "0.4 ms", "3 ms", "10 ms", "30 ms" }, 2);
         addParameter (attackChoice);
+
+        // v2.106.0: the three-state section switch the cut-bell-shelf
+        // button drives - the multi-state button targets of the hosted
+        // consoles, frozen in a mock.
+        modeChoice = new juce::AudioParameterChoice (
+            juce::ParameterID { "mockLowMode", 1 }, "Low Mode",
+            { "Off", "Mid", "On" }, 0);
+        addParameter (modeChoice);
     }
 
     const juce::String getName() const override { return "MockChoiceConsole"; }
@@ -947,6 +957,7 @@ public:
     // Raw on purpose: the base class owns the parameter, the tests keep a
     // handle to read the chosen rung after the bridge moves it.
     juce::AudioParameterChoice* attackChoice = nullptr;
+    juce::AudioParameterChoice* modeChoice = nullptr;
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockChoiceConsole)
@@ -11628,15 +11639,18 @@ static void testV2103Console1Knobs()
         expectTrue (proc.getConsole1Bridge().getMatchedRoleCount() == 26,
                     "hosting the console resolves the roles via the swap callback");
 
+        // v2.106.0: the knobs are RELATIVE now - the first CC of a
+        // knob only syncs its LED ring, the value stays wherever the
+        // console left it.
         proc.getConsole1Bridge().postController (103, 64);   // low cut
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (lowCutParam->getValue() - 64.0f / 127.0f) < 1.0e-6f,
-                    "CC 103 at 64 puts the low cut at 64/127");
+        expectTrue (std::abs (lowCutParam->getValue() - 0.1f) < 1.0e-6f,
+                    "the first touch of a knob moves nothing - it only syncs its ring");
 
         proc.getConsole1Bridge().postController (47, 127);   // comp threshold
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (thresholdParam->getValue() - 1.0f) < 1.0e-6f,
-                    "CC 47 at 127 puts the threshold at full");
+        expectTrue (std::abs (thresholdParam->getValue() - 0.1f) < 1.0e-6f,
+                    "the threshold keeps the console value until its knob turns");
 
         const float before = lowCutParam->getValue();
         proc.getConsole1Bridge().postController (64, 100);   // not one of the 26
@@ -11644,20 +11658,26 @@ static void testV2103Console1Knobs()
         expectTrue (std::abs (lowCutParam->getValue() - before) < 1.0e-6f,
                     "an unmapped CC changes nothing");
 
+        proc.getConsole1Bridge().postController (103, 68);   // four CC steps up
+        proc.getConsole1Bridge().drainNow();
+        const float moved = 0.1f + 4.0f / 254.0f;
+        expectTrue (std::abs (lowCutParam->getValue() - moved) < 1.0e-6f,
+                    "a 4-step turn moves the low cut by the relative gain, half the v2.105 leap");
+
         // end-to-end with v2.102: the proxy slot wears the hardware move,
         // so the DAW automation lane reads it too.
         expectTrue (std::abs (proc.getAutomationBank().getProxy (1)->getValue()
-                                 - 64.0f / 127.0f) < 1.0e-6f,
+                                 - moved) < 1.0e-6f,
                     "the automation proxy slot carries the hardware move");
 
         proc.getConsole1Bridge().postController (103, 32);
         proc.getConsole1Bridge().postController (103, 96);
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (lowCutParam->getValue() - 96.0f / 127.0f) < 1.0e-6f,
-                    "the FIFO keeps its order: the last value wins");
+        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 254.0f)) < 1.0e-6f,
+                    "the FIFO keeps its order: the deltas land one after the other, the floor clamps");
 
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (lowCutParam->getValue() - 96.0f / 127.0f) < 1.0e-6f,
+        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 254.0f)) < 1.0e-6f,
                     "draining an empty FIFO changes nothing");
     }
 
@@ -11672,20 +11692,27 @@ static void testV2103Console1Knobs()
         expectTrue (proc.getConsole1Bridge().getMatchedRoleCount() == 1,
                     "the attack ladder resolves exactly one role (compAttack)");
 
+        // v2.106.0: the ladder turns relatively now, from the rung the
+        // console left it on (2 = 0.5 here).
         proc.getConsole1Bridge().postController (51, 0);
         proc.getConsole1Bridge().drainNow();
-        expectTrue (attackParam->getIndex() == 0,
-                    "CC 51 at 0 lands on the first rung");
+        expectTrue (attackParam->getIndex() == 2,
+                    "the first CC of the ladder knob moves nothing - it only syncs its ring");
+
+        proc.getConsole1Bridge().postController (51, 64);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (attackParam->getIndex() == 3,
+                    "a 64-step climb lands a half-sweep higher, snapped to the rung");
 
         proc.getConsole1Bridge().postController (51, 127);
         proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 4,
-                    "CC 51 at 127 lands on the last rung");
+                    "the climb continues to the last rung");
 
         proc.getConsole1Bridge().postController (51, 63);
         proc.getConsole1Bridge().drainNow();
-        expectTrue (attackParam->getIndex() == 2,
-                    "CC 51 at 63 snaps to the middle rung");
+        expectTrue (attackParam->getIndex() == 3,
+                    "a 64-step fall snaps one rung back down");
     }
 }
 
@@ -11928,6 +11955,131 @@ static void testV21040Console1Buttons()
         bridge.drainNow();
         expectTrue (bridge.consumePendingConsoleSelection() == -1,
                     "a 00 release never parks a selection");
+    }
+
+    // ---- v2.106.0 (the lights): LED sync, relative knobs, 2-state buttons
+
+    beginTest ("v2.106.0: a retarget parks a full LED sync and the knobs move relatively");
+    {
+        Console1Bridge bridge;
+        MockConsole sparse (true, 0, { "Low Cut", "Threshold" });
+        bridge.retargetPlugin (&sparse);
+
+        expectTrue (bridge.isLedSyncPending(),
+                    "a retarget parks a full LED sync");
+        juce::MidiBuffer sync;
+        bridge.buildLedSync (sync);
+        int cc103 = -1, cc47 = -1;
+        for (const auto metadata : sync)
+        {
+            const auto m = metadata.getMessage();
+            if (m.getControllerNumber() == 103) cc103 = m.getControllerValue();
+            if (m.getControllerNumber() == 47)  cc47  = m.getControllerValue();
+        }
+        expectTrue (sync.getNumEvents() == 2 && cc103 == 13 && cc47 == 13,
+                    "the sync carries both resolved knobs at their current value, 7-bit");
+
+        auto* lowCut = sparse.getParameters()[(size_t) 0];
+        bridge.postController (103, 90);
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - 0.1f) < 1.0e-6f,
+                    "the first touch moves nothing - it only syncs the ring");
+        int cc = 0, value = 0;
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 13,
+                    "the first touch echoes the parameter's current value to the ring");
+
+        bridge.postController (103, 95);
+        bridge.drainNow();
+        const float moved = 0.1f + 5.0f / 254.0f;
+        expectTrue (std::abs (lowCut->getValue() - moved) < 1.0e-6f,
+                    "a 5-step turn moves the value by the relative gain");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103
+                        && value == juce::roundToInt (moved * 127.0f),
+                    "each move echoes the new 7-bit value to the ring");
+
+        bridge.postController (103, 40); // a 55-step fall overshoots the floor
+        bridge.drainNow();
+        expectTrue (lowCut->getValue() < 1.0e-6f,
+                    "a fall past the floor clamps at zero");
+
+        bridge.postController (103, 100); // climb on from the floor
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - (60.0f / 254.0f)) < 1.0e-6f,
+                    "the climb continues from the floor");
+
+        bridge.postController (103, 4); // a 96-step hop is a WRAP, not a turn
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - (92.0f / 254.0f)) < 1.0e-6f,
+                    "a hop past the end wraps: the endless encoder keeps climbing");
+
+        // a full climb to the ceiling, wrap hops and all, clamps at one
+        bridge.postController (103, 68);
+        bridge.postController (103, 0);
+        bridge.postController (103, 64);
+        bridge.drainNow();
+        expectTrue (lowCut->getValue() > 0.9999f,
+                    "the ceiling clamps at one");
+    }
+
+    beginTest ("v2.106.0: a multi-state button target toggles between its ends");
+    {
+        MockChoiceConsole choice;
+        Console1Bridge bridge;
+        bridge.retargetPlugin (&choice);
+
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 1,
+                    "the three-state section switch resolves to the cut-bell-shelf low button");
+
+        auto* mode = choice.modeChoice;
+        expectTrue (mode->getIndex() == 0,
+                    "the switch starts on the first state");
+
+        bridge.postController (93, 127); // the press
+        bridge.drainNow();
+        expectTrue (mode->getIndex() == 2,
+                    "one press lands DIRECTLY on the last state - no step-by-step cycle");
+
+        int cc = 0, value = 0;
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 93 && value == 127,
+                    "the press echoes the button LED lit");
+
+        bridge.postController (93, 127);
+        bridge.drainNow();
+        expectTrue (mode->getIndex() == 0,
+                    "the next press lands DIRECTLY back on the first state");
+
+        mode->setValueNotifyingHost (0.5f); // parked on the middle state
+        expectTrue (mode->getIndex() == 1,
+                    "the switch parks on the middle state");
+
+        bridge.postController (93, 63); // a 3F mid-state press is a press too
+        bridge.drainNow();
+        expectTrue (mode->getIndex() == 2,
+                    "a press from the middle state still lands on ON - the module answers first press");
+    }
+
+    beginTest ("v2.106.0: the full LED sync covers every knob and every button");
+    {
+        MockConsole costes (true, 0, costesNames);
+        Console1Bridge bridge;
+        bridge.retargetPlugin (&costes);
+
+        expectTrue (bridge.isLedSyncPending(),
+                    "the Costes retarget parks its own sync");
+        juce::MidiBuffer sync;
+        bridge.buildLedSync (sync);
+        expectTrue (sync.getNumEvents() == 33,
+                    "26 knobs + 7 buttons resolve on the Costes console: 33 CC events");
+
+        bool sawRatio = false;
+        for (const auto metadata : sync)
+        {
+            const auto m = metadata.getMessage();
+            if (m.getControllerNumber() == 49) // the ratio knob
+                sawRatio = (m.getControllerValue() == juce::roundToInt (0.1f * 127.0f));
+        }
+        expectTrue (sawRatio,
+                    "the ratio knob CC 49 carries the console's current value");
     }
 
     // ---- v2.105.0 (the nine consoles) --------------------------------------

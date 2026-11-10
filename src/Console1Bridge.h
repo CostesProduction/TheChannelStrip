@@ -32,6 +32,21 @@
 // heartbeat applies on the message thread, because a console swap can
 // never run on the audio thread.
 //
+// v2.106.0 (the lights): the bridge now also TALKS to the hardware.
+// The MK2's LED rings follow the physical knobs, not the console's
+// parameters - on load and on every console switch they showed stale
+// positions until each knob moved. A MIDI OUTPUT port is opened next
+// to the input, and (1) every retarget parks a full LED sync, (2)
+// every knob move and button press queues an incremental echo; the
+// editor heartbeat is the only sender (message thread), so the audio
+// thread never touches the output. Two field requests ride along:
+// the knobs turn the parameters RELATIVELY now (half the v2.105 leap
+// per CC step, the MK2's FINE ADJUST stacks its own halving for 4x,
+// and the first touch of a knob only syncs its ring - the value
+// never jumps to the physical position), and a multi-state button
+// target toggles between its first and last state (off <-> on)
+// instead of cycling a step at a time.
+//
 // Everything is applied through setValueNotifyingHost, so the whole
 // v2.102 path follows for free: the editor knob, the EQ-Verite flush,
 // the GR forwarder, the DAW automation lane and the preset star.
@@ -170,6 +185,30 @@ inline int c1ButtonForCc (int cc)
 inline int c1TrackIndexForCc (int cc)
 {
     return (cc >= 21 && cc <= 30) ? cc - 21 : -1;
+}
+
+// v2.106.0: the knobs move the parameters RELATIVELY - the hardware
+// streams absolute 0..127, but the old absolute mapping leapt the
+// parameter to the knob's physical position (one detent = a fat jump,
+// hard to aim). The bridge now reads the CC stream as increments:
+// every step of CC moves the value by this gain, half the v2.105
+// leap, and the MK2's FINE ADJUST button (which halves the CC step
+// the encoder emits) stacks on top for 4x. The endless encoder wraps
+// past 127 back to 0, so a delta beyond +-64 is a wrap, not a turn.
+constexpr float c1KnobGain = 1.0f / 254.0f;
+
+// v2.106.0: the LED value a button target reports to the hardware -
+// the last step of a discrete target reads as ON, a continuous one
+// is on past half (the Costes expander ratio snaps to 10:1 = 0.81,
+// so the hard gate lights up in hard mode).
+inline int c1ButtonLedValue (juce::AudioProcessorParameter* param)
+{
+    if (param == nullptr)
+        return 0;
+    const int steps = param->getNumSteps();
+    if (param->isDiscrete() && steps >= 2 && steps <= 128)
+        return (juce::roundToInt (param->getValue() * (float) (steps - 1)) == steps - 1) ? 127 : 0;
+    return (param->getValue() > 0.5f) ? 127 : 0;
 }
 
 // ---- layer 2: name synonyms -----------------------------------------------
@@ -394,7 +433,12 @@ inline int c1LongestButtonMatch (int button, const juce::String& normalisedName)
 class Console1Bridge : private juce::MidiInputCallback
 {
 public:
-    Console1Bridge() = default;
+    Console1Bridge()
+    {
+        // v2.106.0: every knob starts un-touched, so its first CC only
+        // syncs the LED ring instead of jumping the value.
+        lastKnobCc.fill (-1);
+    }
 
     // The processor calls this once from its constructor: looks the
     // device up right away and starts the 2 s detection thread. The
@@ -559,6 +603,10 @@ public:
         // happen when active was non-null, so getUnchecked is in
         // range by construction.
         const juce::SpinLock::ScopedLockType lock (targetLock);
+        // v2.106.0: the knobs start un-touched on the new console -
+        // the first CC of every knob only syncs its ring.
+        for (int r = 0; r < c1NumRoles; ++r)
+            lastKnobCc[(size_t) r] = -1;
         for (int r = 0; r < c1NumRoles; ++r)
         {
             const int idx = assigned[(size_t) r];
@@ -571,6 +619,10 @@ public:
             buttonTargetIndices[(size_t) b] = idx;
             buttonTargets[(size_t) b] = (idx >= 0) ? params.getUnchecked (idx) : nullptr;
         }
+
+        // v2.106.0 (the lights): park the full sync - the heartbeat
+        // sends it to the rings on the message thread.
+        ledSyncPending.store (true, std::memory_order_release);
     }
 
     // Thread-safe: the MIDI callback (or a test) pushes bytes here.
@@ -656,6 +708,68 @@ public:
         return pendingConsoleSelection.exchange (-1, std::memory_order_acq_rel);
     }
 
+    // ---- v2.106.0 (the lights): the LED feedback --------------------------
+
+    // True when a retarget (or the output opening) parked a full sync
+    // that the editor heartbeat has not sent yet.
+    bool isLedSyncPending() const
+    {
+        return ledSyncPending.load (std::memory_order_acquire);
+    }
+
+    // The full sync, built without sending: every resolved knob CC
+    // with its current value, every resolved button CC lit or dark.
+    // The pump sends it; the offline tests read it here.
+    void buildLedSync (juce::MidiBuffer& out)
+    {
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        out.clear();
+        for (int r = 0; r < c1NumRoles; ++r)
+            if (targets[(size_t) r] != nullptr)
+                out.addEvent (juce::MidiMessage::controllerEvent (
+                    0, c1CcForRole (r),
+                    juce::roundToInt (targets[(size_t) r]->getValue() * 127.0f)), 0);
+        for (int b = 0; b < c1NumButtons; ++b)
+            if (buttonTargets[(size_t) b] != nullptr)
+                out.addEvent (juce::MidiMessage::controllerEvent (
+                    0, c1CcForButton (b),
+                    c1ButtonLedValue (buttonTargets[(size_t) b])), 0);
+    }
+
+    // Pops one queued incremental echo; false when the queue is
+    // empty. The pump drains it on the message thread, the offline
+    // tests inspect it here.
+    bool popLedEcho (int& cc, int& value)
+    {
+        const int t = echoTail.load (std::memory_order_relaxed);
+        if (t == echoHead.load (std::memory_order_acquire))
+            return false;
+        const Event& ev = echoFifo[(size_t) (t & (echoCapacity - 1))];
+        cc = (int) ev.cc;
+        value = (int) ev.value;
+        echoTail.store (t + 1, std::memory_order_release);
+        return true;
+    }
+
+    // The message-thread pump: the pending full sync first, then
+    // every queued echo. Without an open output both drain to
+    // nothing - the rings then follow the hands, as they always did.
+    void pumpLedEcho()
+    {
+        if (ledSyncPending.exchange (false, std::memory_order_acq_rel))
+        {
+            juce::MidiBuffer full;
+            buildLedSync (full);
+            sendNow (full);
+        }
+        juce::MidiBuffer echoes;
+        int cc = 0, value = 0;
+        while (popLedEcho (cc, value))
+            echoes.addEvent (juce::MidiMessage::controllerEvent (0, cc, value), 0);
+        if (echoes.getNumEvents() > 0)
+            sendNow (echoes);
+    }
+
 private:
     // ---- layer 3: value ---------------------------------------------------
 
@@ -680,7 +794,29 @@ private:
             if (param == nullptr)
                 return; // the active console does not expose this role
 
-            float v = (float) value / 127.0f;
+            // v2.106.0: RELATIVE. The first CC of a knob only syncs its
+            // LED ring - the value never jumps to the physical position
+            // it found. Every later CC moves the value by the CC step
+            // (wrap-corrected past +-64, the endless encoder) times the
+            // relative gain, half the v2.105 leap.
+            int& last = lastKnobCc[(size_t) role];
+            if (last < 0)
+            {
+                last = value;
+                postLedEcho (cc, juce::roundToInt (param->getValue() * 127.0f));
+                return;
+            }
+            int delta = value - last;
+            last = value;
+            if (delta > 64)
+                delta -= 128;
+            else if (delta < -64)
+                delta += 128;
+            if (delta == 0)
+                return;
+
+            float v = juce::jlimit (0.0f, 1.0f,
+                                    param->getValue() + (float) delta * c1KnobGain);
 
             // Discrete parameters (2..128 steps) snap to the nearest step,
             // so a 5-rung attack ladder lands on rungs, not between them.
@@ -689,6 +825,7 @@ private:
                 v = (float) juce::roundToInt (v * (float) (steps - 1)) / (float) (steps - 1);
 
             param->setValueNotifyingHost (v);
+            postLedEcho (cc, juce::roundToInt (v * 127.0f));
             return;
         }
 
@@ -707,8 +844,13 @@ private:
         const int steps = param->getNumSteps();
         if (param->isDiscrete() && steps > 2 && steps <= 128)
         {
+            // v2.106.0: a multi-state target is a SWITCH, not a ladder -
+            // one press toggles between the first and the last state,
+            // never a single-step crawl through the middle. The module
+            // answers on the FIRST press, the way every 2-state button
+            // always did.
             const int current = juce::roundToInt (param->getValue() * (float) (steps - 1));
-            const int next = (current + 1) % steps;
+            const int next = (current >= steps - 1) ? 0 : (steps - 1);
             param->setValueNotifyingHost ((float) next / (float) (steps - 1));
         }
         else
@@ -727,12 +869,40 @@ private:
                     if (soft >= 0.0f && hard > soft + 1.0e-4f && hard <= 1.0f)
                     {
                         param->setValueNotifyingHost (param->getValue() < hard - 1.0e-4f ? hard : soft);
+                        postLedEcho (c1CcForButton (button), c1ButtonLedValue (param));
                         return;
                     }
                 }
             }
             param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
         }
+
+        // v2.106.0 (the lights): the button LED follows the new state.
+        postLedEcho (c1CcForButton (button), c1ButtonLedValue (param));
+    }
+
+    // ---- v2.106.0: the LED echo queue -------------------------------------
+    // The audio thread pushes, the message thread pops. Overflow drops
+    // silently: the rings are cosmetic, the next move re-syncs them.
+
+    static constexpr int echoCapacity = 64; // power of two
+
+    void postLedEcho (int cc, int value)
+    {
+        const int h = echoHead.load (std::memory_order_relaxed);
+        if (h - echoTail.load (std::memory_order_acquire) >= echoCapacity)
+            return; // full: drop, the next move re-syncs the ring
+        echoFifo[(size_t) (h & (echoCapacity - 1))] =
+            { (juce::uint8) juce::jlimit (0, 127, cc),
+              (juce::uint8) juce::jlimit (0, 127, value) };
+        echoHead.store (h + 1, std::memory_order_release);
+    }
+
+    void sendNow (const juce::MidiBuffer& buffer)
+    {
+        const juce::SpinLock::ScopedLockType lock (outputLock);
+        if (midiOutput != nullptr)
+            midiOutput->sendBlockOfMessagesNow (buffer);
     }
 
     // ---- the hardware ------------------------------------------------------
@@ -748,23 +918,58 @@ private:
         if (! hardwareEnabled.load (std::memory_order_relaxed))
             return false;
 
-        for (const auto& d : juce::MidiInput::getAvailableDevices())
+        bool opened = false;
+
+        if (midiInput == nullptr)
         {
-            const juce::String low = d.name.toLowerCase();
-            if (low.contains ("console 1") || low.contains ("console1"))
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
             {
-                auto input = std::unique_ptr<juce::MidiInput> (
-                    juce::MidiInput::openDevice (d.identifier, this));
-                if (input != nullptr)
+                const juce::String low = d.name.toLowerCase();
+                if (low.contains ("console 1") || low.contains ("console1"))
                 {
-                    midiInput  = std::move (input);
-                    deviceName = d.name;
-                    midiInput->start();
-                    return true;
+                    auto input = std::unique_ptr<juce::MidiInput> (
+                        juce::MidiInput::openDevice (d.identifier, this));
+                    if (input != nullptr)
+                    {
+                        midiInput  = std::move (input);
+                        deviceName = d.name;
+                        midiInput->start();
+                        opened = true;
+                        break;
+                    }
                 }
             }
         }
-        return false;
+
+        // v2.106.0 (the lights): the same name match on the OUTPUT
+        // side - the port that feeds the LED rings. Some drivers only
+        // expose it later, so the 2 s loop keeps trying; when it
+        // finally opens, a full sync parks right away, so a unit
+        // plugged in after launch still lights up correctly.
+        if (midiOutput == nullptr)
+        {
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+            {
+                const juce::String low = d.name.toLowerCase();
+                if (low.contains ("console 1") || low.contains ("console1"))
+                {
+                    auto output = std::unique_ptr<juce::MidiOutput> (
+                        juce::MidiOutput::openDevice (d.identifier));
+                    if (output != nullptr)
+                    {
+                        {
+                            const juce::SpinLock::ScopedLockType lock (outputLock);
+                            midiOutput = std::move (output);
+                        }
+                        ledSyncPending.store (true, std::memory_order_release);
+                        opened = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return opened;
     }
 
     void detectionLoop()
@@ -781,7 +986,7 @@ private:
             if (detectorStop.load (std::memory_order_relaxed))
                 return;
 
-            if (midiInput == nullptr)
+            if (midiInput == nullptr || midiOutput == nullptr)
                 autoDetectAndOpen();
         }
     }
@@ -804,6 +1009,18 @@ private:
     std::atomic<int> pendingConsoleSelection { -1 };
 
     std::unique_ptr<juce::MidiInput> midiInput;
+
+    // v2.106.0 (the lights): the feedback channel, guarded by its own
+    // lock (the detection thread opens it, the message thread sends),
+    // its echo queue, and the last CC each knob streamed.
+    std::unique_ptr<juce::MidiOutput> midiOutput;
+    juce::SpinLock outputLock;
+    std::atomic<bool> ledSyncPending { false };
+    std::array<Event, echoCapacity> echoFifo {};
+    std::atomic<int> echoHead { 0 };
+    std::atomic<int> echoTail { 0 };
+    std::array<int, c1NumRoles> lastKnobCc {};
+
     juce::String deviceName;
 
     std::thread detector;

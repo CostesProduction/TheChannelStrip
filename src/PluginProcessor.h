@@ -163,6 +163,12 @@ public:
     // a console swap must never run on the audio thread. Track 1 is
     // the internal Costes strip, Tracks 2..10 the nine console slots.
     void consumeConsole1Selection();
+
+    // v2.106.0 (the lights): flushes the Console 1 bridge's LED
+    // feedback to the hardware - the full sync parked by the last
+    // retarget, then every queued echo. Message thread only (the
+    // editor heartbeat); without a device it is a no-op.
+    void pumpConsole1LedSync();
     void clearHostedPlugin();
 
     // ---- v2.55.0 (roadmap C1): the internal Costes channel strip ----

@@ -310,6 +310,26 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.106.0** — *The lights never lie.*
+  - **THE LED RINGS NOW FOLLOW THE CONSOLE** - the bridge opens the
+    Console 1 MIDI OUTPUT port and feeds the true parameter values
+    back to the hardware: a full sync on every console switch (and on
+    plugin load / device plug-in), then an incremental echo on every
+    knob move and button press. The rings light up where the console
+    actually is, not where the knobs were last left.
+  - **THE KNOBS TURN RELATIVELY** - the hardware streams absolute
+    0..127, and the old absolute mapping leapt the parameter to the
+    knob's physical position in one fat detent jump, hard to aim.
+    Every CC step now moves the value by half the v2.105 leap (the
+    MK2's FINE ADJUST button stacks its own halving for 4x), and
+    touching a knob for the first time only syncs its ring - the
+    value never jumps to where the knob happens to sit.
+  - **MULTI-STATE BUTTONS TOGGLE, NOT CYCLE** - a button target with
+    more than two states (an EQ mode with three positions, a
+    gate/expander mode switch) now answers on the FIRST press: one
+    press lands on the last state (on), the next lands back on the
+    first (off). No more stepping through the middle.
+
 - **2.105.1** — *The sustain is a range.*
   - **The SUSTAIN knob now drives the gate/expander RANGE** - the one
     depth control all nine hosted consoles and the Costes expander

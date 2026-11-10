@@ -2676,6 +2676,11 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     // here, on the message thread.
     proc.consumeConsole1Selection();
 
+    // v2.106.0 (the lights): the LED feedback to the Console 1
+    // hardware - the full sync parked by the last retarget, then the
+    // queued echoes - is flushed here, on the message thread.
+    proc.pumpConsole1LedSync();
+
     if (proc.getCurrentPluginIdent() != lastSyncedPresetIdent
         || proc.getCurrentPresetName() != lastSyncedPresetName
         || proc.isCurrentPresetModified() != lastSyncedPresetModified)

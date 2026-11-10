@@ -1089,6 +1089,17 @@ void TheChannelStripAudioProcessor::consumeConsole1Selection()
         selectConsole (track - 1);
 }
 
+// v2.106.0 (the lights): the LED feedback to the Console 1 hardware.
+// The bridge parks a full sync on every retarget and echoes each knob
+// move and button press; this call - the editor heartbeat, the only
+// sender - flushes both to the MIDI output port. Without a device
+// (and in the offline harness) everything drains to nothing.
+void TheChannelStripAudioProcessor::pumpConsole1LedSync()
+{
+    if (console1 != nullptr)
+        console1->pumpLedEcho();
+}
+
 void TheChannelStripAudioProcessor::clearHostedPlugin()
 {
     // v2.15.5: stop forwarding gain reduction BEFORE the console goes
