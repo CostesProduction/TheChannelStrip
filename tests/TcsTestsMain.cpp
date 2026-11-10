@@ -11660,9 +11660,9 @@ static void testV2103Console1Knobs()
 
         proc.getConsole1Bridge().postController (103, 68);   // four CC steps up
         proc.getConsole1Bridge().drainNow();
-        const float moved = 0.1f + 4.0f / 254.0f;
+        const float moved = 0.1f + 4.0f / 508.0f;
         expectTrue (std::abs (lowCutParam->getValue() - moved) < 1.0e-6f,
-                    "a 4-step turn moves the low cut by the relative gain, half the v2.105 leap");
+                    "a 4-step turn moves the low cut by the relative gain, a quarter of the v2.105 leap");
 
         // end-to-end with v2.102: the proxy slot wears the hardware move,
         // so the DAW automation lane reads it too.
@@ -11670,14 +11670,14 @@ static void testV2103Console1Knobs()
                                  - moved) < 1.0e-6f,
                     "the automation proxy slot carries the hardware move");
 
-        proc.getConsole1Bridge().postController (103, 32);
-        proc.getConsole1Bridge().postController (103, 96);
+        proc.getConsole1Bridge().postController (103, 4);
+        proc.getConsole1Bridge().postController (103, 68);
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 508.0f)) < 1.0e-6f,
                     "the FIFO keeps its order: the deltas land one after the other, the floor clamps");
 
         proc.getConsole1Bridge().drainNow();
-        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCutParam->getValue() - (64.0f / 508.0f)) < 1.0e-6f,
                     "draining an empty FIFO changes nothing");
     }
 
@@ -11702,17 +11702,17 @@ static void testV2103Console1Knobs()
         proc.getConsole1Bridge().postController (51, 64);
         proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 3,
-                    "a 64-step climb lands a half-sweep higher, snapped to the rung");
+                    "a 64-detent climb crosses a rung boundary, snapped to rung 3");
 
         proc.getConsole1Bridge().postController (51, 127);
         proc.getConsole1Bridge().drainNow();
-        expectTrue (attackParam->getIndex() == 4,
-                    "the climb continues to the last rung");
-
-        proc.getConsole1Bridge().postController (51, 63);
-        proc.getConsole1Bridge().drainNow();
         expectTrue (attackParam->getIndex() == 3,
-                    "a 64-step fall snaps one rung back down");
+                    "the +63 sub-rung intent banks below the boundary, rung 3 stays");
+
+        proc.getConsole1Bridge().postController (51, 0);
+        proc.getConsole1Bridge().drainNow();
+        expectTrue (attackParam->getIndex() == 4,
+                    "the banked intent plus one wrap-detent crosses to the last rung");
     }
 }
 
@@ -11895,7 +11895,7 @@ static void testV21040Console1Buttons()
     }
 
     // ---- a press flips, a release does nothing ---------------------------
-    beginTest ("v2.104.0: a button press flips the switch, a release does nothing");
+    beginTest ("v2.104.0: a button message sets the switch, the value is the intent");
 
     {
         MockConsole costes (true, 0, costesNames);
@@ -11903,33 +11903,35 @@ static void testV21040Console1Buttons()
         bridge.retargetPlugin (&costes);
 
         auto* phaseParam = costes.getParameters()[45];
-        const float phaseStart = phaseParam->getValue();
 
-        bridge.postController (108, 0); // the release
-        bridge.drainNow();
-        expectTrue (std::abs (phaseParam->getValue() - phaseStart) < 1.0e-6f,
-                    "a 00 release changes nothing");
-
-        bridge.postController (108, 127); // the press
-        bridge.drainNow();
-        expectTrue (phaseParam->getValue() > 0.99f,
-                    "a 7F press flips the switch on");
-
-        bridge.postController (108, 127);
+        // v2.106.2: the capture of 2026-11-10 shows one message per
+        // press and the value IS the intent - 7F means on, 00 means
+        // off, 3F means on for a 2-state target.
+        bridge.postController (108, 0); // the press says 00
         bridge.drainNow();
         expectTrue (phaseParam->getValue() < 0.01f,
-                    "the next press flips it back off");
+                    "a 00 message sets the switch off - the value is the intent");
 
-        bridge.postController (108, 63); // 3F: the mid-state value is a press too
+        bridge.postController (108, 127); // the press says 7F
         bridge.drainNow();
         expectTrue (phaseParam->getValue() > 0.99f,
-                    "a 3F mid-state press flips as well");
+                    "a 7F message sets the switch on");
+
+        bridge.postController (108, 0);
+        bridge.drainNow();
+        expectTrue (phaseParam->getValue() < 0.01f,
+                    "the next 00 message sets it off again");
+
+        bridge.postController (108, 63); // 3F: a nonzero value means on too
+        bridge.drainNow();
+        expectTrue (phaseParam->getValue() > 0.99f,
+                    "a 3F message sets it on - any nonzero value means on");
 
         auto* shapeParam = costes.getParameters()[20];
         bridge.postController (53, 127);
         bridge.drainNow();
         expectTrue (shapeParam->getValue() > 0.99f,
-                    "the SHAPE button flips the expander on switch");
+                    "the SHAPE button sets the expander on switch");
     }
 
     // ---- Track Select parks the selection --------------------------------
@@ -11951,10 +11953,10 @@ static void testV21040Console1Buttons()
         expectTrue (bridge.consumePendingConsoleSelection() == 9,
                     "Track 10 parks console slot 9");
 
-        bridge.postController (25, 0); // a release parks nothing
+        bridge.postController (25, 0); // a 00 message parks its track too
         bridge.drainNow();
-        expectTrue (bridge.consumePendingConsoleSelection() == -1,
-                    "a 00 release never parks a selection");
+        expectTrue (bridge.consumePendingConsoleSelection() == 4,
+                    "a 00 message parks the same track - the doubled park is harmless");
     }
 
     // ---- v2.106.0 (the lights): LED sync, relative knobs, 2-state buttons
@@ -11990,35 +11992,34 @@ static void testV21040Console1Buttons()
 
         bridge.postController (103, 95);
         bridge.drainNow();
-        const float moved = 0.1f + 5.0f / 254.0f;
+        const float moved = 0.1f + 5.0f / 508.0f;
         expectTrue (std::abs (lowCut->getValue() - moved) < 1.0e-6f,
                     "a 5-step turn moves the value by the relative gain");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 103
                         && value == juce::roundToInt (moved * 127.0f),
                     "each move echoes the new 7-bit value to the ring");
 
-        bridge.postController (103, 40); // a 55-step fall overshoots the floor
+        bridge.postController (103, 31); // a 64-step fall overshoots the floor
         bridge.drainNow();
         expectTrue (lowCut->getValue() < 1.0e-6f,
                     "a fall past the floor clamps at zero");
 
-        bridge.postController (103, 100); // climb on from the floor
+        bridge.postController (103, 91); // climb on from the floor
         bridge.drainNow();
-        expectTrue (std::abs (lowCut->getValue() - (60.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCut->getValue() - (60.0f / 508.0f)) < 1.0e-6f,
                     "the climb continues from the floor");
 
-        bridge.postController (103, 4); // a 96-step hop is a WRAP, not a turn
+        bridge.postController (103, 4); // an 87-step hop is a WRAP, not a turn
         bridge.drainNow();
-        expectTrue (std::abs (lowCut->getValue() - (92.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCut->getValue() - (101.0f / 508.0f)) < 1.0e-6f,
                     "a hop past the end wraps: the endless encoder keeps climbing");
 
-        // a full climb to the ceiling, wrap hops and all, clamps at one
-        bridge.postController (103, 68);
-        bridge.postController (103, 0);
-        bridge.postController (103, 64);
+        // park the value at the ceiling, then overshoot it: the clamp holds
+        lowCut->setValueNotifyingHost (1.0f);
+        bridge.postController (103, 68);   // +64 past the ceiling
         bridge.drainNow();
         expectTrue (lowCut->getValue() > 0.9999f,
-                    "the ceiling clamps at one");
+                    "an overshoot past the ceiling clamps at one");
     }
 
     beginTest ("v2.106.0: a multi-state button target toggles between its ends");
@@ -12109,30 +12110,30 @@ static void testV21040Console1Buttons()
         // detent from the yanked spot reads as exactly +1
         bridge.postController (103, 14);
         bridge.drainNow();
-        expectTrue (std::abs (lowCut->getValue() - (0.1f + 1.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCut->getValue() - (0.1f + 1.0f / 508.0f)) < 1.0e-6f,
                     "one detent from the yanked ring is +1, not a wrap");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 13,
                     "the +1 detent echoes the ring it re-anchors on");
 
         bridge.postController (103, 17);
         bridge.drainNow();
-        const float moved = 0.1f + 5.0f / 254.0f;
+        const float moved = 0.1f + 5.0f / 508.0f;
         expectTrue (std::abs (lowCut->getValue() - moved) < 1.0e-6f,
                     "four more detents land +4 on top");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 103
                         && value == juce::roundToInt (moved * 127.0f),
                     "the move echoes the new ring value");
 
-        bridge.postController (103, 0);   // -15 from the anchored ring
+        bridge.postController (103, 0);   // -14 from the anchored ring
         bridge.drainNow();
-        expectTrue (std::abs (lowCut->getValue() - (0.1f - 10.0f / 254.0f)) < 1.0e-6f,
-                    "a 15-step fall from the anchored ring");
-        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 8,
-                    "the fall echoes its own ring, 8");
+        expectTrue (std::abs (lowCut->getValue() - (0.1f - 9.0f / 508.0f)) < 1.0e-6f,
+                    "a 14-step fall from the anchored ring");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 10,
+                    "the fall echoes its own ring, 10");
 
-        bridge.postController (103, 127); // 127 - 8 = +119: a wrap, -9
+        bridge.postController (103, 127); // 127 - 10 = +117: a wrap, -11
         bridge.drainNow();
-        const float wrapped = 0.1f - 10.0f / 254.0f - 9.0f / 254.0f;
+        const float wrapped = 0.1f - 9.0f / 508.0f - 11.0f / 508.0f;
         expectTrue (std::abs (lowCut->getValue() - wrapped) < 1.0e-6f,
                     "a hop past the end still wraps with the echo anchor");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 103
@@ -12152,7 +12153,7 @@ static void testV21040Console1Buttons()
                     "up past the ceiling wraps and clamps at one");
         bridge.postController (103, 126); // -1 from the re-anchored 127
         bridge.drainNow();
-        expectTrue (std::abs (lowCut->getValue() - (1.0f - 1.0f / 254.0f)) < 1.0e-6f,
+        expectTrue (std::abs (lowCut->getValue() - (1.0f - 1.0f / 508.0f)) < 1.0e-6f,
                     "one detent down from the ceiling");
     }
 
@@ -12176,43 +12177,43 @@ static void testV21040Console1Buttons()
         // build 1 ate every sub-rung move: single detents never moved
         // the ladder. The ring re-anchors on the rung each time, so the
         // hardware streams 65 again and again.
-        for (int i = 0; i < 31; ++i)
+        for (int i = 0; i < 63; ++i)
         {
             bridge.postController (51, 65);
             bridge.drainNow();
         }
         expectTrue (attack->getIndex() == 2,
-                    "31 single detents stay on rung 2 - the intent banks below it");
+                    "63 single detents stay on rung 2 - the intent banks below it");
 
-        bridge.postController (51, 65);  // the 32nd crosses the boundary
+        bridge.postController (51, 65);  // the 64th crosses the boundary
         bridge.drainNow();
         int popped = 0;
         while (bridge.popLedEcho (cc, value))
             ++popped;
-        expectTrue (popped == 32 && cc == 51 && value == 95,
-                    "31 re-anchored echoes of 64, then the crossing echo 95");
+        expectTrue (popped == 64 && cc == 51 && value == 95,
+                    "63 re-anchored echoes of 64, then the crossing echo 95");
 
         // down again: the ring sits on 95, every detent streams 94
-        for (int i = 0; i < 31; ++i)
+        for (int i = 0; i < 63; ++i)
         {
             bridge.postController (51, 94);
             bridge.drainNow();
         }
         expectTrue (attack->getIndex() == 3,
-                    "31 down-detents stay on rung 3");
+                    "63 down-detents stay on rung 3");
 
-        bridge.postController (51, 94);  // the 32nd crosses back down
+        bridge.postController (51, 94);  // the 64th crosses back down
         bridge.drainNow();
         popped = 0;
         while (bridge.popLedEcho (cc, value))
             ++popped;
-        expectTrue (popped == 32 && cc == 51 && value == 64,
-                    "31 re-anchored echoes of 95, then the crossing echo 64");
+        expectTrue (popped == 64 && cc == 51 && value == 64,
+                    "63 re-anchored echoes of 95, then the crossing echo 64");
 
-        bridge.postController (51, 30);  // -34 in one move, past the rung
+        bridge.postController (51, 0);   // -64 in one move, past the rung
         bridge.drainNow();
         expectTrue (attack->getIndex() == 1,
-                    "a 34-step fall crosses straight to rung 1");
+                    "a 64-step fall crosses straight to rung 1");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 32,
                     "rung 1 echoes its ring, 32");
 
@@ -12829,20 +12830,20 @@ static void testV21040Console1Buttons()
         expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
                     "the mock starts at the 2:1 default");
 
-        bridge.postController (59, 127); // the press
+        bridge.postController (59, 127); // the press says 7F
         bridge.drainNow();
         expectTrue (std::abs (ratioParam->getValue() - hard) < 1.0e-4f,
-                    "a press snaps the expander ratio to 10:1");
+                    "a 7F message snaps the expander ratio to 10:1");
 
-        bridge.postController (59, 127);
+        bridge.postController (59, 0); // the press says 00
         bridge.drainNow();
         expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
-                    "the next press snaps it back to 2:1");
+                    "a 00 message snaps it back to 2:1");
 
-        bridge.postController (59, 0); // the release
+        bridge.postController (59, 63); // the press says 3F
         bridge.drainNow();
-        expectTrue (std::abs (ratioParam->getValue() - soft) < 1.0e-4f,
-                    "a 00 release changes nothing");
+        expectTrue (std::abs (ratioParam->getValue() - hard) < 1.0e-4f,
+                    "a 3F message snaps it to 10:1 again - any nonzero value means on");
     }
 }
 

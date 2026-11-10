@@ -23,14 +23,15 @@
 //   3. value: absolute 7-bit, value / 127, snapped to the parameter's
 //      steps when it is discrete (2..128 steps).
 //
-// v2.104.0 (the buttons): the MK2's momentary buttons ride the same
-// three layers with their own frozen CC table. A press (7F, or 3F when
-// the button owns a middle state, the CUT BELL SHELF pair) flips the
-// switch the button resolved by name - a 2-state parameter toggles, a
-// multi-state one cycles a step - and the Track Select range (CC
-// 21..30, Track 1..10) parks console selections that the editor
-// heartbeat applies on the message thread, because a console swap can
-// never run on the audio thread.
+// v2.104.0 (the buttons): the MK2's buttons ride the same three
+// layers with their own frozen CC table. The capture of 2026-11-10
+// settled the hardware model: ONE message per press, and the value IS
+// the state the button means (7F on, 00 off, 3F the middle of a
+// 3-position cycle). The bridge obeys the value - a 2-state target
+// takes it absolute, a multi-state one toggles between its ends - and
+// the Track Select range (CC 21..30, Track 1..10) parks console
+// selections that the editor heartbeat applies on the message thread,
+// because a console swap can never run on the audio thread.
 //
 // v2.106.0 (the lights): the bridge now also TALKS to the hardware.
 // The MK2's LED rings follow the physical knobs, not the console's
@@ -206,11 +207,13 @@ inline int c1TrackIndexForCc (int cc)
 // streams absolute 0..127, but the old absolute mapping leapt the
 // parameter to the knob's physical position (one detent = a fat jump,
 // hard to aim). The bridge now reads the CC stream as increments:
-// every step of CC moves the value by this gain, half the v2.105
-// leap, and the MK2's FINE ADJUST button (which halves the CC step
-// the encoder emits) stacks on top for 4x. The endless encoder wraps
-// past 127 back to 0, so a delta beyond +-64 is a wrap, not a turn.
-constexpr float c1KnobGain = 1.0f / 254.0f;
+// every step of CC moves the value by this gain - v2.106.2 halves it
+// again, a quarter of the v2.105 leap (an old 0.4 dB crank is a 0.2 dB
+// one now), and the MK2's FINE ADJUST button (which halves the CC
+// step the encoder emits) stacks on top for 8x. The endless encoder
+// wraps past 127 back to 0, so a delta beyond +-64 is a wrap, not a
+// turn.
+constexpr float c1KnobGain = 1.0f / 508.0f;
 
 // v2.106.0: the LED value a button target reports to the hardware -
 // the last step of a discrete target reads as ON, a continuous one
@@ -807,13 +810,14 @@ private:
     void applyEvent (int cc, int value)
     {
         // v2.104.0 (the buttons): Track Select first - a CC range, not
-        // a role. A press (7F, or 3F on a middle-state button) parks
-        // the selection; the release (00) parks nothing.
+        // a role. v2.106.2: one message per press and the value is the
+        // state, so a 00 message parks its track too - the doubled
+        // park of a toggle stream is harmless, the selection reads
+        // the same either way.
         const int track = c1TrackIndexForCc (cc);
         if (track >= 0)
         {
-            if (value > 0)
-                pendingConsoleSelection.store (track, std::memory_order_release);
+            pendingConsoleSelection.store (track, std::memory_order_release);
             return;
         }
 
@@ -896,12 +900,15 @@ private:
             return;
         }
 
-        // v2.104.0 (the buttons): a momentary press flips the target -
-        // a 2-state switch toggles, a multi-state discrete parameter
-        // cycles one step at a time.
+        // v2.104.0 (the buttons), v2.106.2 (the truth): the capture of
+        // 2026-11-10 shows ONE message per press and the value IS the
+        // state the button means - 7F on, 00 off, 3F the middle of a
+        // 3-position cycle. The old flip-on-nonzero / ignore-00 read
+        // desynced the parameter whenever the hardware (which sets its
+        // own state from our LED echo) sent 00.
         const int button = c1ButtonForCc (cc);
-        if (button < 0 || value <= 0)
-            return; // not one of the captured buttons, or the release
+        if (button < 0)
+            return; // not one of the captured buttons
 
         const juce::SpinLock::ScopedLockType lock (targetLock);
         auto* param = buttonTargets[(size_t) button];
@@ -915,7 +922,9 @@ private:
             // one press toggles between the first and the last state,
             // never a single-step crawl through the middle. The module
             // answers on the FIRST press, the way every 2-state button
-            // always did.
+            // always did. v2.106.2: the value is ignored here - the
+            // hardware cycles 7F/3F/00 blindly, so the toggle follows
+            // the press count, not the value.
             const int current = juce::roundToInt (param->getValue() * (float) (steps - 1));
             const int next = (current >= steps - 1) ? 0 : (steps - 1);
             param->setValueNotifyingHost ((float) next / (float) (steps - 1));
@@ -935,13 +944,17 @@ private:
                     const float hard = continuous->convertTo0to1 (10.0f);
                     if (soft >= 0.0f && hard > soft + 1.0e-4f && hard <= 1.0f)
                     {
-                        param->setValueNotifyingHost (param->getValue() < hard - 1.0e-4f ? hard : soft);
+                        // v2.106.2: the value is the intent - any
+                        // nonzero message means hard, a 00 means soft.
+                        param->setValueNotifyingHost (value > 0 ? hard : soft);
                         postLedEcho (c1CcForButton (button), c1ButtonLedValue (param));
                         return;
                     }
                 }
             }
-            param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
+            // v2.106.2: the value is the state - 7F (or 3F) sets the
+            // target on, 00 sets it off.
+            param->setValueNotifyingHost (value > 0 ? 1.0f : 0.0f);
         }
 
         // v2.106.0 (the lights): the button LED follows the new state.

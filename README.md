@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.106.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.106.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,25 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.106.2** — *The buttons say what they mean.*
+  - **THE BUTTON VALUE IS THE INTENT** - the MIDI capture of 2026-11-10
+    settled the hardware model: the MK2 sends ONE message per press and
+    the value IS the state the button means (7F on, 00 off, 3F the
+    middle of a 3-position cycle). The old read - flip on any nonzero
+    message, ignore the 00 - desynced the parameter whenever the
+    hardware, which sets its own state from our LED echo, sent 00: the
+    EQ ON button looked like a broken 3-state switch. The bridge obeys
+    the value now: 7F and 3F set a 2-state target on, 00 sets it off,
+    the hard gate snaps to 10:1 on any nonzero message and back to 2:1
+    on 00, and the multi-state targets keep the direct end-toggle.
+  - **TRACK SELECT PARKS ON EVERY MESSAGE** - the toggle-style stream
+    doubles the park, and the doubled park is harmless: the selection
+    reads the same either way.
+  - **THE KNOBS TURN HALF AS FAR AGAIN** - the relative gain drops to
+    1/508 per CC step, a quarter of the v2.105 leap: an old 0.4 dB
+    crank is a 0.2 dB one now, and the FINE ADJUST button stacks on
+    top for 8x.
 
 - **2.106.1** — *The ring is the knob.*
   - **THE LED ECHO ANCHORS THE RELATIVE KNOBS** - on the MK2 the LED
