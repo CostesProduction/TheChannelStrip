@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.105.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.106.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,22 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.106.1** — *The ring is the knob.*
+  - **THE LED ECHO ANCHORS THE RELATIVE KNOBS** - on the MK2 the LED
+    ring the bridge now drives IS the endless encoder's virtual
+    position: the echo that lights the ring also moves the spot the
+    next detent streams from. v2.106.0 anchored its deltas on the raw
+    CC the hand last sent, so once the echo snapped the ring back to
+    the parameter the following detents read as negative turns and the
+    value oscillated around its start. The anchor is the queued echo
+    now: with the output open every detent is one clean step, and the
+    ring display always shows the true parameter value.
+  - **DISCRETE LADDERS BANK THEIR INTENT** - a single CC step is far
+    smaller than a rung, so v2.106.0 ate every sub-rung move and a
+    ladder knob (a five-rung attack, a stepped ratio) could never
+    leave its rung when turned slowly. The pending intent now
+    accumulates until it crosses a rung boundary, then lands on the
+    rung and resets.
 - **2.106.0** — *The lights never lie.*
   - **THE LED RINGS NOW FOLLOW THE CONSOLE** - the bridge opens the
     Console 1 MIDI OUTPUT port and feeds the true parameter values

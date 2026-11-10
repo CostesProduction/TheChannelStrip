@@ -45,7 +45,22 @@
 // and the first touch of a knob only syncs its ring - the value
 // never jumps to the physical position), and a multi-state button
 // target toggles between its first and last state (off <-> on)
-// instead of cycling a step at a time.
+//      instead of cycling a step at a time.
+//
+// v2.106.1 (the ring is the knob): the field taught the bridge a lesson
+// about the MK2's own hardware. The LED ring the echo drives IS the
+// endless encoder's virtual position: lighting the ring also moves the
+// spot the next detent streams from. Build 1 anchored its deltas on the
+// raw CC the hand last sent, so once the echo snapped the ring back to
+// the parameter the following detents read as negative turns and the
+// value oscillated around its start, never leaving. The anchor is the
+// QUEUED echo now - with the output open every detent is one clean
+// step whatever the ring display does, a dropped echo falls back to the
+// raw CC, and with the output closed nothing changes. Discrete ladders
+// learn patience too: a single CC step is far smaller than a rung, so
+// build 1 ate every sub-rung move and a ladder knob never left its
+// rung - the pending intent now banks per role until it crosses a rung
+// boundary.
 //
 // Everything is applied through setValueNotifyingHost, so the whole
 // v2.102 path follows for free: the editor knob, the EQ-Verite flush,
@@ -604,9 +619,13 @@ public:
         // range by construction.
         const juce::SpinLock::ScopedLockType lock (targetLock);
         // v2.106.0: the knobs start un-touched on the new console -
-        // the first CC of every knob only syncs its ring.
+        // the first CC of every knob only syncs its ring. v2.106.1: a
+        // fresh target also drops every banked sub-rung intent.
         for (int r = 0; r < c1NumRoles; ++r)
+        {
             lastKnobCc[(size_t) r] = -1;
+            knobPending[(size_t) r] = 0.0f;
+        }
         for (int r = 0; r < c1NumRoles; ++r)
         {
             const int idx = assigned[(size_t) r];
@@ -770,6 +789,18 @@ public:
             sendNow (echoes);
     }
 
+    // v2.106.1: the offline twin of the output port opening. The real
+    // open parks a full sync and re-anchors every knob; the harness
+    // calls this to walk the echo-anchored relative path end to end.
+    void simulateOutputOpenForTests()
+    {
+        outputOpen.store (true, std::memory_order_release);
+        ledSyncPending.store (true, std::memory_order_release);
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        for (int r = 0; r < c1NumRoles; ++r)
+            lastKnobCc[(size_t) r] = -1;
+    }
+
 private:
     // ---- layer 3: value ---------------------------------------------------
 
@@ -799,11 +830,22 @@ private:
             // it found. Every later CC moves the value by the CC step
             // (wrap-corrected past +-64, the endless encoder) times the
             // relative gain, half the v2.105 leap.
+            //
+            // v2.106.1: the ring IS the encoder. On the MK2 the LED ring
+            // the echo drives is the endless encoder's virtual position,
+            // so the echo that lights the ring also moves the spot the
+            // next detent streams from. The delta anchor therefore follows
+            // the QUEUED echo - with the output open every detent is one
+            // clean step whatever the ring display does, a dropped echo
+            // leaves the ring where the hand left it (the raw CC stays
+            // the anchor), and with the output closed nothing is yanked
+            // and the raw CC keeps anchoring, as in build 1.
+            const bool ringEcho = outputOpen.load (std::memory_order_acquire);
             int& last = lastKnobCc[(size_t) role];
             if (last < 0)
             {
-                last = value;
-                postLedEcho (cc, juce::roundToInt (param->getValue() * 127.0f));
+                const int ring = juce::roundToInt (param->getValue() * 127.0f);
+                last = (postLedEcho (cc, ring) && ringEcho) ? ring : value;
                 return;
             }
             int delta = value - last;
@@ -815,17 +857,42 @@ private:
             if (delta == 0)
                 return;
 
-            float v = juce::jlimit (0.0f, 1.0f,
-                                    param->getValue() + (float) delta * c1KnobGain);
-
-            // Discrete parameters (2..128 steps) snap to the nearest step,
-            // so a 5-rung attack ladder lands on rungs, not between them.
             const int steps = param->getNumSteps();
+            float target = -1.0f; // < 0: the move was eaten below a rung
             if (param->isDiscrete() && steps >= 2 && steps <= 128)
-                v = (float) juce::roundToInt (v * (float) (steps - 1)) / (float) (steps - 1);
+            {
+                // Discrete parameters (2..128 steps) land on rungs, but one
+                // CC step is far smaller than a rung: the single-shot snap of
+                // build 1 ate every sub-rung move and a ladder knob never
+                // left its rung. v2.106.1 banks the pending intent per role
+                // (clamped to one rung, so the ends cannot bank credit)
+                // until it crosses a rung boundary.
+                float& pending = knobPending[(size_t) role];
+                pending += (float) delta * c1KnobGain;
+                const float gap = 1.0f / (float) (steps - 1);
+                pending = juce::jlimit (-gap, gap, pending);
+                const float snapped = juce::jlimit (0.0f, 1.0f,
+                    (float) juce::roundToInt ((param->getValue() + pending) * (float) (steps - 1))
+                        / (float) (steps - 1));
+                if (std::fabs (snapped - param->getValue()) >= 1.0e-6f)
+                {
+                    param->setValueNotifyingHost (snapped);
+                    pending = 0.0f;
+                    target = snapped;
+                }
+            }
+            else
+            {
+                target = juce::jlimit (0.0f, 1.0f,
+                                        param->getValue() + (float) delta * c1KnobGain);
+                param->setValueNotifyingHost (target);
+            }
 
-            param->setValueNotifyingHost (v);
-            postLedEcho (cc, juce::roundToInt (v * 127.0f));
+            // the echo re-anchors the ring - and the encoder behind it -
+            // on the value the parameter actually wears
+            const float shown = (target >= 0.0f) ? target : param->getValue();
+            if (postLedEcho (cc, juce::roundToInt (shown * 127.0f)) && ringEcho)
+                last = juce::roundToInt (shown * 127.0f);
             return;
         }
 
@@ -887,15 +954,19 @@ private:
 
     static constexpr int echoCapacity = 64; // power of two
 
-    void postLedEcho (int cc, int value)
+    // v2.106.1: reports whether the echo was queued. A dropped echo
+    // leaves the ring where the hand left it, so the caller then keeps
+    // the raw CC as the encoder's anchor instead of the echo value.
+    bool postLedEcho (int cc, int value)
     {
         const int h = echoHead.load (std::memory_order_relaxed);
         if (h - echoTail.load (std::memory_order_acquire) >= echoCapacity)
-            return; // full: drop, the next move re-syncs the ring
+            return false; // full: drop, the next move re-syncs the ring
         echoFifo[(size_t) (h & (echoCapacity - 1))] =
             { (juce::uint8) juce::jlimit (0, 127, cc),
               (juce::uint8) juce::jlimit (0, 127, value) };
         echoHead.store (h + 1, std::memory_order_release);
+        return true;
     }
 
     void sendNow (const juce::MidiBuffer& buffer)
@@ -962,6 +1033,16 @@ private:
                             midiOutput = std::move (output);
                         }
                         ledSyncPending.store (true, std::memory_order_release);
+                        // v2.106.1: the parked sync is about to yank every
+                        // ring - and the encoder behind it - to the
+                        // parameter positions, so every knob re-anchors on
+                        // its next touch.
+                        outputOpen.store (true, std::memory_order_release);
+                        {
+                            const juce::SpinLock::ScopedLockType lock (targetLock);
+                            for (int r = 0; r < c1NumRoles; ++r)
+                                lastKnobCc[(size_t) r] = -1;
+                        }
                         opened = true;
                         break;
                     }
@@ -1020,6 +1101,13 @@ private:
     std::atomic<int> echoHead { 0 };
     std::atomic<int> echoTail { 0 };
     std::array<int, c1NumRoles> lastKnobCc {};
+
+    // v2.106.1: true once the LED output port is open (the rings - and
+    // the encoders behind them - then answer our echoes), and the
+    // per-role sub-rung intent a discrete target banks until it
+    // crosses a rung boundary.
+    std::atomic<bool> outputOpen { false };
+    std::array<float, c1NumRoles> knobPending {};
 
     juce::String deviceName;
 

@@ -12082,6 +12082,155 @@ static void testV21040Console1Buttons()
                     "the ratio knob CC 49 carries the console's current value");
     }
 
+    // ---- v2.106.1 (the ring is the knob): the echo anchors the delta
+
+    beginTest ("v2.106.1: the echo anchors the relative delta once the output is open");
+    {
+        Console1Bridge bridge;
+        MockConsole sparse (true, 0, { "Low Cut", "Threshold" });
+        bridge.retargetPlugin (&sparse);
+        bridge.simulateOutputOpenForTests();
+
+        expectTrue (bridge.isLedSyncPending(),
+                    "the simulated open parks the full sync, like the real one");
+
+        auto* lowCut = sparse.getParameters()[(size_t) 0];
+
+        bridge.postController (103, 90);   // the hand's first touch, from anywhere
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - 0.1f) < 1.0e-6f,
+                    "the first touch still moves nothing");
+        int cc = 0, value = 0;
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 13,
+                    "the first touch echoes the parameter's ring, 13");
+
+        // build 1 read this same stream as 14 - 90 = a wrap of +52 and
+        // slammed the value; the anchor is the echoed ring now, so one
+        // detent from the yanked spot reads as exactly +1
+        bridge.postController (103, 14);
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - (0.1f + 1.0f / 254.0f)) < 1.0e-6f,
+                    "one detent from the yanked ring is +1, not a wrap");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 13,
+                    "the +1 detent echoes the ring it re-anchors on");
+
+        bridge.postController (103, 17);
+        bridge.drainNow();
+        const float moved = 0.1f + 5.0f / 254.0f;
+        expectTrue (std::abs (lowCut->getValue() - moved) < 1.0e-6f,
+                    "four more detents land +4 on top");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103
+                        && value == juce::roundToInt (moved * 127.0f),
+                    "the move echoes the new ring value");
+
+        bridge.postController (103, 0);   // -15 from the anchored ring
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - (0.1f - 10.0f / 254.0f)) < 1.0e-6f,
+                    "a 15-step fall from the anchored ring");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 8,
+                    "the fall echoes its own ring, 8");
+
+        bridge.postController (103, 127); // 127 - 8 = +119: a wrap, -9
+        bridge.drainNow();
+        const float wrapped = 0.1f - 10.0f / 254.0f - 9.0f / 254.0f;
+        expectTrue (std::abs (lowCut->getValue() - wrapped) < 1.0e-6f,
+                    "a hop past the end still wraps with the echo anchor");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103
+                        && value == juce::roundToInt (wrapped * 127.0f),
+                    "the wrap echoes its ring");
+
+        // the ceiling: park the value at one, re-open, wrap up past it
+        lowCut->setValueNotifyingHost (1.0f);
+        bridge.simulateOutputOpenForTests();
+        bridge.postController (103, 127);
+        bridge.drainNow();
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 103 && value == 127,
+                    "the first touch at the ceiling echoes 127");
+        bridge.postController (103, 0);   // -127 = a wrap of +1, clamped
+        bridge.drainNow();
+        expectTrue (lowCut->getValue() > 0.9999f,
+                    "up past the ceiling wraps and clamps at one");
+        bridge.postController (103, 126); // -1 from the re-anchored 127
+        bridge.drainNow();
+        expectTrue (std::abs (lowCut->getValue() - (1.0f - 1.0f / 254.0f)) < 1.0e-6f,
+                    "one detent down from the ceiling");
+    }
+
+    beginTest ("v2.106.1: a discrete target banks the sub-rung intent until it crosses");
+    {
+        Console1Bridge bridge;
+        MockChoiceConsole choice;
+        bridge.retargetPlugin (&choice);
+        bridge.simulateOutputOpenForTests();
+
+        auto* attack = choice.attackChoice;
+
+        bridge.postController (51, 0);   // the first touch, from anywhere
+        bridge.drainNow();
+        expectTrue (attack->getIndex() == 2,
+                    "the first touch keeps rung 2");
+        int cc = 0, value = 0;
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 64,
+                    "the first touch echoes the rung's ring, 64");
+
+        // build 1 ate every sub-rung move: single detents never moved
+        // the ladder. The ring re-anchors on the rung each time, so the
+        // hardware streams 65 again and again.
+        for (int i = 0; i < 31; ++i)
+        {
+            bridge.postController (51, 65);
+            bridge.drainNow();
+        }
+        expectTrue (attack->getIndex() == 2,
+                    "31 single detents stay on rung 2 - the intent banks below it");
+
+        bridge.postController (51, 65);  // the 32nd crosses the boundary
+        bridge.drainNow();
+        int popped = 0;
+        while (bridge.popLedEcho (cc, value))
+            ++popped;
+        expectTrue (popped == 32 && cc == 51 && value == 95,
+                    "31 re-anchored echoes of 64, then the crossing echo 95");
+
+        // down again: the ring sits on 95, every detent streams 94
+        for (int i = 0; i < 31; ++i)
+        {
+            bridge.postController (51, 94);
+            bridge.drainNow();
+        }
+        expectTrue (attack->getIndex() == 3,
+                    "31 down-detents stay on rung 3");
+
+        bridge.postController (51, 94);  // the 32nd crosses back down
+        bridge.drainNow();
+        popped = 0;
+        while (bridge.popLedEcho (cc, value))
+            ++popped;
+        expectTrue (popped == 32 && cc == 51 && value == 64,
+                    "31 re-anchored echoes of 95, then the crossing echo 64");
+
+        bridge.postController (51, 30);  // -34 in one move, past the rung
+        bridge.drainNow();
+        expectTrue (attack->getIndex() == 1,
+                    "a 34-step fall crosses straight to rung 1");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 32,
+                    "rung 1 echoes its ring, 32");
+
+        // below the last rung the intent keeps banking, nothing applies
+        attack->setValueNotifyingHost (0.0f);
+        bridge.simulateOutputOpenForTests();
+        bridge.postController (51, 63);   // the first touch at the floor rung
+        bridge.drainNow();
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 0,
+                    "the floor rung echoes 0");
+        bridge.postController (51, 127); // 127 - 0: a wrap of -1, below rung 0
+        bridge.drainNow();
+        expectTrue (attack->getIndex() == 0,
+                    "a fall below rung 0 is eaten - the intent keeps banking");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 0,
+                    "the eaten move echoes the rung, not the intent");
+    }
+
     // ---- v2.105.0 (the nine consoles) --------------------------------------
     // The mappings below are frozen against the doctor reports Clement
     // captured on 2026-11-10: every mock wears the exact parameter list
