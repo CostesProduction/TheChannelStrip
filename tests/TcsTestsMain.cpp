@@ -3479,6 +3479,8 @@ void testDoctorReport()
                 "the hosted console's name reaches the report");
     expectTrue (report.contains ("latency: 222"),
                 "the hosted console's forwarded latency reaches the report");
+    expectTrue (report.contains ("parameters: 0"),
+                "v2.104.1: the parameter section is there, empty for a console without knobs");
 
     // a fired sentinel and the warning it posted both show up
     proc.setEditorOpen (true);
@@ -3492,6 +3494,19 @@ void testDoctorReport()
                 "the report carries the silence warning itself");
     expectTrue (report.contains ("name: MockSilenceConsole"),
                 "the report names the currently hosted console");
+
+    // v2.104.1: the parameter dump - the exact names the Console 1
+    // bridge matches against, index by index
+    {
+        const std::vector<juce::String> dumpNames = { "Low Cut", "Threshold", "Output" };
+        proc.getHostedStrip().setPlugin (std::make_unique<MockConsole> (true, 0, dumpNames));
+        report = proc.buildDoctorReport();
+        expectTrue (report.contains ("parameters: 3")
+                        && report.contains ("param 0: Low Cut")
+                        && report.contains ("param 1: Threshold")
+                        && report.contains ("param 2: Output"),
+                    "v2.104.1: the doctor lists the hosted console parameters, index by index");
+    }
 }
 
 // v2.34 (zone A rework): the merged sidebar status lines - the old

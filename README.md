@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.104.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.104.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,12 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.104.1** — *The doctor reads the console.*
+  - **The Doctor report now lists the hosted console's parameters,
+    index by index,** with the exact names the Console 1 bridge
+    matches against — the ground truth for the knob mapping of the
+    nine third-party consoles. Open the Doctor with a console
+    selected, copy the list, and the mapping can be frozen offline.
 - **2.104.0** — *The buttons.*
   - **The MK2 buttons now drive the console switches.** The capture of
     2026-11-09 (expert-mode hex, channel 1) is frozen into a button

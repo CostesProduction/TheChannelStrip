@@ -494,6 +494,17 @@ juce::String TheChannelStripAudioProcessor::buildDoctorReport()
                << "  current preset: "
                << (getCurrentPresetName().isEmpty() ? juce::String ("(none)")
                                                      : getCurrentPresetName()) << "\n";
+
+        // v2.104.1: the exact parameter names the Console 1 bridge
+        // matches against, index by index - the ground truth for the
+        // knob mapping of a hosted console (copy this list for a new
+        // console and its mapping can be frozen offline). Same source
+        // as the bridge: getParameters()[i]->getName(64).
+        const auto& hostedParams = hosted->getParameters();
+        report << "  parameters: " << hostedParams.size() << "\n";
+        for (int i = 0; i < hostedParams.size(); ++i)
+            report << "  param " << i << ": "
+                   << hostedParams.getUnchecked (i)->getName (64) << "\n";
     }
     else
     {
