@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.106.3** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.107.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,17 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.107.0** — *The session link.*
+  - **ONE CLICK, EVERY INSTANCE** - a new SESSION LINK checkbox sits
+    right under the console buttons: checked, this instance follows
+    every console change of the other linked instances of the session
+    and publishes its own - mouse clicks and Console 1 Track Select
+    alike. Unchecked, every instance stays independent, exactly as
+    before.
+  - The opt-in rides the session state, so a reopened project keeps
+    its linked instances linked. Emptying the slot stays a private
+    move, and a change applied by the link is never re-published.
 
 - **2.106.3** — *Bells and the honest grid.*
   - **THE EQ BUTTONS PAIR BELL WITH SHELF** - the CUT/BELL/SHELF

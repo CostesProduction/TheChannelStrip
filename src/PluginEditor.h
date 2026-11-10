@@ -738,6 +738,11 @@ private:
 
     std::array<juce::TextButton, (size_t) TheChannelStripAudioProcessor::numConsoles> consoleButtons;
 
+    // v2.107.0: the opt-in session link toggle - checked, this instance
+    // follows (and publishes) the console changes of the other linked
+    // instances of the session.
+    juce::TextButton sessionLinkToggle;
+
     // v2.52 (point B): the tilt and response-speed buttons moved from
     // this sidebar ONTO the analyser strip itself - they are children
     // of SpectrumPanel now (see that class). The v2.12 lessons travel

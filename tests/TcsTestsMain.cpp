@@ -12985,6 +12985,80 @@ static void testV21040Console1Buttons()
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.107.0 (the session link): every TheChannelStrip instance of one
+// DAW session lives in the same process, so a process-wide registry
+// carries a console change to all of them. An opted-in instance
+// follows the others and publishes its own changes; an opted-out one
+// stays fully independent. Emptying the slot stays private, a change
+// applied BY the link is never re-published, and the restore path
+// never publishes - a reopened session keeps its links, quietly.
+// ---------------------------------------------------------------------------
+static void testV21070SessionLink()
+{
+    TheChannelStripAudioProcessor a;
+    TheChannelStripAudioProcessor b;
+
+    // fresh instances are independent: the flag starts clear
+    expectTrue (! a.isSessionLinkEnabled() && ! b.isSessionLinkEnabled(),
+                "fresh instances are not linked");
+
+    // one linked, one not: a private change only touches its owner
+    a.setSessionLinkEnabled (true);
+    a.toggleCostesStrip();
+    expectTrue (a.isCostesStripActive(),
+                "the linked instance selects its own strip");
+    expectTrue (! b.isCostesStripActive(),
+                "an opted-out instance does not follow");
+
+    // both linked: b's change reaches a - and never loops back
+    b.setSessionLinkEnabled (true);
+    b.toggleCostesStrip();
+    expectTrue (b.isCostesStripActive() && a.isCostesStripActive(),
+                "a follows b's selection without a ping-pong");
+
+    // emptying the slot is a private move - never published
+    b.toggleCostesStrip();
+    expectTrue (! b.isCostesStripActive(),
+                "b empties its slot");
+    expectTrue (a.isCostesStripActive(),
+                "emptying stays private: a keeps its strip");
+
+    a.toggleCostesStrip();
+    expectTrue (! a.isCostesStripActive(),
+                "a empties its slot too");
+
+    // the Console 1 Track Select path publishes like a mouse click -
+    // but only when the change actually lands (an unavailable console
+    // returns before any publish, so nothing ripples offline)
+    a.getConsole1Bridge().postController (21, 127);
+    a.getConsole1Bridge().drainNow();
+    a.consumeConsole1Selection();
+    expectTrue (a.isCostesStripActive(),
+                "the Track Select MK2 lands on the Costes strip");
+    expectTrue (b.isCostesStripActive(),
+                "the follow carries the hardware path too");
+
+    // opting back out: b stops following
+    b.setSessionLinkEnabled (false);
+    a.toggleCostesStrip();
+    expectTrue (! a.isCostesStripActive(),
+                "a empties its slot");
+    expectTrue (b.isCostesStripActive(),
+                "an opted-out instance keeps its own selection");
+
+    // the flag rides the session state
+    a.setSessionLinkEnabled (true);
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+    TheChannelStripAudioProcessor c;
+    c.setStateInformation (state.getData(), (int) state.getSize());
+    expectTrue (c.isSessionLinkEnabled(),
+                "the link flag survives a state roundtrip");
+    expectTrue (! c.isCostesStripActive(),
+                "a restore never selects anything by itself");
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13087,6 +13161,7 @@ int main (int argc, char* argv[])
     testV2103Console1Knobs();
     testV21031CostesKnobMapping();
     testV21040Console1Buttons();
+    testV21070SessionLink();
 
     if (integration)
         testIntegrationRealConsole();

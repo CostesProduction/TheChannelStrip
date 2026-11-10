@@ -118,12 +118,53 @@ juce::String TheChannelStripAudioProcessor::consoleLabel (int index)
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.107.0 (the session link): the process-wide registry.
+// ---------------------------------------------------------------------------
+SessionConsoleLink& SessionConsoleLink::getInstance()
+{
+    static SessionConsoleLink instance;
+    return instance;
+}
+
+void SessionConsoleLink::add (TheChannelStripAudioProcessor* processor)
+{
+    const juce::SpinLock::ScopedLockType lock (registryLock);
+    members.addIfNotAlreadyThere (processor);
+}
+
+void SessionConsoleLink::remove (TheChannelStripAudioProcessor* processor)
+{
+    const juce::SpinLock::ScopedLockType lock (registryLock);
+    members.removeAllInstancesOf (processor);
+}
+
+void SessionConsoleLink::publish (TheChannelStripAudioProcessor* sender, int selection)
+{
+    juce::Array<TheChannelStripAudioProcessor*> snapshot;
+    {
+        const juce::SpinLock::ScopedLockType lock (registryLock);
+        snapshot.addArray (members);
+    }
+
+    // delivered outside the registry lock: a receiver's console swap
+    // takes its own instantiateGuard (every instance has one), so no
+    // lock ordering issue can arise, and a receiver never re-publishes
+    // (its re-entrancy guard is set during the delivery below).
+    for (auto* processor : snapshot)
+        if (processor != nullptr && processor != sender)
+            processor->receiveSessionConsoleChange (selection);
+}
+
 TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
     : AudioProcessor (BusesProperties()
                         .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout())
 {
+    // v2.107.0: join the process-wide session link before anything else
+    // can publish a console change to this instance.
+    SessionConsoleLink::getInstance().add (this);
     // v2.102.0: the automation bridge. A DAW reads a plugin's parameter
     // table ONCE, at load (the JUCE VST3 wrapper builds it in a single
     // pass and never revisits it - see AutomationProxyBank.h), so the
@@ -206,6 +247,10 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
 
 TheChannelStripAudioProcessor::~TheChannelStripAudioProcessor()
 {
+    // v2.107.0: leave the session link first - a stale registry entry
+    // would dangle at the next publish.
+    SessionConsoleLink::getInstance().remove (this);
+
     saveKnownPluginList();
 
     // v2.15.5: release the COM references borrowed from the hosted
@@ -1069,6 +1114,9 @@ void TheChannelStripAudioProcessor::selectConsole (int consoleIndex)
     // through here (it goes through maybeRestoreHosted directly).
     markSessionStateChanged();
 
+    // v2.107.0: the console slot selection rides the session link.
+    publishSessionLinkChange (1 + consoleIndex);
+
     logHostStatus ("Instantiating '" + slot.desc.name + "'...");
     juce::Thread::launch ([this, desc = slot.desc] () { instantiateHosted (desc, false); });
 }
@@ -1087,6 +1135,47 @@ void TheChannelStripAudioProcessor::consumeConsole1Selection()
         selectCostesStrip();
     else if (track >= 1 && track <= numConsoles)
         selectConsole (track - 1);
+}
+
+bool TheChannelStripAudioProcessor::isSessionLinkEnabled() const
+{
+    return sessionLinkEnabled.load (std::memory_order_relaxed);
+}
+
+void TheChannelStripAudioProcessor::setSessionLinkEnabled (bool enabled)
+{
+    sessionLinkEnabled.store (enabled, std::memory_order_relaxed);
+}
+
+// v2.107.0: the link's delivery point - message thread only. An
+// instance only obeys when it opted in, and the guard makes the
+// applied change one-way: the selectCostesStrip/selectConsole calls
+// below see applyingSessionLinkChange set, so they publish nothing
+// and a chain of linked instances can never ping-pong.
+void TheChannelStripAudioProcessor::receiveSessionConsoleChange (int selection)
+{
+    if (! sessionLinkEnabled.load (std::memory_order_relaxed)
+            || applyingSessionLinkChange)
+        return;
+
+    const juce::ScopedValueSetter<bool> guard (applyingSessionLinkChange, true);
+
+    if (selection == 0)
+        selectCostesStrip();
+    else if (selection >= 1 && selection <= numConsoles)
+        selectConsole (selection - 1);
+}
+
+// v2.107.0: called at the end of the two selection paths - a change
+// that did not happen (an unavailable console returned early) never
+// ripples through the session.
+void TheChannelStripAudioProcessor::publishSessionLinkChange (int selection)
+{
+    if (! sessionLinkEnabled.load (std::memory_order_relaxed)
+            || applyingSessionLinkChange)
+        return;
+
+    SessionConsoleLink::getInstance().publish (this, selection);
 }
 
 // v2.106.0 (the lights): the LED feedback to the Console 1 hardware.
@@ -1191,6 +1280,10 @@ void TheChannelStripAudioProcessor::selectCostesStrip()
 
     // v2.70.2: same as selectConsole - the swap changed the state.
     markSessionStateChanged();
+
+    // v2.107.0: the strip is one of the session's selections - the
+    // linked instances follow it.
+    publishSessionLinkChange (0);
 }
 
 // ---------------------------------------------------------------------------
@@ -2789,6 +2882,10 @@ void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& dest
     xml->setAttribute ("specTau", specTau.load (std::memory_order_relaxed));
     // v2.13: loudness reference of the analyser axis (Record/Mix/Master).
     xml->setAttribute ("lufsTarget", lufsTarget.load (std::memory_order_relaxed));
+    // v2.107.0 (the session link): the opt-in rides the session state,
+    // so a reopened project keeps its linked instances linked.
+    xml->setAttribute ("sessionLink",
+                       sessionLinkEnabled.load (std::memory_order_relaxed) ? 1 : 0);
 
     if (auto* active = hostedStrip.getActivePlugin())
     {
@@ -3011,6 +3108,10 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
 
     analyserVisible.store (xml->getBoolAttribute ("analyserVisible", true),
                            std::memory_order_relaxed);
+    // v2.107.0: restore the session-link opt-in directly - a restore is
+    // not a console change, it never publishes.
+    sessionLinkEnabled.store (xml->getBoolAttribute ("sessionLink", false),
+                              std::memory_order_relaxed);
 
     // v2.11: analyser response speed; missing attribute (older session)
     // keeps the Slow default (~1 s). v2.12 keeps only two speeds

@@ -2091,6 +2091,28 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         b.onClick = [this, i] { proc.selectConsole ((int) i); };
     }
 
+    // ---- v2.107.0: the session link toggle ----
+    // Checked, this instance follows every console change of the other
+    // linked instances of the session and publishes its own; unchecked,
+    // it stays independent - the behaviour of every version before.
+    // The flag rides the session state, like the analyser visibility.
+    sessionLinkToggle.setButtonText ("Session Link");
+    sessionLinkToggle.setClickingTogglesState (true);
+    styleConsoleButton (sessionLinkToggle);
+    helpTexts[&sessionLinkToggle] =
+        "When checked, all the linked instances of the session follow "
+        "each other's console changes; unchecked, this one is "
+        "independent.";
+    addAndMakeVisible (sessionLinkToggle);
+
+    sessionLinkToggle.onClick = [this]
+    {
+        proc.setSessionLinkEnabled (sessionLinkToggle.getToggleState());
+    };
+
+    sessionLinkToggle.setToggleState (proc.isSessionLinkEnabled(),
+                                      juce::dontSendNotification);
+
     // ---- v2.26 (roadmap point 4): the presets section ----
     // One combo box listing every preset in the preset folder - the
     // ROOT and the album sub-folders alike (v2.30: albums are listed,
@@ -2409,6 +2431,11 @@ void TheChannelStripAudioProcessorEditor::resized()
         consoleButtons[i].setBounds (sideX, y, sw, 28);
         y += 28 + 5;
     }
+
+    // v2.107.0: the session link toggle sits right under the console
+    // buttons - the sidebar's leftover-space layout absorbs the row.
+    sessionLinkToggle.setBounds (sideX, y, sw, 24);
+    y += 24 + 5;
 
     // ---- v2.39.0 (Clement's blocks): the sidebar is FOUR blocks
     //      separated by an IDENTICAL vertical space - (1) title +

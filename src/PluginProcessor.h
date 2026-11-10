@@ -23,6 +23,41 @@
 
 class TheChannelStripAudioProcessorEditor;
 
+// ---------------------------------------------------------------------------
+// v2.107.0 (the session link): all the TheChannelStrip instances of one
+// DAW session live in the SAME PROCESS, so one process-wide registry can
+// tell every linked instance when any of them changes console. An
+// instance with its SESSION LINK toggle checked follows every console
+// change of the other linked instances - and publishes its own, mouse
+// clicks and Console 1 Track Select alike. Unchecked, an instance stays
+// fully independent, exactly as every version before. Emptying the slot
+// stays a private move, and a change applied BY the link is never
+// re-published: the delivery is one-way, so a chain of linked instances
+// can never ping-pong.
+// ---------------------------------------------------------------------------
+class TheChannelStripAudioProcessor;
+
+class SessionConsoleLink
+{
+public:
+    static SessionConsoleLink& getInstance();
+
+    // the processor's constructor and destructor own the registration
+    void add (TheChannelStripAudioProcessor* processor);
+    void remove (TheChannelStripAudioProcessor* processor);
+
+    // message thread only: every caller (a UI click, the editor
+    // heartbeat) runs on the message thread, so a delivered console
+    // change can never race a processor being destroyed.
+    void publish (TheChannelStripAudioProcessor* sender, int selection);
+
+private:
+    SessionConsoleLink() = default;
+
+    juce::SpinLock registryLock;
+    juce::Array<TheChannelStripAudioProcessor*> members;
+};
+
 // v2.2: the shell is deliberately minimal. It hosts exactly one of the
 // supported bx_console plugins, shows a spectrum analyser and displays a
 // stable smoothed LUFS correction (how much to add to the output to
@@ -157,6 +192,16 @@ public:
     // out of range; reports to the status line if the plugin is not
     // installed.
     void selectConsole (int consoleIndex);
+
+    // v2.107.0 (the session link): when true, this instance follows every
+    // console change of the other linked instances of the session and
+    // publishes its own - mouse clicks and Console 1 Track Select alike.
+    // False by default: the pre-2.107 independence.
+    bool isSessionLinkEnabled() const;
+    void setSessionLinkEnabled (bool enabled);
+
+    // the SessionConsoleLink's delivery point - message thread only
+    void receiveSessionConsoleChange (int selection);
 
     // v2.104.0 (the buttons): applies a Track Select press parked by
     // the Console 1 bridge. Message thread only (the editor heartbeat):
@@ -555,6 +600,12 @@ private:
 
     void selectCostesStrip();
 
+    // v2.107.0: the two selection paths publish to the session link once
+    // their change has actually landed (an unavailable console returns
+    // before this point). Selection 0 = the internal strip,
+    // 1..numConsoles = the console slots.
+    void publishSessionLinkChange (int selection);
+
     // v2.51.1: identGuard-guarded write (see the member declaration).
     void setCurrentPluginIdent (const juce::String& ident);
 
@@ -669,6 +720,12 @@ private:
     std::atomic<float> anaDbDiv { 12.0f }; // v2.53 default: 15/12/9 dB/div
     std::atomic<float> eqDbDiv { 4.0f };   // v2.53 default: 8/6/4/2 dB/div
     std::atomic<bool> analyserVisible { true };
+
+    // v2.107.0 (the session link): the opt-in flag (rides the session
+    // state) and the re-entrancy guard that keeps a follow applied BY
+    // the link from being re-published to it.
+    std::atomic<bool> sessionLinkEnabled { false };
+    bool applyingSessionLinkChange = false;   // message thread only
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).
     std::atomic<float> specTau { 1.0f };
