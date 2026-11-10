@@ -399,12 +399,18 @@ class MockConsole : public juce::AudioProcessor
 {
 public:
     explicit MockConsole (bool acceptsMonoLayout, int parameterCount = 0,
-                           const std::vector<juce::String>& namedParameters = {})
+                           const std::vector<juce::String>& namedParameters = {},
+                           const juce::String& consoleName = "MockConsole")
         : AudioProcessor (BusesProperties()
                             .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
                             .withOutput ("Main", juce::AudioChannelSet::stereo(), true)),
           acceptsMono (acceptsMonoLayout)
     {
+        // v2.105.0 (the nine consoles): the pinned overrides key on
+        // the hosted plugin name, so the frozen-mapping mocks wear
+        // the real console names. The default keeps every existing
+        // mock anonymous - no pin matches "MockConsole".
+        name = consoleName;
         // v2.102.0: optional hosted parameters for the automation-bridge
         // suite - a console the DAW side can automate. Defaults to none,
         // so every existing mock-based test is untouched.
@@ -435,6 +441,9 @@ public:
     std::atomic<int>   lastChannelCount { 0 };
     std::atomic<int>   processCallCount { 0 };
 
+    // v2.105.0: the console name this mock reports to the bridge.
+    juce::String name;
+
     // v2.43 (testEqCurveSmoothing): OPTIONAL deterministic band-limited
     // noise injection - a console's shaped noise floor living INSIDE
     // the console, uncorrelated with the input. A fixed-seed xorshift
@@ -460,7 +469,7 @@ public:
     // is untouched.
     void setLowcut (bool on) { lowcutOn.store (on); }
 
-    const juce::String getName() const override { return "MockConsole"; }
+    const juce::String getName() const override { return name; }
 
     void prepareToPlay (double sampleRate, int) override
     {
@@ -11906,6 +11915,571 @@ static void testV21040Console1Buttons()
         bridge.drainNow();
         expectTrue (bridge.consumePendingConsoleSelection() == -1,
                     "a 00 release never parks a selection");
+    }
+
+    // ---- v2.105.0 (the nine consoles) --------------------------------------
+    // The mappings below are frozen against the doctor reports Clement
+    // captured on 2026-11-10: every mock wears the exact parameter list
+    // of one hosted console AND its exact plugin name, so the greedy
+    // resolver plus the pinned overrides must land every driver on the
+    // captured index. When a console update shifts a parameter, a fresh
+    // doctor report re-captures the list and these expectations move
+    // with it (the counts say which console drifted first).
+
+    beginTest ("v2.105.0: bx_console AMEK 9099 mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Mute", "Bank", "Input Gain", "V-Gain", "THD", "Phase", "Output Gain",
+            "Monitoring", "Console Channel", "Stereo Mode", "Meter Position", "Mono Maker In", "Mono Maker", "Stereo Width In", "Stereo Width",
+            "Filter Position", "HighPass Filter", "HighPass Filter In", "HighPass Filter X3", "LowPass Filter", "LowPass Filter In", "LowPass Filter /3", "EQ On/Off",
+            "EQ Position", "Low Band In", "Low Frequency", "Low Gain", "Low Peak", "Low Glow", "Low Mid In", "Low Mid Frequency",
+            "Low Mid Gain", "Low Mid Q", "Low Mid Notch", "Low Mid Frequency /2", "High Mid In", "High Mid Frequency", "High Mid Gain", "High Mid Q",
+            "High Mid Notch", "High Mid Frequency X2", "High Band In", "High Frequency", "High Gain", "High Peak", "High Sheen", "Auto Listen",
+            "Comp On/Off", "Comp Ratio", "Comp Threshold", "Comp Release", "Comp Attack", "Comp Mix", "Comp Highpass", "Comp Hard Knee",
+            "Comp Auto Release", "Comp/Lim Output Gain", "Ambience On/Off", "Limiter On/Off", "Limiter Level", "Limiter Makeup Gain", "Limiter Release", "Limiter Attack",
+            "Limiter Mix", "Limiter Clip", "Sidechain Link", "Dyn External Key", "Gate On", "Gate Expander Mode", "Expander Ratio", "Gate Range",
+            "Gate Threshold", "Gate Threshold Range", "Gate Hold", "Gate Release", "GateReleaseLin", "Gate Attack", "Gate Invert", "Gate Lowpass Freq",
+            "Gate Lowpass Resonant Q", "Gate Highpass Freq", "Gate Highpass Resonant Q", "Gate Key Listen", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console AMEK 9099");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 24
+                        && bridge.getMatchedButtonCount() == 9
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 17
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 20,
+                    "AMEK 9099: 24 knobs, 9 buttons, input 3, low cut 17, high cut 20");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 72
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 75
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 74
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "AMEK 9099: gate threshold 72, release 75, sustain 74, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 26
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 27
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 33
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 31
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 32
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 37
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 38
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 43
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 44,
+                    "AMEK 9099: EQ low 26/27, low mid 33/31/32, high mid 39/37/38, high 43/44");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 49
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 53
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 52
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 51
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 50
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "AMEK 9099: comp ratio 49, mix 53, attack 52, release 51, threshold 50, drive 5, character 4, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 6
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == 16
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 69
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 68
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 23
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 28
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 45
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 48
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 24,
+                    "AMEK 9099: buttons phase 6, filters 16, gate 69, shape 68, eq 23, low mode 28, high mode 45, comp 48, order 24");
+    }
+
+    beginTest ("v2.105.0: bx_console SSL 4000 E mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Mute", "Setting", "In Gain", "Virtual Gain", "THD", "Phase", "Out Gain",
+            "Monitoring", "Console Channel", "Stereo Mode", "HPF On/Off", "HPF Frequency", "HPF x3", "LPF On/Off", "LPF Frequency",
+            "LPF /3", "FLT Position", "Dyn On/Off", "LC Ratio", "LC Threshold", "LC Release", "LC Attack", "LC Mix",
+            "LC Link", "LC Highpass", "LC 2nd Thresh Level", "GE Mode", "GE Invert", "GE Range", "GE Threshold", "GE Threshold Range",
+            "GE Release", "GE Attack", "GE Hysteresis", "Dyn VCA Series", "Dyn Key", "EQ On/Off", "EQ High Gain", "EQ High Frequency",
+            "EQ High Bell", "EQ High Mid Gain", "EQ High Mid Frequency", "EQ High Mid Q", "EQ Type", "EQ Low Mid Gain", "EQ Low Mid Frequency", "EQ Low Mid Q",
+            "EQ Low Gain", "EQ Low Frequency", "EQ Low Bell", "EQ Position", "Meter Position", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console SSL 4000 E");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 23
+                        && bridge.getMatchedButtonCount() == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
+                    "SSL 4000 E: 23 knobs, 8 buttons, input 3, low cut 12, high cut 15");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 30
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 32
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "SSL 4000 E: gate threshold 30, release 32, sustain -1, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 49
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 47
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 46
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 45
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 43
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 42
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 41
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 38,
+                    "SSL 4000 E: EQ low 49/48, low mid 47/46/45, high mid 43/42/41, high 39/38");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 22
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 21
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 20
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "SSL 4000 E: comp ratio 19, mix 23, attack 22, release 21, threshold 20, drive 5, character 4, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 6
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == 17
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 27
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 37
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 50
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 40
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 18
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 51,
+                    "SSL 4000 E: buttons phase 6, filters 17, gate 27, shape -1, eq 37, low mode 50, high mode 40, comp 18, order 51");
+    }
+
+    beginTest ("v2.105.0: bx_console SSL 4000 G mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Mute", "Setting", "In Gain", "Virtual Gain", "THD", "Phase", "Out Gain",
+            "Monitoring", "Console Channel", "Stereo Mode", "HPF On/Off", "HPF Frequency", "HPF x3", "LPF On/Off", "LPF Frequency",
+            "LPF /3", "FLT Position", "Dyn On/Off", "LC Ratio", "LC Threshold", "LC Release", "LC Attack", "LC Mix",
+            "LC Link", "LC Highpass", "LC 2nd Thresh Level", "GE Mode", "GE Invert", "GE Range", "GE Threshold", "GE Threshold Range",
+            "GE Release", "GE Attack", "GE Hysteresis", "Dyn VCA Series", "Dyn Key", "EQ On/Off", "EQ High Gain", "EQ High Frequency",
+            "EQ High Bell", "EQ High Mid Gain", "EQ High Mid Frequency", "EQ High Mid Q", "EQ High Mid x3", "EQ Type", "EQ Low Mid Gain", "EQ Low Mid Frequency",
+            "EQ Low Mid Q", "EQ Low Mid /3", "EQ Low Gain", "EQ Low Frequency", "EQ Low Bell", "EQ Position", "Meter Position", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console SSL 4000 G");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 23
+                        && bridge.getMatchedButtonCount() == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
+                    "SSL 4000 G: 23 knobs, 8 buttons, input 3, low cut 12, high cut 15");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 30
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 32
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "SSL 4000 G: gate threshold 30, release 32, sustain -1, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 51
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 50
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 47
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 46
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 43
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 42
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 41
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 38,
+                    "SSL 4000 G: EQ low 51/50, low mid 48/47/46, high mid 43/42/41, high 39/38");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 22
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 21
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 20
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "SSL 4000 G: comp ratio 19, mix 23, attack 22, release 21, threshold 20, drive 5, character 4, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 6
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == 17
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 27
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 37
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 52
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 40
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 18
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 53,
+                    "SSL 4000 G: buttons phase 6, filters 17, gate 27, shape -1, eq 37, low mode 52, high mode 40, comp 18, order 53");
+    }
+
+    beginTest ("v2.105.0: bx_console SSL 9000 J mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Mute", "Setting", "In Gain", "Virtual Gain", "THD", "Phase", "Out Gain",
+            "Monitoring", "Meter Position", "Console Channel", "Stereo Mode", "Filter Position", "Filter Split", "HPF On/Off", "HPF Frequency",
+            "HPF Freq x3", "LPF On/Off", "LPF Frequency", "LPF Freq /3", "Comp Ratio", "Comp Threshold", "Comp Release", "Comp Attack",
+            "Comp Peak", "Comp Mix", "Comp Highpass", "Sidechain Link", "Gate Expander Mode", "Gate Invert", "Gate Range", "Gate Threshold",
+            "Gate Threshold Range", "Gate Hold", "Gate Release", "Gate Attack", "EQ High Gain", "EQ High Frequency", "EQ High Bell", "EQ High Mid Gain",
+            "EQ High Mid Frequency", "EQ High Mid Q", "EQ High Mid x3", "EQ Low Mid Gain", "EQ Low Mid Frequency", "EQ Low Mid Q", "EQ Low Mid /3", "EQ Low Gain",
+            "EQ Low Frequency", "EQ Low Bell", "EQ On/Off", "EQ Type", "EQ Position", "Dyn Position", "Dyn On/Off", "Dyn External Key",
+            "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console SSL 9000 J");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 24
+                        && bridge.getMatchedButtonCount() == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 15
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 18,
+                    "SSL 9000 J: 24 knobs, 8 buttons, input 3, low cut 15, high cut 18");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 31
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 34
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 33
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "SSL 9000 J: gate threshold 31, release 34, sustain 33, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 47
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 45
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 44
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 43
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 41
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 40
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 37
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 36,
+                    "SSL 9000 J: EQ low 48/47, low mid 45/44/43, high mid 41/40/39, high 37/36");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 20
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 25
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 22
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 21
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "SSL 9000 J: comp ratio 20, mix 25, attack 23, release 22, threshold 21, drive 5, character 4, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 6
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == 12
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 28
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 50
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 49
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 38
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 54
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 52,
+                    "SSL 9000 J: buttons phase 6, filters 12, gate 28, shape -1, eq 50, low mode 49, high mode 38, comp 54, order 52");
+    }
+
+    beginTest ("v2.105.0: bx_console N mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Bypass", "Mute", "Setting", "In Gain", "Phase", "Virtual Gain", "THD", "Out Gain",
+            "Monitoring", "Console Channel", "Stereo Mode", "HPF On/Off", "HPF Frequency", "HPF x3", "LPF On/Off", "LPF Frequency",
+            "LPF /3", "LC On/Off", "LC Link", "LC Gain", "LC Threshold", "LC Threshold Range", "LC Ratio", "LC Attack",
+            "LC Release", "LC 2nd Thresh Level", "LC Highpass", "LC Mix", "GE On/Off", "GE Key", "GE Invert", "GE Hysteresis",
+            "GE Threshold", "GE Threshold Range", "GE Range", "GE Attack", "GE Release", "EQ On/Off", "EQ Position", "EQ Low Frequency",
+            "EQ Low Q", "EQ Low Gain", "EQ Low Shelf", "EQ Low Mid Frequency", "EQ Low Mid Q", "EQ Low Mid Gain", "EQ High Mid Frequency", "EQ High Mid Q",
+            "EQ High Mid Gain", "EQ High Frequency", "EQ High Q", "EQ High Gain", "EQ High Shelf", "Metertype", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console N");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 23
+                        && bridge.getMatchedButtonCount() == 7
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
+                    "bx_console N: 23 knobs, 7 buttons, input 3, low cut 12, high cut 15");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 32
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 36
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "bx_console N: gate threshold 32, release 36, sustain -1, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 41
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 44
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 43
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 45
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 47
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 46
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 49
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 51,
+                    "bx_console N: EQ low 39/41, low mid 44/43/45, high mid 47/46/48, high 49/51");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 22
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 27
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 24
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 20
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 6
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "bx_console N: comp ratio 22, mix 27, attack 23, release 24, threshold 20, drive 6, character 5, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 4
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 28
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 37
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 42
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 52
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 17
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 38,
+                    "bx_console N: buttons phase 4, filters -1, gate -1, shape 28, eq 37, low mode 42, high mode 52, comp 17, order 38");
+    }
+
+    beginTest ("v2.105.0: Lindell 80 Channel mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "THD", "Gain", "Pad", "Unity", "High Frequency", "High Gain", "84 Mode", "Mid High Q",
+            "Mid Frequency", "Mid Gain", "Low Frequency", "Low Gain", "High Pass", "Low Pass", "Equalizer", "Filter",
+            "Comp Mix", "Comp High Pass Filter", "Comp Threshold", "Comp Ratio", "Comp Gain", "Comp Recovery", "Comp In", "Comp Fast",
+            "Comp Niveau", "Comp Smash", "Comp External Side Chain", "Gate Hysteresis", "Gate Threshold", "Gate Range", "Gate Recovery", "Gate In",
+            "Gate Fast", "Gate Expander", "Gate Inverted", "Gate External Side Chain", "Mute", "Phase", "Level", "TMT Channel",
+            "TMT Link", "Input Level", "Output Level", "Bypass", "Program",
+        };
+        MockConsole console (true, 0, names, "Lindell 80 Channel");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 19
+                        && bridge.getMatchedButtonCount() == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 13,
+                    "Lindell 80: 19 knobs, 5 buttons, input 1, low cut 12, high cut 13");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 28
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 30
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "Lindell 80: gate threshold 28, release 30, sustain -1, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 10
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 11
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 9
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 7
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 5,
+                    "Lindell 80: EQ low 10/11, low mid -1/8/9, high mid 7/-1/-1, high 4/5");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 16
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 23
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 21
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 18
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 42,
+                    "Lindell 80: comp ratio 19, mix 16, attack 23, release 21, threshold 18, drive 0, character -1, pan -1, output 42");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 37
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 32
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 31
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 14
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 22
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == -1,
+                    "Lindell 80: buttons phase 37, filters -1, gate 32, shape 31, eq 14, low mode -1, high mode -1, comp 22, order -1");
+    }
+
+    beginTest ("v2.105.0: Lindell 50 Channel mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Pre Gain", "THD", "Cut", "Phase", "Unity", "High Pass", "High Pass Freq", "Pad",
+            "EQ Bypass", "Equalizer", "High Freq", "High Gain", "High Mid Freq", "High Mid Gain", "Mid Freq", "Mid Gain",
+            "Low Mid Freq", "Low Mid Gain", "Low Freq", "Low Gain", "Band Filter", "Low Shelf", "High Shelf", "EQ In",
+            "Gain 31Hz", "Gain 63Hz", "Gain 125Hz", "Gain 250Hz", "Gain 500Hz", "Gain 1kHz", "Gain 2kHz", "Gain 4kHz",
+            "Gain 8kHz", "Gain 16kHz", "Comp Bypass", "Compressor", "FET Mix", "FET HPF", "Comp In", "Comp External Side Chain",
+            "FET Input", "FET Output", "FET Release", "FET DS", "FET Mode", "FET Ceiling", "VCA Threshold", "VCA Attack",
+            "VCA Release", "VCA Ratio", "VCA Knee", "VCA Niveau", "VCA Type", "VCA Link", "VCA Gain", "Gate Hysteresis",
+            "Gate Threshold", "Gate Range", "Gate Release", "Gate In", "Gate Fast", "Gate Expander", "Gate Inverted", "Gate External Side Chain",
+            "Level", "TMT Channel", "TMT Link", "Input Level", "Output Level", "EQ Post Dyn", "Bypass", "Program",
+        };
+        MockConsole console (true, 0, names, "Lindell 50 Channel");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 18
+                        && bridge.getMatchedButtonCount() == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 6
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == -1,
+                    "Lindell 50: 18 knobs, 8 buttons, input 0, low cut 6, high cut -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 56
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 58
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "Lindell 50: gate threshold 56, release 58, sustain -1, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 18
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 16
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 17
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 13
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 10
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 11,
+                    "Lindell 50: EQ low 18/19, low mid -1/16/17, high mid -1/12/13, high 10/11");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 49
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 47
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 46
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 68,
+                    "Lindell 50: comp ratio 49, mix -1, attack 47, release 48, threshold 46, drive 1, character -1, pan -1, output 68");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 3
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 60
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 59
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 23
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == 21
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == 22
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 38
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 69,
+                    "Lindell 50: buttons phase 3, filters -1, gate 60, shape 59, eq 23, low mode 21, high mode 22, comp 38, order 69");
+    }
+
+    beginTest ("v2.105.0: bx_console Focusrite SC mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Mute", "Setting", "In Gain", "Virtual Gain", "THD", "Phase", "Out Gain",
+            "Monitoring", "Console Channel", "Stereo Mode", "HPF On", "HPF Frequency", "HPF x3", "LPF On", "LPF Frequency",
+            "LPF /3", "Dyn HPF Pos", "Dyn Peak EQ Pos", "Dyn LPF Pos", "Dyn LPF Freq", "Dyn HPF Freq", "Dyn Peak EQ Gain", "Dyn Peak EQ Freq",
+            "Dyn Peak EQ Freq x10", "Comp On", "Comp Threshold", "Comp Ratio", "Comp Release", "Comp Attack", "Comp Makeupgain", "Comp Link",
+            "Comp Mix", "DeEsser On", "DeEsser Listen", "DeEsser Bandpass Freq", "DeEsser Sensitivity", "Gate Threshold", "Gate Range", "Gate Hold",
+            "Gate Release", "Gate Attack", "Gate Key", "Gate Key Listen", "Gate On", "Gate Link", "Gate Expander", "All EQ On",
+            "EQ LF Freq", "EQ LF Gain", "EQ HF Freq", "EQ HF Gain", "EQ HF On", "EQ LF On", "EQ LMF Q", "EQ LMF Freq",
+            "EQ LMF Freq x3", "EQ LMF Gain", "EQ HMF Q", "EQ HMF Freq", "EQ HMF Freq x3", "EQ HMF Gain", "EQ HMF On", "EQ LMF On",
+            "EQ Position", "Meter Position", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console Focusrite SC");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 24
+                        && bridge.getMatchedButtonCount() == 6
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 3
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 12
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 15,
+                    "Focusrite SC: 24 knobs, 6 buttons, input 3, low cut 12, high cut 15");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 37
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 40
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "Focusrite SC: gate threshold 37, release 40, sustain 39, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 48
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 49
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 54
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 55
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 57
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 58
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 59
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 61
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 50
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 51,
+                    "Focusrite SC: EQ low 48/49, low mid 54/55/57, high mid 58/59/61, high 50/51");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 27
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 32
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 29
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == 28
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 26
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 5
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 4
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 7,
+                    "Focusrite SC: comp ratio 27, mix 32, attack 29, release 28, threshold 26, drive 5, character 4, pan -1, output 7");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 6
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 46
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 44
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 47
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 25
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 64,
+                    "Focusrite SC: buttons phase 6, filters -1, gate 46, shape 44, eq 47, low mode -1, high mode -1, comp 25, order 64");
+    }
+
+    beginTest ("v2.105.0: bx_console AMEK 200 mapping frozen");
+    {
+        Console1Bridge bridge;
+        const std::vector<juce::String> names = {
+            "Power", "Bank", "Monitoring", "Meter Position", "Mute", "Phase", "V-Gain", "THD",
+            "Input Gain", "Output Gain", "Console Channel", "Stereo Mode", "Mono Maker In", "Mono Maker", "Stereo Width In", "Stereo Width",
+            "Balance L/R", "Filter Position", "High Pass Filter In", "High Pass Filter", "Low Pass Filter In", "Low Pass Filter", "EQ On/Off", "EQ Position",
+            "LF Band In", "LF Frequency", "LF Q", "LF Gain", "LMF Band In", "LMF Frequency", "LMF Q", "LMF Gain",
+            "MF Band In", "MF Frequency", "MF Q", "MF Gain", "HMF Band In", "HMF Frequency", "HMF Q", "HMF Gain",
+            "HF Band In", "HF Frequency", "HF Q", "HF Gain", "Gain Scale", "Gain Scale Invert", "Auto Listen", "Dyn External Key",
+            "Gate/Exp On/Off", "Gate/Expander Mode", "Gate/Exp Thresh", "Gate/Exp Thresh Range", "Gate/Exp Range", "Gate/Exp Invert", "Gate Hold", "Expander Ratio",
+            "Gate/Exp Attack", "Gate/Exp Release", "Gate/Exp Release Lin", "Gate/Exp Low Pass Freq", "Gate/Exp Low Pass Resonant Q", "Gate/Exp High Pass Freq", "Gate/Exp High Pass Resonant Q", "Gate/Exp Key Listen",
+            "Comp On/Off", "Comp Threshold", "Comp Ratio", "Comp Timing", "Comp Ambience", "Comp Output", "Comp Parallel Mix", "Sidechain Link",
+            "Limiter On/Off", "Limiter Threshold", "Limiter Makeup Gain", "Limiter Mix", "Limiter Ambience", "VCA Clip On/Off", "VCA Clip Headroom", "Bypass",
+        };
+        MockConsole console (true, 0, names, "bx_console AMEK 200");
+        bridge.retargetPlugin (&console);
+
+        expectTrue (bridge.getMatchedRoleCount() == 24
+                        && bridge.getMatchedButtonCount() == 7
+                        && bridge.getTargetIndexForRole (int (C1Role::inputGain)) == 8
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 19
+                        && bridge.getTargetIndexForRole (int (C1Role::highCut)) == 21,
+                    "AMEK 200: 24 knobs, 7 buttons, input 8, low cut 19, high cut 21");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::gateThreshold)) == 50
+                        && bridge.getTargetIndexForRole (int (C1Role::gateRelease)) == 57
+                        && bridge.getTargetIndexForRole (int (C1Role::sustain)) == 54
+                        && bridge.getTargetIndexForRole (int (C1Role::punch)) == -1,
+                    "AMEK 200: gate threshold 50, release 57, sustain 54, punch -1");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::eqLowFreq)) == 25
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLowGain)) == 27
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidQ)) == 30
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidFreq)) == 29
+                        && bridge.getTargetIndexForRole (int (C1Role::eqLoMidGain)) == 31
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidQ)) == 38
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidFreq)) == 37
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHiMidGain)) == 39
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighFreq)) == 41
+                        && bridge.getTargetIndexForRole (int (C1Role::eqHighGain)) == 43,
+                    "AMEK 200: EQ low 25/27, low mid 30/29/31, high mid 38/37/39, high 41/43");
+        expectTrue (bridge.getTargetIndexForRole (int (C1Role::compRatio)) == 66
+                        && bridge.getTargetIndexForRole (int (C1Role::compDryWet)) == 70
+                        && bridge.getTargetIndexForRole (int (C1Role::compAttack)) == 67
+                        && bridge.getTargetIndexForRole (int (C1Role::compRelease)) == -1
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 65
+                        && bridge.getTargetIndexForRole (int (C1Role::drive)) == 7
+                        && bridge.getTargetIndexForRole (int (C1Role::character)) == 6
+                        && bridge.getTargetIndexForRole (int (C1Role::pan)) == 16
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 9,
+                    "AMEK 200: comp ratio 66, mix 70, attack 67, release -1, threshold 65, drive 7, character 6, pan 16, output 9");
+        expectTrue (bridge.getButtonTargetIndexForRole (int (C1Button::phaseInvert)) == 5
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::filtersToComp)) == 17
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::hardGate)) == 49
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::shapeOn)) == 48
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::eqOn)) == 22
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::lowMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::highMode)) == -1
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::compOn)) == 64
+                        && bridge.getButtonTargetIndexForRole (int (C1Button::order)) == 23,
+                    "AMEK 200: buttons phase 5, filters 17, gate 49, shape 48, eq 22, low mode -1, high mode -1, comp 64, order 23");
+    }
+
+    beginTest ("v2.105.0: a pin past the parameter list is skipped, the greedy claim stands");
+    {
+        Console1Bridge bridge;
+        MockConsole stub (true, 0, { "Low Cut", "Threshold", "Output" }, "bx_console AMEK 200");
+        bridge.retargetPlugin (&stub);
+
+        expectTrue (bridge.getMatchedRoleCount() == 3
+                        && bridge.getMatchedButtonCount() == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::lowCut)) == 0
+                        && bridge.getTargetIndexForRole (int (C1Role::compThreshold)) == 1
+                        && bridge.getTargetIndexForRole (int (C1Role::output)) == 2,
+                    "the AMEK 200 pins (19, 21) sit past the 3-parameter list, so the greedy claims stand");
     }
 }
 

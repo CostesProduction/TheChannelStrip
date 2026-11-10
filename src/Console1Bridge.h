@@ -185,48 +185,58 @@ inline int c1TrackIndexForCc (int cc)
 // On" (5), and the character knob is the tilt - the generic
 // "character" pattern is gone because on the Costes console it
 // grabbed "Compressor Character" (9) and the tilt (4) could never
-// win. A hosted console that really exposes a character knob can
-// get a pinned pattern the day one exists.
+// win. v2.105.0: the hosted bx consoles expose the character knob as
+// "V-Gain" / "Virtual Gain", so those patterns carry the role there
+// (the Costes tilt keeps the pattern it always had).
 
 namespace Console1Detail
 {
-    inline const char* const wInputGain[]     = { "inputgain", "inputtrim", "intrim", "inputlevel", "inlevel",
-                                                 "trimin", nullptr };
-    inline const char* const wHighCut[]       = { "highcut", "hpf", "highpasscut", nullptr };
-    inline const char* const wLowCut[]        = { "lowcut", "inputlowcut", "lowcutfilter", nullptr };
+    inline const char* const wInputGain[]     = { "inputgain", "inputtrim", "intrim", "trimin", "ingain",
+                                                 "pregain", nullptr };
+    inline const char* const wHighCut[]       = { "highcut", "lowpass", "lpffrequency", "lpffreq", nullptr };
+    inline const char* const wLowCut[]        = { "lowcut", "inputlowcut", "lowcutfilter", "hpffrequency",
+                                                 "hpffreq", "highpassfreq", "highpassfilter", nullptr };
     inline const char* const wGateThreshold[] = { "gatethreshold", "gatethresh", "gatelevel", "gategain", "gate",
-                                                 "expanderthreshold", nullptr };
-    inline const char* const wGateRelease[]  = { "gaterelease", "shaperelease", "expanderrelease", nullptr };
-    inline const char* const wSustain[]      = { "sustain", nullptr };
+                                                 "expanderthreshold", "gethreshold", "expthresh", nullptr };
+    inline const char* const wGateRelease[]  = { "gaterelease", "shaperelease", "expanderrelease", "gerelease",
+                                                 "exprelease", nullptr };
+    inline const char* const wSustain[]      = { "sustain", "gatehold", nullptr };
     inline const char* const wPunch[]         = { "punch", "transientattack", nullptr };
     inline const char* const wEqLowFreq[]    = { "lowfreq", "lowfrequency", "lffreq", "bassfreq", "lowbandfreq",
                                                  "eq1frequency", nullptr };
     inline const char* const wEqLowGain[]    = { "lowgain", "lfgain", "bassgain", "lowbandgain", "eq1gain", nullptr };
-    inline const char* const wEqLoMidQ[]     = { "lowmidq", "lmcue", "lowmidcue", "eq2width", nullptr };
+    inline const char* const wEqLoMidQ[]     = { "lowmidq", "lmcue", "lowmidcue", "eq2width", "lmfq", nullptr };
     inline const char* const wEqLoMidFreq[]  = { "lowmidfreq", "lowmidfrequency", "lmfreq", "midlowfreq",
-                                                 "eq2frequency", nullptr };
-    inline const char* const wEqLoMidGain[]  = { "lowmidgain", "lmgain", "midlowgain", "eq2gain", nullptr };
-    inline const char* const wEqHiMidQ[]     = { "highmidq", "hmcue", "highmidcue", "eq3width", nullptr };
+                                                 "eq2frequency", "lmffreq", "midfreq", nullptr };
+    inline const char* const wEqLoMidGain[]  = { "lowmidgain", "lmgain", "midlowgain", "eq2gain", "lmfgain",
+                                                 "midgain", nullptr };
+    inline const char* const wEqHiMidQ[]     = { "highmidq", "hmcue", "highmidcue", "eq3width", "hmfq",
+                                                 "midhighq", nullptr };
     inline const char* const wEqHiMidFreq[]  = { "highmidfreq", "highmidfrequency", "hmfreq", "midhighfreq",
-                                                 "eq3frequency", nullptr };
-    inline const char* const wEqHiMidGain[]  = { "highmidgain", "hmgain", "midhighgain", "eq3gain", nullptr };
+                                                 "eq3frequency", "hmffreq", nullptr };
+    inline const char* const wEqHiMidGain[]  = { "highmidgain", "hmgain", "midhighgain", "eq3gain", "hmfgain",
+                                                 nullptr };
     inline const char* const wEqHighFreq[]   = { "highfreq", "highfrequency", "hffreq", "treblefreq", "highbandfreq",
                                                  "eq4frequency", nullptr };
     inline const char* const wEqHighGain[]   = { "highgain", "hfgain", "treblegain", "highbandgain", "eq4gain", nullptr };
     inline const char* const wCompRatio[]    = { "ratio", "compratio", "compressionratio", "compressorratio", nullptr };
-    inline const char* const wCompDryWet[]   = { "parallel", "drywet", "mix", "blend", "compressormix", nullptr };
-    inline const char* const wCompAttack[]   = { "attack", "attacktime", "compattack", "compressorfastattack", nullptr };
-    inline const char* const wCompRelease[]  = { "release", "releasetime", "comprelease", "compressorrelease", nullptr };
+    inline const char* const wCompDryWet[]   = { "parallel", "drywet", "mix", "blend", "compressormix",
+                                                 "compmix", nullptr };
+    inline const char* const wCompAttack[]   = { "attack", "attacktime", "compattack", "compressorfastattack",
+                                                 "comptiming", "compfast", nullptr };
+    inline const char* const wCompRelease[]  = { "release", "releasetime", "comprelease", "compressorrelease",
+                                                 "vcarelease", "comprecovery", nullptr };
     inline const char* const wCompThreshold[]= { "threshold", "thresh", "compthreshold", "compressionthreshold",
                                                  "compressorthreshold", nullptr };
-    inline const char* const wDrive[]        = { "drive", "saturation", "saturationdrive", nullptr };
+    inline const char* const wDrive[]        = { "drive", "saturation", "saturationdrive", "thd", nullptr };
     // v2.103.1: the tilt, not the generic "character" - that pattern
     // always grabbed "Compressor Character" (9 chars) and the tilt
     // (4 chars) could never win the greedy assignment.
-    inline const char* const wCharacter[]    = { "tilt", nullptr };
+    inline const char* const wCharacter[]    = { "tilt", "vgain", "virtualgain", nullptr };
     inline const char* const wPan[]          = { "pan", "balance", "panorama", "panpot", nullptr };
     inline const char* const wOutput[]       = { "output", "outputlevel", "channelvolume", "volume",
-                                                 "outlevel", "outtrim", "trimout", "mastervolume", nullptr };
+                                                 "outlevel", "outtrim", "trimout", "mastervolume", "outgain",
+                                                 nullptr };
 
     inline const char* const* const words[c1NumRoles] = {
         wInputGain, wHighCut, wLowCut,
@@ -251,19 +261,73 @@ namespace Console1Detail
 // the Costes console.
 namespace Console1ButtonDetail
 {
-    inline const char* const wBPhaseInvert[]   = { "phaseinvert", "polarity", "invert", "phase", nullptr };
-    inline const char* const wBFiltersToComp[] = { "filtertocompressor", "filtertocomp", "filtertocmp", nullptr };
-    inline const char* const wBHardGate[]      = { "expanderfastattack", "hardgate", "gatefastattack", nullptr };
-    inline const char* const wBShapeOn[]       = { "expanderon", "shapeon", "gateon", nullptr };
-    inline const char* const wBEqOn[]          = { "eqon", "equalizeron", nullptr };
-    inline const char* const wBLowMode[]      = { "eq1mode", "lowbell", "lowshelf", "lowmode", nullptr };
-    inline const char* const wBHighMode[]     = { "eq4mode", "highbell", "highshelf", "highmode", nullptr };
-    inline const char* const wBCompOn[]       = { "compressoron", "compon", nullptr };
-    inline const char* const wBOrder[]        = { "chainorder", "routingorder", "signalorder", nullptr };
+    // v2.105.0: bare "invert" is GONE - it matched "GE Invert" (6 chars)
+    // over "Phase" (5) on every SSL-style console and steered the
+    // phase button into the gate expander.
+    inline const char* const wBPhaseInvert[]   = { "phaseinvert", "polarity", "phase", nullptr };
+    inline const char* const wBFiltersToComp[] = { "filtertocompressor", "filtertocomp", "filtertocmp",
+                                                  "fltposition", "filterposition", nullptr };
+    inline const char* const wBHardGate[]      = { "expanderfastattack", "hardgate", "gatefastattack",
+                                                  "gemode", "expandermode", "gateexpander", "gatefast",
+                                                  nullptr };
+    // v2.105.0: no bare "gatein" - it hides inside "Gate Invert(ed)";
+    // the Lindell "Gate In" switches are pinned instead.
+    inline const char* const wBShapeOn[]       = { "expanderon", "shapeon", "gateon", "geonoff",
+                                                  "gateexponoff", nullptr };
+    inline const char* const wBEqOn[]          = { "eqon", "equalizeron", "eqin", nullptr };
+    inline const char* const wBLowMode[]      = { "eq1mode", "lowbell", "lowshelf", "lowmode", "lowpeak",
+                                                  nullptr };
+    inline const char* const wBHighMode[]     = { "eq4mode", "highbell", "highshelf", "highmode", "highpeak",
+                                                  nullptr };
+    inline const char* const wBCompOn[]       = { "compressoron", "compon", "compin", "dynonoff", "lconoff",
+                                                  nullptr };
+    inline const char* const wBOrder[]        = { "chainorder", "routingorder", "signalorder", "eqposition",
+                                                  "eqpostdyn", nullptr };
 
     inline const char* const* const words[c1NumButtons] = {
         wBPhaseInvert, wBFiltersToComp, wBHardGate, wBShapeOn,
         wBEqOn, wBLowMode, wBHighMode, wBCompOn, wBOrder
+    };
+}
+
+// v2.105.0 (the nine consoles): the pinned overrides, applied AFTER
+// the two greedy passes. The resolver works on substrings, and some
+// facts of the real consoles cannot be expressed that way: the AMEK
+// 200 lists "High Pass Filter In" (the switch) one slot before "High
+// Pass Filter" (the frequency), and on four consoles the three letters
+// "pan" hide inside "exPANder" and would steer the pan knob into the
+// gate-expander switch. A pin can also force a driver idle (-1): the
+// Lindell 50 hosts TWO compressors, and the "mix" the greedy finds
+// belongs to the FET one, not the VCA the MK2 comp section drives. The
+// key is the hosted plugin getName() - the exact string the doctor
+// report prints - so a pin only ever applies to the console it froze
+// and an unknown console stays pure greedy. The frozen per-console
+// tests in the offline suite validate every index below.
+namespace Console1PinDetail
+{
+    struct C1Pin { const char* console; int driver; int index; };
+
+    inline const C1Pin pins[] = {
+        { "bx_console AMEK 9099",    (int) C1Role::pan,                     -1 },
+        { "bx_console AMEK 9099",    c1NumRoles + (int) C1Button::hardGate, 69 },
+        { "bx_console SSL 9000 J",   (int) C1Role::pan,                     -1 },
+        { "bx_console SSL 9000 J",   c1NumRoles + (int) C1Button::hardGate, 28 },
+        { "bx_console Focusrite SC", (int) C1Role::pan,                     -1 },
+        { "bx_console Focusrite SC", c1NumRoles + (int) C1Button::hardGate, 46 },
+        { "bx_console AMEK 200",     (int) C1Role::lowCut,                  19 },
+        { "bx_console AMEK 200",     (int) C1Role::highCut,                 21 },
+        { "bx_console AMEK 200",     (int) C1Role::compRelease,             -1 },
+        { "Lindell 50 Channel",      (int) C1Role::compDryWet,              -1 },
+        { "Lindell 50 Channel",      (int) C1Role::pan,                     -1 },
+        { "Lindell 50 Channel",      c1NumRoles + (int) C1Button::hardGate, 60 },
+        { "Lindell 50 Channel",      c1NumRoles + (int) C1Button::shapeOn,  59 },
+        { "Lindell 80 Channel",      (int) C1Role::inputGain,                1 },
+        { "Lindell 80 Channel",      (int) C1Role::lowCut,                  12 },
+        { "Lindell 80 Channel",      (int) C1Role::gateRelease,             30 },
+        { "Lindell 80 Channel",      (int) C1Role::pan,                     -1 },
+        { "Lindell 80 Channel",      c1NumRoles + (int) C1Button::hardGate, 32 },
+        { "Lindell 80 Channel",      c1NumRoles + (int) C1Button::shapeOn,  31 },
+        { "Lindell 80 Channel",      c1NumRoles + (int) C1Button::eqOn,     14 }
     };
 }
 
@@ -455,7 +519,29 @@ public:
             if (bestScore <= 0)
                 break;
             buttonAssigned[(size_t) bestButton] = bestParam;
-            used[(size_t) bestParam] = 1;
+            used[(size_t) bestParam]   = 1;
+        }
+
+        // v2.105.0: the pinned overrides, applied before the swap so
+        // the greedy result and the pins publish atomically. A pin
+        // whose index sits past the parameter list is skipped - a
+        // plugin update may have moved it, so the greedy claim then
+        // stands and the frozen tests catch the shift. The "used"
+        // flags are not rewritten: no pass runs after this point.
+        if (active != nullptr)
+        {
+            const juce::String consoleName = active->getName();
+            for (const auto& pin : Console1PinDetail::pins)
+            {
+                if (! consoleName.equalsIgnoreCase (juce::String (pin.console)))
+                    continue;
+                if (pin.index >= n)
+                    continue;
+                if (pin.driver < c1NumRoles)
+                    assigned[(size_t) pin.driver] = pin.index;
+                else if (pin.driver < c1NumRoles + c1NumButtons)
+                    buttonAssigned[(size_t) (pin.driver - c1NumRoles)] = pin.index;
+            }
         }
 
         // Swap the resolved table under the lock. idx >= 0 can only

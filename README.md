@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.104.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.105.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,24 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.105.0** — *The nine consoles.*
+  - **The 26 MK2 knobs and the 9 buttons now resolve on all nine hosted
+    consoles**, frozen against the doctor reports captured on 2026-11-10:
+    AMEK 9099 (24/26 + 9/9), SSL 4000 E (23/26 + 8/9), SSL 4000 G (23/26 +
+    8/9), SSL 9000 J (24/26 + 8/9), bx_console N (23/26 + 7/9), Lindell 80
+    Channel (19/26 + 5/9), Lindell 50 Channel (18/26 + 8/9), Focusrite SC
+    (24/26 + 6/9), AMEK 200 (24/26 + 7/9).
+  - **The HPF/LPF inversion is fixed**: the low-cut knob is the high-pass
+    filter and the high-cut knob the low-pass, as the hardware labels read.
+  - **Two live v2.104 bugs closed**: the phase button no longer steals
+    "GE Invert" from the gate expander, and the pan pattern no longer
+    hides inside "exPANder" names.
+  - **The character knob carries the analog V-Gain / Virtual Gain** on
+    the bx consoles (validated in the field); the Costes tilt is
+    unchanged.
+  - **A small pinned-mapping table** carries the console-specific facts no
+    substring can express (the AMEK 200 filter pair, the Lindell dual
+    compressor), keyed on the hosted plugin exact name.
 - **2.104.1** — *The doctor reads the console.*
   - **The Doctor report now lists the hosted console's parameters,
     index by index,** with the exact names the Console 1 bridge
