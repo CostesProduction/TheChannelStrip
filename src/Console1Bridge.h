@@ -28,7 +28,8 @@
 // settled the hardware model: ONE message per press, and the value IS
 // the state the button means (7F on, 00 off, 3F the middle of a
 // 3-position cycle). The bridge obeys the value - a 2-state target
-// takes it absolute, a multi-state one toggles between its ends - and
+// takes it absolute, a multi-state one toggles its working pair (a
+// 3-state switch pairs its middle with its end: bell<->shelf) - and
 // the Track Select range (CC 21..30, Track 1..10) parks console
 // selections that the editor heartbeat applies on the message thread,
 // because a console swap can never run on the audio thread.
@@ -862,22 +863,54 @@ private:
                 return;
 
             const int steps = param->getNumSteps();
+            const bool rungTarget = param->isDiscrete() && steps >= 2 && steps <= 128;
+            auto* const ranged = dynamic_cast<juce::RangedAudioParameter*> (param);
+            const float gridStep = (rungTarget || ranged == nullptr)
+                                        ? 0.0f
+                                        : ranged->getNormalisableRange().interval;
             float target = -1.0f; // < 0: the move was eaten below a rung
-            if (param->isDiscrete() && steps >= 2 && steps <= 128)
+            if (rungTarget || gridStep > 0.0f)
             {
-                // Discrete parameters (2..128 steps) land on rungs, but one
-                // CC step is far smaller than a rung: the single-shot snap of
-                // build 1 ate every sub-rung move and a ladder knob never
-                // left its rung. v2.106.1 banks the pending intent per role
-                // (clamped to one rung, so the ends cannot bank credit)
-                // until it crosses a rung boundary.
+                // Grid parameters land on rungs: a discrete one (2..128
+                // steps) or, since v2.106.3, a STEPPED RANGE - the Costes
+                // compressor threshold spans -60..0 dB on a 1 dB grid, the
+                // way the mouse snaps it, and the knob owes the parameter
+                // the same lattice. One CC step is far smaller than a grid
+                // cell: the single-shot snap of build 1 ate every sub-cell
+                // move and a grid knob never left its value. v2.106.1 banks
+                // the pending intent per role (clamped to one cell, so the
+                // ends cannot bank credit) until it crosses a boundary;
+                // v2.106.3 snaps a stepped range in REAL space, so even a
+                // skewed grid lands on a legal value.
                 float& pending = knobPending[(size_t) role];
                 pending += (float) delta * c1KnobGain;
-                const float gap = 1.0f / (float) (steps - 1);
+                float gap = 1.0f; // a 2-step discrete target spans the range
+                if (rungTarget)
+                {
+                    gap = 1.0f / (float) (steps - 1);
+                }
+                else
+                {
+                    const auto& range = ranged->getNormalisableRange();
+                    const float realNow = ranged->convertFrom0to1 (param->getValue());
+                    const float neighbour = (realNow + gridStep <= range.getRange().getEnd())
+                                                ? (realNow + gridStep) : (realNow - gridStep);
+                    gap = std::fabs (ranged->convertTo0to1 (neighbour) - param->getValue());
+                }
                 pending = juce::jlimit (-gap, gap, pending);
-                const float snapped = juce::jlimit (0.0f, 1.0f,
-                    (float) juce::roundToInt ((param->getValue() + pending) * (float) (steps - 1))
-                        / (float) (steps - 1));
+                float snapped = -1.0f;
+                if (rungTarget)
+                {
+                    snapped = juce::jlimit (0.0f, 1.0f,
+                        (float) juce::roundToInt ((param->getValue() + pending) * (float) (steps - 1))
+                            / (float) (steps - 1));
+                }
+                else
+                {
+                    snapped = juce::jlimit (0.0f, 1.0f,
+                        ranged->convertTo0to1 (ranged->getNormalisableRange().snapToLegalValue (
+                            ranged->convertFrom0to1 (param->getValue() + pending))));
+                }
                 if (std::fabs (snapped - param->getValue()) >= 1.0e-6f)
                 {
                     param->setValueNotifyingHost (snapped);
@@ -924,9 +957,16 @@ private:
             // answers on the FIRST press, the way every 2-state button
             // always did. v2.106.2: the value is ignored here - the
             // hardware cycles 7F/3F/00 blindly, so the toggle follows
-            // the press count, not the value.
+            // the press count, not the value. v2.106.3: a 3-state switch
+            // toggles its working pair - the MIDDLE with the END
+            // (bell<->shelf); the first state (cut) is the corner the
+            // hand leaves, not a toggle end.
             const int current = juce::roundToInt (param->getValue() * (float) (steps - 1));
-            const int next = (current >= steps - 1) ? 0 : (steps - 1);
+            int next;
+            if (steps == 3)
+                next = (current == 1) ? (steps - 1) : 1;
+            else
+                next = (current >= steps - 1) ? 0 : (steps - 1);
             param->setValueNotifyingHost ((float) next / (float) (steps - 1));
         }
         else

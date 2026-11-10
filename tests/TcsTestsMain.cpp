@@ -916,10 +916,12 @@ public:
 
         // v2.106.0: the three-state section switch the cut-bell-shelf
         // button drives - the multi-state button targets of the hosted
-        // consoles, frozen in a mock.
+        // consoles, frozen in a mock. v2.106.3: the labels wear the real
+        // CUT/BELL/SHELF cycle of the EQ mode switches, because the
+        // toggle pairs BELL with SHELF now.
         modeChoice = new juce::AudioParameterChoice (
             juce::ParameterID { "mockLowMode", 1 }, "Low Mode",
-            { "Off", "Mid", "On" }, 0);
+            { "Cut", "Bell", "Shelf" }, 0);
         addParameter (modeChoice);
     }
 
@@ -961,6 +963,63 @@ public:
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockChoiceConsole)
+};
+
+// v2.106.3 (the honest grid): a console whose one knob wears a STEPPED
+// range - the real Costes compressor threshold spans -60..0 dB on a
+// 1 dB grid, the way the mouse snaps it. The knob must land on the
+// same lattice, never on a phantom value in between.
+class MockSteppedConsole : public juce::AudioProcessor
+{
+public:
+    MockSteppedConsole()
+        : AudioProcessor (BusesProperties()
+                            .withInput  ("Main", juce::AudioChannelSet::stereo(), true)
+                            .withOutput ("Main", juce::AudioChannelSet::stereo(), true))
+    {
+        threshold = new juce::AudioParameterFloat (
+            juce::ParameterID { "mockSteppedThreshold", 1 }, "Compressor Threshold",
+            juce::NormalisableRange<float> (-60.0f, 0.0f, 1.0f), -20.0f);
+        addParameter (threshold);
+    }
+
+    const juce::String getName() const override { return "MockSteppedConsole"; }
+
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        return layouts.getMainInputChannelSet() == layouts.getMainOutputChannelSet()
+            && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.clear();
+    }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi()  const override { return false; }
+    bool producesMidi() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+    // Raw on purpose: the base class owns the parameter, the tests keep a
+    // handle to read the real dB value after the bridge moves it.
+    juce::AudioParameterFloat* threshold = nullptr;
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MockSteppedConsole)
 };
 
 // ---------------------------------------------------------------------------
@@ -12022,7 +12081,7 @@ static void testV21040Console1Buttons()
                     "an overshoot past the ceiling clamps at one");
     }
 
-    beginTest ("v2.106.0: a multi-state button target toggles between its ends");
+    beginTest ("v2.106.3: a three-state button toggles between its middle and its end");
     {
         MockChoiceConsole choice;
         Console1Bridge bridge;
@@ -12033,30 +12092,30 @@ static void testV21040Console1Buttons()
 
         auto* mode = choice.modeChoice;
         expectTrue (mode->getIndex() == 0,
-                    "the switch starts on the first state");
+                    "the switch starts on CUT");
 
         bridge.postController (93, 127); // the press
         bridge.drainNow();
-        expectTrue (mode->getIndex() == 2,
-                    "one press lands DIRECTLY on the last state - no step-by-step cycle");
+        expectTrue (mode->getIndex() == 1,
+                    "one press from CUT lands on BELL - the working pair, never a crawl");
 
         int cc = 0, value = 0;
-        expectTrue (bridge.popLedEcho (cc, value) && cc == 93 && value == 127,
-                    "the press echoes the button LED lit");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 93 && value == 0,
+                    "BELL reads as LED off - only the last state lights the ring");
 
         bridge.postController (93, 127);
         bridge.drainNow();
-        expectTrue (mode->getIndex() == 0,
-                    "the next press lands DIRECTLY back on the first state");
+        expectTrue (mode->getIndex() == 2,
+                    "the next press lands on SHELF - the pair alternates");
 
         mode->setValueNotifyingHost (0.5f); // parked on the middle state
         expectTrue (mode->getIndex() == 1,
                     "the switch parks on the middle state");
 
-        bridge.postController (93, 63); // a 3F mid-state press is a press too
+        bridge.postController (93, 63); // a 3F message toggles the pair too
         bridge.drainNow();
         expectTrue (mode->getIndex() == 2,
-                    "a press from the middle state still lands on ON - the module answers first press");
+                    "a 3F message from BELL lands on SHELF - the value is the state, not a step");
     }
 
     beginTest ("v2.106.0: the full LED sync covers every knob and every button");
@@ -12230,6 +12289,85 @@ static void testV21040Console1Buttons()
                     "a fall below rung 0 is eaten - the intent keeps banking");
         expectTrue (bridge.popLedEcho (cc, value) && cc == 51 && value == 0,
                     "the eaten move echoes the rung, not the intent");
+    }
+
+    // ---- v2.106.3 (the honest grid): stepped ranges snap like the mouse --
+    beginTest ("v2.106.3: a stepped range snaps the knob to the parameter's grid");
+    {
+        Console1Bridge bridge;
+        MockSteppedConsole stepped;
+        bridge.retargetPlugin (&stepped);
+        bridge.simulateOutputOpenForTests();
+
+        expectTrue (bridge.getMatchedRoleCount() == 1,
+                    "the stepped threshold resolves exactly one role (compThreshold)");
+
+        auto* const thresholdParam = stepped.threshold;
+        expectTrue (std::abs (thresholdParam->get() - (-20.0f)) < 1.0e-4f,
+                    "the mock starts at -20 dB, on the grid");
+
+        // the mouse snaps this threshold to whole dB because its range
+        // carries a 1 dB interval - the knob owes the same lattice
+        bridge.postController (47, 64);   // the hand's first touch
+        bridge.drainNow();
+        expectTrue (std::abs (thresholdParam->get() - (-20.0f)) < 1.0e-4f,
+                    "the first touch moves nothing");
+        int cc = 0, value = 0;
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 47 && value == 85,
+                    "the first touch echoes -20 dB's ring, 85");
+
+        // one detent is 60/508 dB: four of them stay below the half-step,
+        // the intent banks, the value never leaves the 1 dB grid
+        for (int i = 0; i < 4; ++i)
+        {
+            bridge.postController (47, 86);
+            bridge.drainNow();
+        }
+        expectTrue (std::abs (thresholdParam->get() - (-20.0f)) < 1.0e-4f,
+                    "four sub-grid detents stay at -20 dB - the intent banks");
+        int popped = 0;
+        while (bridge.popLedEcho (cc, value))
+            ++popped;
+        expectTrue (popped == 4 && cc == 47 && value == 85,
+                    "each banked detent echoes the unchanged ring, 85");
+
+        // the fifth detent crosses the half-step: a whole dB, never a phantom
+        bridge.postController (47, 86);
+        bridge.drainNow();
+        expectTrue (std::abs (thresholdParam->get() - (-19.0f)) < 1.0e-4f,
+                    "the crossing lands exactly on -19 dB");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 47 && value == 87,
+                    "the crossing echoes -19 dB's ring, 87");
+
+        // and the grid keeps its word on the way down
+        for (int i = 0; i < 4; ++i)
+        {
+            bridge.postController (47, 86);
+            bridge.drainNow();
+        }
+        expectTrue (std::abs (thresholdParam->get() - (-19.0f)) < 1.0e-4f,
+                    "four down-detents stay at -19 dB");
+        popped = 0;
+        while (bridge.popLedEcho (cc, value))
+            ++popped;
+        expectTrue (popped == 4 && cc == 47 && value == 87,
+                    "each banked down-detent echoes the unchanged ring, 87");
+
+        bridge.postController (47, 86);
+        bridge.drainNow();
+        expectTrue (std::abs (thresholdParam->get() - (-20.0f)) < 1.0e-4f,
+                    "the fifth down-detent crosses back to -20 dB");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 47 && value == 85,
+                    "the crossing back echoes -20 dB's ring, 85");
+
+        // a big jump is clamped to one cell: the same anti-teleport rule
+        // as the ladder rungs - the ends cannot bank credit
+        bridge.postController (47, 21);   // -64 in one move
+        bridge.drainNow();
+        expectTrue (std::abs (thresholdParam->get() - (-21.0f)) < 1.0e-4f,
+                    "a 64-detent fall crosses exactly one dB");
+        expectTrue (bridge.popLedEcho (cc, value) && cc == 47 && value == 83,
+                    "-21 dB echoes its ring, 83");
     }
 
     // ---- v2.105.0 (the nine consoles) --------------------------------------

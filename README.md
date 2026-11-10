@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.106.2** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.106.3** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,22 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.106.3** — *Bells and the honest grid.*
+  - **THE EQ BUTTONS PAIR BELL WITH SHELF** - the CUT/BELL/SHELF
+    section switches toggle their working pair now: a press from CUT
+    lands on BELL, then the pair alternates BELL <-> SHELF. CUT is the
+    corner the hand leaves, not a toggle end (the in-situ report of
+    2026-11-10: the toggle used to jump CUT <-> SHELF and BELL was
+    unreachable).
+  - **THE KNOBS OBEY THE PARAMETER'S GRID** - the mouse snaps the
+    Costes thresholds to whole dB because their range carries a step
+    interval; the knob owes the same lattice. Sub-grid detents bank
+    their intent and the crossing lands exactly on the parameter's own
+    step - snapped in real space, so even a skewed grid lands legal -
+    never again a phantom 0.2 dB between the mouse's steps, and the
+    same one-cell-per-message clamp as the ladders stops the
+    teleporting.
 
 - **2.106.2** — *The buttons say what they mean.*
   - **THE BUTTON VALUE IS THE INTENT** - the MIDI capture of 2026-11-10
