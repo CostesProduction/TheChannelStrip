@@ -2991,8 +2991,12 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor (
         if (inRegistry && ! viewedProcessor->isEditorOpen())
         {
             const juce::uint32 embedNowMs = juce::Time::getMillisecondCounter();
-            viewGone = TheChannelStripAudioProcessor::isInstanceStale (
-                            *viewedProcessor, embedNowMs)
+            // v2.110.0: the held view falls only past the LONG absence
+            // - a track whose region is between events must not drop
+            // the view mid-take (the 3 s probe used to send it home).
+            viewGone = TheChannelStripAudioProcessor::isInstanceAbsentBeyond (
+                            *viewedProcessor, embedNowMs,
+                            TheChannelStripAudioProcessor::walkerGoneAfterMs)
                 && (viewedProcessor->isWalkerGone()
                         || TheChannelStripAudioProcessor::isAnyInstanceDelivering (
                                SessionConsoleLink::getInstance()
@@ -3069,14 +3073,20 @@ void TheChannelStripAudioProcessorEditor::releaseViewedInstance()
 
     embeddedHostedEditor.reset();
 
-    if (! viewedProcessor->isEditorOpen())
-        viewedProcessor->getHostedStrip().setEditorObservedPlugin (nullptr);
-
-    // v2.109.0: the viewed instance can stop measuring - unless it
-    // already left the registry, in which case its counter died with
-    // it and must not be touched through a stale pointer.
+    // v2.110.0: the registry guards EVERY member touch below - a
+    // viewed instance purged from the host's undo cache is freed
+    // memory, and isEditorOpen used to deref it before the guard.
+    // The embedded editor reset above is this editor's own component;
+    // the dead instance is never reached through it.
     if (SessionConsoleLink::getInstance().contains (viewedProcessor))
+    {
+        if (! viewedProcessor->isEditorOpen())
+            viewedProcessor->getHostedStrip().setEditorObservedPlugin (nullptr);
+
+        // v2.109.0: the viewed instance can stop measuring - its
+        // counter died with it only if it already left the registry.
         viewedProcessor->releaseWalkerView();
+    }
 
     viewedProcessor = nullptr;
 }
@@ -3139,7 +3149,16 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
         // the host's undo cache - the registry still lists it,
         // but it no longer receives blocks. The walker steps
         // over these ghosts.
-        if (TheChannelStripAudioProcessor::isInstanceStale (*candidate, nowMs))
+        // v2.110.0 (the walk trusts the gaps): the ghost verdict now
+        // needs a LONG absence - Studio One delivers nothing while a
+        // track's events are not playing, and the 3 s probe marked
+        // Clement's live tracks gone between their regions (the
+        // Terminal showed CH 2/6/7 marked mid-play, CH 6 twice).
+        // Under the long threshold a silent gap is just a gap: the
+        // channel stays in the walk like any other.
+        if (TheChannelStripAudioProcessor::isInstanceAbsentBeyond (
+                *candidate, nowMs,
+                TheChannelStripAudioProcessor::walkerGoneAfterMs))
         {
             // v2.109.1 (the walk remembers the gone): stale means
             // gone only while the session still delivers somewhere -
@@ -3173,6 +3192,18 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
                 "[TheChannelStrip] walk: CH "
                 + juce::String (candidate->getChannelNumber())
                 + " reachable without blocks (the session is idle)");
+        }
+        else if (TheChannelStripAudioProcessor::isInstanceStale (*candidate,
+                                                                  nowMs))
+        {
+            // v2.110.0: a silent gap under the verdict threshold - the
+            // region is simply not playing right now. The Terminal says
+            // the channel is kept, and the walk acquires it below like
+            // any other.
+            juce::Logger::writeToLog (
+                "[TheChannelStrip] walk: CH "
+                + juce::String (candidate->getChannelNumber())
+                + " kept in the walk (silent gap under the gone verdict)");
         }
 
         // v2.109.0: the view keeps the measured instance measuring -

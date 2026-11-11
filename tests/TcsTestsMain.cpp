@@ -13420,6 +13420,62 @@ static void testV21091WalkerRemembersGone()
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.110.0 (the walk trusts the gaps): the gone verdict needs a LONG
+// absence - Studio One delivers nothing to a track whose events are
+// not playing right now, and the 3 s probe marked Clement's live
+// tracks gone between their regions. The verdict lands only past
+// walkerGoneAfterMs, and the host's reconnect (prepareToPlay, every
+// transport start) lifts it with the freshness probe refreshed: a
+// purged undo-cache ghost never hears either one.
+static void testV21100WalkTrustsGaps()
+{
+    // the absence probes: 3 s still means stale, only 2 min means gone
+    {
+        TheChannelStripAudioProcessor p;
+        p.prepareToPlay (48000.0, 512);
+
+        const auto nowMs = juce::Time::getMillisecondCounter();
+
+        expectTrue (TheChannelStripAudioProcessor::isInstanceStale (
+                        p, nowMs + 4000)
+                    && ! TheChannelStripAudioProcessor::isInstanceAbsentBeyond (
+                        p, nowMs + 4000,
+                        TheChannelStripAudioProcessor::walkerGoneAfterMs),
+                    "a 4 s silence is stale but far from gone");
+
+        expectTrue (! TheChannelStripAudioProcessor::isInstanceAbsentBeyond (
+                        p, nowMs + 119000,
+                        TheChannelStripAudioProcessor::walkerGoneAfterMs),
+                    "a 119 s gap stays under the gone verdict");
+
+        expectTrue (TheChannelStripAudioProcessor::isInstanceAbsentBeyond (
+                        p, nowMs + 121000,
+                        TheChannelStripAudioProcessor::walkerGoneAfterMs),
+                    "a 121 s gap is gone territory");
+    }
+
+    // the host's reconnect lifts the verdict and refreshes the probe
+    {
+        TheChannelStripAudioProcessor p;
+        p.prepareToPlay (48000.0, 512);
+        p.markWalkerGone();
+
+        expectTrue (p.isWalkerGone(),
+                    "the verdict reads back before the reconnect");
+
+        p.prepareToPlay (48000.0, 512);
+
+        expectTrue (! p.isWalkerGone(),
+                    "the host reconnect lifts the gone verdict");
+
+        const auto nowMs = juce::Time::getMillisecondCounter();
+
+        expectTrue (! TheChannelStripAudioProcessor::isInstanceStale (p, nowMs),
+                    "the reconnect refreshes the freshness probe");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13528,6 +13584,7 @@ int main (int argc, char* argv[])
     testV21081WalkerFreshness();
     testV21090SidebarFollowsView();
     testV21091WalkerRemembersGone();
+    testV21100WalkTrustsGaps();
 
     if (integration)
         testIntegrationRealConsole();

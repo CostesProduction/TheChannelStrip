@@ -234,17 +234,43 @@ public:
     // millisecond clock, so the subtraction below stays modular.
     static constexpr juce::uint32 walkerStaleAfterMs = 3000;
 
+    // v2.110.0 (the walk trusts the gaps): the sticky verdict needs a
+    // LONG absence. Studio One delivers nothing to a track whose
+    // events are not playing right now, so the 3 s probe marked live
+    // tracks gone between their regions (Clement's Terminal showed
+    // CH 2/6/7 marked gone mid-play, CH 6 twice). Under this
+    // threshold a silent gap is just a gap; beyond it the verdict can
+    // be stamped (still only while the session delivers elsewhere).
+    static constexpr juce::uint32 walkerGoneAfterMs = 120000;
+
     juce::uint32 getLastProcessMs() const;
+
+    static bool isAbsentTimestamp (juce::uint32 lastMs, juce::uint32 nowMs,
+                                   juce::uint32 absenceMs)
+    {
+        return nowMs - lastMs > absenceMs;
+    }
 
     static bool isStaleTimestamp (juce::uint32 lastMs, juce::uint32 nowMs)
     {
-        return nowMs - lastMs > walkerStaleAfterMs;
+        return isAbsentTimestamp (lastMs, nowMs, walkerStaleAfterMs);
     }
 
     static bool isInstanceStale (const TheChannelStripAudioProcessor& instance,
                                  juce::uint32 nowMs)
     {
         return isStaleTimestamp (instance.getLastProcessMs(), nowMs);
+    }
+
+    // v2.110.0: the long-absence probe behind the gone verdict (see
+    // walkerGoneAfterMs). The modular subtraction keeps the wrap-around
+    // safe, exactly like isStaleTimestamp above.
+    static bool isInstanceAbsentBeyond (
+        const TheChannelStripAudioProcessor& instance,
+        juce::uint32 nowMs, juce::uint32 absenceMs)
+    {
+        return isAbsentTimestamp (instance.getLastProcessMs(), nowMs,
+                                  absenceMs);
     }
 
     // v2.109.0 (the sidebar follows the view): how many walker editors

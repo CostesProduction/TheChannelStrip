@@ -725,6 +725,19 @@ void TheChannelStripAudioProcessor::restoreStereoLayout (juce::AudioProcessor& p
 
 void TheChannelStripAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    // v2.110.0 (the walk trusts the gaps): prepareToPlay is the host
+    // re-connecting this track to the graph (every transport start) -
+    // a purged undo-cache ghost never hears it. The reconnect lifts
+    // any gone verdict stamped during a silent gap and refreshes the
+    // freshness probe: the timestamp's meaning IS the connection to
+    // the graph, and a prepare is one more proof of it.
+    if (walkerMarkedGone.exchange (false, std::memory_order_relaxed))
+        juce::Logger::writeToLog ("[TheChannelStrip] walk: the host "
+                                  "reconnected this track - the gone "
+                                  "verdict is lifted");
+    lastProcessMs.store (juce::Time::getMillisecondCounter(),
+                         std::memory_order_relaxed);
+
     currentSampleRate = juce::jmax (8000.0, sampleRate);
     currentBlockSize = juce::jmax (1, samplesPerBlock);
     numChannels = juce::jlimit (1, 2, juce::jmax (getTotalNumInputChannels(),

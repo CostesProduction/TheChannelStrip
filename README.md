@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.109.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.110.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,24 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.110.0** — *The walk trusts the gaps.*
+  - The gone verdict now needs a two-minute silence: a track whose
+    regions are not playing right now stays in the walk - embedded
+    and usable like any other, with a Terminal note saying it is
+    kept - and only a long absence while the session plays elsewhere
+    stamps the verdict.
+  - A held view survives silent gaps the same way: the walk keeps
+    looking at a channel whose region is between events instead of
+    falling home after three seconds.
+  - Every transport start lifts the verdict: the host reconnects
+    its live tracks at play, so a marked channel comes back with
+    the transport, while a purged undo-cache ghost never hears the
+    reconnect and stays out of the walk for good.
+  - Hardened: a viewed instance purged from the undo cache is never
+    touched through its stale pointer, and a hosted plugin still
+    embedded by a walker is detached at strip teardown instead of
+    dying under its living editor.
 
 - **2.109.1** — *The walk remembers the gone.*
   - A track that stops receiving blocks while the session still

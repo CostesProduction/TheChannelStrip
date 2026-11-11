@@ -39,14 +39,31 @@ HostedStrip::~HostedStrip()
         if (auto* out = outgoingSlot.exchange (nullptr, std::memory_order_acq_rel))
         {
             if (out->plugin != nullptr)
+            {
                 out->plugin->releaseResources();
+                // v2.110.0: a walker may still embed this plugin's
+                // editor - the walk keeps silent-gap tracks now, so a
+                // purge can land under a held view. If the observed
+                // pointer names it, the plugin outlives the strip
+                // (one rare leak on one dead track) instead of dying
+                // under its living editor (the v2.107.1 crash).
+                if (out->plugin.get()
+                    == editorObservedPlugin->load (std::memory_order_acquire))
+                    out->plugin.release();
+            }
             delete out;
         }
 
         if (auto* active = activeSlot.exchange (nullptr, std::memory_order_acq_rel))
         {
             if (active->plugin != nullptr)
+            {
                 active->plugin->releaseResources();
+                // v2.110.0: same gate as the outgoing slot above.
+                if (active->plugin.get()
+                    == editorObservedPlugin->load (std::memory_order_acquire))
+                    active->plugin.release();
+            }
             delete active;
         }
     }
