@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.107.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.107.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,13 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.107.1** — *The editor lets go first.*
+  - A console leaving the slot is no longer destroyed while
+    the shell editor still embeds it. The session link can
+    block the message thread far past the destruction grace,
+    and a console change made during that window crashed the
+    host inside the editor's own timer; the destruction now
+    waits for the editor to let go first.
 - **2.107.0** — *The session link.*
   - **ONE CLICK, EVERY INSTANCE** - a new SESSION LINK checkbox sits
     right under the console buttons: checked, this instance follows

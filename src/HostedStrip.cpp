@@ -8,6 +8,11 @@ namespace
 
 }
 
+void HostedStrip::setEditorObservedPlugin (juce::AudioProcessor* plugin)
+{
+    editorObservedPlugin->store (plugin, std::memory_order_release);
+}
+
 HostedStrip::HostedStrip()
 {
     formatManager.addDefaultFormats();
@@ -201,10 +206,21 @@ void HostedStrip::retireActiveIntoOutgoing (HostedSlot* oldActive)
         // thread after a grace period so in-flight audio has drained.
         // Capture the raw pointer and take ownership inside the lambda so
         // the lambda stays copyable for std::function.
-        juce::Thread::launch ([prev, guard = swapCallbackGuard] ()
+        juce::Thread::launch ([prev, guard = swapCallbackGuard, observed = editorObservedPlugin] ()
         {
             std::unique_ptr<HostedSlot> obj (prev);
             juce::Thread::sleep (150);
+
+            // v2.107.1: the shell editor may still embed this plugin on
+            // its way out - the session-link fan-out can block the
+            // message thread far past the grace, and destroying the
+            // plugin under its living editor crashes the editor's timer
+            // (the Studio Pro crash of v2.107.0). Wait until the editor
+            // lets go. No lock is held while waiting, and the shared flag
+            // outlives this strip.
+            while (obj->plugin != nullptr
+                && observed->load (std::memory_order_acquire) == obj->plugin.get())
+                juce::Thread::sleep (10);
 
             // v2.103.0: a swap callback on another thread may still be
             // walking this plugin's parameters - the destroy waits for
@@ -240,10 +256,16 @@ void HostedStrip::retireOutgoingNow()
     // never-lost race into a three-build segfault). The destroy now
     // pays the same 150 ms grace and takes the same guard as the
     // callbacks, so it can never overlap one regardless of timing.
-    juce::Thread::launch ([old, guard = swapCallbackGuard] ()
+    juce::Thread::launch ([old, guard = swapCallbackGuard, observed = editorObservedPlugin] ()
     {
         std::unique_ptr<HostedSlot> obj (old);
         juce::Thread::sleep (150);
+
+        // v2.107.1: same gate as retireActiveIntoOutgoing - never destroy
+        // a plugin the shell editor still embeds.
+        while (obj->plugin != nullptr
+            && observed->load (std::memory_order_acquire) == obj->plugin.get())
+            juce::Thread::sleep (10);
 
         const juce::ScopedLock lock (*guard);
 

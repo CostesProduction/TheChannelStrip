@@ -29,6 +29,13 @@ public:
     void setPlugin (std::unique_ptr<juce::AudioProcessor> newPlugin);
     void clearPlugin();
 
+    // v2.107.1: the shell editor reports which hosted plugin it currently
+    // embeds. A retiring plugin is destroyed only once the editor stops
+    // observing it - the session-link fan-out can block the message thread
+    // far past the 150 ms retire grace, and destroying a plugin under its
+    // living editor crashes the editor's timer.
+    void setEditorObservedPlugin (juce::AudioProcessor* plugin);
+
     bool hasActivePlugin() const
     {
         return activeSlot.load (std::memory_order_acquire) != nullptr;
@@ -180,6 +187,11 @@ private:
 
     std::atomic<HostedSlot*> activeSlot   { nullptr };
     std::atomic<HostedSlot*> outgoingSlot { nullptr };
+    // v2.107.1: shared ownership on purpose - a destruction thread
+    // captures the flag itself, never this strip, so the gate keeps
+    // working even if the strip dies while the thread is waiting.
+    std::shared_ptr<std::atomic<juce::AudioProcessor*>> editorObservedPlugin
+        = std::make_shared<std::atomic<juce::AudioProcessor*>> (nullptr);
     std::atomic<int> reportedLatency { 0 };
 
     double sampleRate = 48000.0;

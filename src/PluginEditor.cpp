@@ -2910,6 +2910,10 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
     // the hosted instance changed: drop the old editor immediately
     embeddedHostedEditor.reset();
     lastEmbeddedInstance = hosted;
+    // v2.107.1: the editor now embeds this plugin - tell the strip, so
+    // the outgoing console is destroyed only once this editor has let
+    // go of it.
+    proc.getHostedStrip().setEditorObservedPlugin (hosted);
 
     if (hosted == nullptr)
     {
@@ -3778,6 +3782,9 @@ void TheChannelStripAudioProcessorEditor::TitleMouseListener::mouseDown (
 TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
 {
     stopTimer();
+    // v2.107.1: this editor is gone - release the gate so a retiring
+    // console behind it is not kept alive forever.
+    proc.getHostedStrip().setEditorObservedPlugin (nullptr);
     // v2.8: closing the editor stops all measurements (LUFS meters and
     // spectrum analysers) until it is opened again.
     proc.setEditorOpen (false);

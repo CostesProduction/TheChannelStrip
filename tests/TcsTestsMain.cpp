@@ -13059,6 +13059,68 @@ static void testV21070SessionLink()
                 "a restore never selects anything by itself");
 }
 
+// ---------------------------------------------------------------------------
+// v2.107.1 (the editor lets go first): a console leaving through the retire
+// grace must NOT be destroyed while the shell editor still embeds it. The
+// session-link fan-out can block the message thread far past the 150 ms
+// grace; v2.107.0 crashed Studio Pro exactly there - the destruction won
+// the race and the editor's timer dereferenced a dead CostesStrip. The
+// destruction task now waits until the editor reports another plugin.
+// ---------------------------------------------------------------------------
+static void testV21071OutgoingWaitsForEditor()
+{
+    // a console that reports its own death from the destructor
+    class DyingConsole : public MockSilenceConsole
+    {
+    public:
+        std::shared_ptr<std::atomic<bool>> destroyed =
+            std::make_shared<std::atomic<bool>> (false);
+        ~DyingConsole() override { destroyed->store (true); }
+    };
+
+    TheChannelStripAudioProcessor proc;
+    proc.prepareToPlay (48000.0, 512);
+
+    auto mockA = std::make_unique<DyingConsole>();
+    auto* a = mockA.get();
+
+    // v2.107.1 build 2: the test keeps its own share of the death flag.
+    // The flag's only owner is the console object itself, so once the
+    // retire task has destroyed it, reading a->destroyed dereferences
+    // freed memory - build 1 crashed the harness exactly there (macOS
+    // libmalloc reuses the first bytes of a freed block for its
+    // free-list linkage, so the load faulted). The shared copy keeps
+    // the flag alive past the console; the raw pointer is never read
+    // again after the swaps.
+    auto destroyedFlag = a->destroyed;
+
+    proc.getHostedStrip().setPlugin (std::move (mockA));
+    // the shell editor embeds the active console
+    proc.getHostedStrip().setEditorObservedPlugin (a);
+
+    // A leaves the active slot and fades out; the NEXT swap arms its
+    // destruction task (150 ms grace, then the editor gate)
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+    proc.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+
+    // far past the grace: A must still be alive, the editor holds it
+    juce::Thread::sleep (400);
+    expectTrue (! destroyedFlag->load(),
+                "the outgoing console waits for its editor");
+
+    // the editor lets go: the retired console completes its destruction
+    proc.getHostedStrip().setEditorObservedPlugin (nullptr);
+    bool gone = false;
+    for (int i = 0; i < 200 && ! gone; ++i)
+    {
+        juce::Thread::sleep (10);
+        gone = destroyedFlag->load();
+    }
+    expectTrue (gone, "once released the retired console is destroyed");
+
+    proc.getHostedStrip().clearPlugin();
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13162,6 +13224,7 @@ int main (int argc, char* argv[])
     testV21031CostesKnobMapping();
     testV21040Console1Buttons();
     testV21070SessionLink();
+    testV21071OutgoingWaitsForEditor();
 
     if (integration)
         testIntegrationRealConsole();
