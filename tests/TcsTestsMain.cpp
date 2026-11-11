@@ -13367,6 +13367,59 @@ static void testV21090SidebarFollowsView()
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.109.1 (the walk remembers the gone): a track with no blocks while
+// the session still delivers is stamped gone once and stays out of the
+// walk; the first delivered block lifts the verdict (an undo restore).
+// The delivering probe backs the verdict: one fresh instance anywhere
+// is proof the session feeds its tracks; a probe older than every
+// timestamp (the uint32 wrap makes such a probe see them all stale)
+// sees nobody delivering.
+// ---------------------------------------------------------------------------
+static void testV21091WalkerRemembersGone()
+{
+    // the verdict reads back, and a delivered block lifts it
+    {
+        TheChannelStripAudioProcessor p;
+        p.prepareToPlay (48000.0, 512);
+        p.markWalkerGone();
+
+        expectTrue (p.isWalkerGone(),
+                    "the gone verdict reads back");
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer noMidi;
+        p.processBlock (block, noMidi);
+
+        expectTrue (! p.isWalkerGone(),
+                    "a delivered block lifts the gone verdict");
+    }
+
+    // the delivering probe
+    {
+        TheChannelStripAudioProcessor a;
+        TheChannelStripAudioProcessor b;
+        juce::Array<TheChannelStripAudioProcessor*> instances;
+        instances.add (&a);
+        instances.add (nullptr);   // a registry hole is skipped silently
+        instances.add (&b);
+
+        const auto nowMs = juce::Time::getMillisecondCounter();
+
+        expectTrue (! TheChannelStripAudioProcessor::isAnyInstanceDelivering (
+                        instances, nowMs + 4000),
+                    "a probe past every timestamp sees nobody delivering");
+
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer noMidi;
+        b.processBlock (block, noMidi);
+
+        expectTrue (TheChannelStripAudioProcessor::isAnyInstanceDelivering (
+                        instances, juce::Time::getMillisecondCounter()),
+                    "one fresh instance is proof the session delivers");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13474,6 +13527,7 @@ int main (int argc, char* argv[])
     testV21080ChannelWalker();
     testV21081WalkerFreshness();
     testV21090SidebarFollowsView();
+    testV21091WalkerRemembersGone();
 
     if (integration)
         testIntegrationRealConsole();

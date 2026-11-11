@@ -259,6 +259,32 @@ public:
         return viewedByWalkers.load (std::memory_order_relaxed) > 0;
     }
 
+    // v2.109.1 (the walk remembers the gone): does the session still
+    // deliver blocks to at least one of its tracks? A track with no
+    // blocks WHILE the session delivers is gone for good; a track
+    // with no blocks at a standstill proves nothing (nobody gets
+    // any), and the walk must keep it reachable.
+    static bool isAnyInstanceDelivering (
+        const juce::Array<TheChannelStripAudioProcessor*>& instances,
+        juce::uint32 nowMs)
+    {
+        for (auto* instance : instances)
+            if (instance != nullptr && ! isInstanceStale (*instance, nowMs))
+                return true;
+
+        return false;
+    }
+
+    // v2.109.1: the sticky verdict itself. Stamped by the walk
+    // (message thread) when a track receives nothing during a
+    // delivery; lifted by the first delivered block (an undo
+    // restore re-feeds the track) - see processBlock.
+    void markWalkerGone()  { walkerMarkedGone.store (true, std::memory_order_relaxed); }
+    bool isWalkerGone() const
+    {
+        return walkerMarkedGone.load (std::memory_order_relaxed);
+    }
+
     // the SessionConsoleLink's delivery point - message thread only
     void receiveSessionConsoleChange (int selection);
 
@@ -792,6 +818,8 @@ private:
     std::atomic<juce::uint32> lastProcessMs { 0 };
     // v2.109.0: the walker-view refcount (see acquireWalkerView).
     std::atomic<int> viewedByWalkers { 0 };
+    // v2.109.1: the walk's sticky gone verdict (see markWalkerGone).
+    std::atomic<bool> walkerMarkedGone { false };
     bool applyingSessionLinkChange = false;   // message thread only
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).

@@ -2980,11 +2980,33 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor (
 
     if (viewedProcessor != nullptr)
     {
-        if (! SessionConsoleLink::getInstance().contains (viewedProcessor)
-                || viewedProcessor->isEditorOpen()
-                || TheChannelStripAudioProcessor::isInstanceStale (
-                      *viewedProcessor, juce::Time::getMillisecondCounter()))
+        // v2.109.1: a stale view falls home only while it MEANS
+        // something - the session still delivers (the viewed track
+        // went quiet mid-take) or the walk already stamped it gone.
+        // At a standstill nobody receives blocks, and the view holds.
+        const bool inRegistry =
+            SessionConsoleLink::getInstance().contains (viewedProcessor);
+        bool viewGone = false;
+
+        if (inRegistry && ! viewedProcessor->isEditorOpen())
         {
+            const juce::uint32 embedNowMs = juce::Time::getMillisecondCounter();
+            viewGone = TheChannelStripAudioProcessor::isInstanceStale (
+                            *viewedProcessor, embedNowMs)
+                && (viewedProcessor->isWalkerGone()
+                        || TheChannelStripAudioProcessor::isAnyInstanceDelivering (
+                               SessionConsoleLink::getInstance()
+                                   .instancesInChannelOrder(),
+                               embedNowMs));
+        }
+
+        if (! inRegistry || viewedProcessor->isEditorOpen() || viewGone)
+        {
+            if (viewGone)
+                juce::Logger::writeToLog (
+                    "[TheChannelStrip] walk: CH "
+                    + juce::String (viewedProcessor->getChannelNumber())
+                    + " view went stale - coming home");
             walkHome();
             return;
         }
@@ -3100,15 +3122,58 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
         if (candidate == &proc)
             break; // wrapped around to this instance: stay home
 
-        if (candidate == nullptr || candidate->isEditorOpen())
+        if (candidate == nullptr)
+            continue; // a registry hole - keep walking
+
+        if (candidate->isEditorOpen())
+        {
+            // v2.109.1: the Terminal tells why a channel is skipped
+            juce::Logger::writeToLog (
+                "[TheChannelStrip] walk: CH "
+                + juce::String (candidate->getChannelNumber())
+                + " skipped (editor open)");
             continue; // on display elsewhere - keep walking
+        }
 
         // v2.108.1: a removed track's processor can live on in
         // the host's undo cache - the registry still lists it,
         // but it no longer receives blocks. The walker steps
         // over these ghosts.
         if (TheChannelStripAudioProcessor::isInstanceStale (*candidate, nowMs))
-            continue; // the host stopped feeding it - keep walking
+        {
+            // v2.109.1 (the walk remembers the gone): stale means
+            // gone only while the session still delivers somewhere -
+            // at a standstill nobody receives blocks and a live
+            // track would vanish exactly when Clement walks it. A
+            // track with no blocks during a delivery is stamped gone
+            // once, stays out of the walk (standstills included),
+            // and the first delivered block lifts the verdict.
+            if (candidate->isWalkerGone())
+            {
+                juce::Logger::writeToLog (
+                    "[TheChannelStrip] walk: CH "
+                    + juce::String (candidate->getChannelNumber())
+                    + " skipped (gone)");
+                continue;
+            }
+
+            if (TheChannelStripAudioProcessor::isAnyInstanceDelivering (
+                    instances, nowMs))
+            {
+                candidate->markWalkerGone();
+                juce::Logger::writeToLog (
+                    "[TheChannelStrip] walk: CH "
+                    + juce::String (candidate->getChannelNumber())
+                    + " marked gone (no blocks while the session plays)");
+                continue;
+            }
+
+            // a standstill proves nothing: the track stays reachable
+            juce::Logger::writeToLog (
+                "[TheChannelStrip] walk: CH "
+                + juce::String (candidate->getChannelNumber())
+                + " reachable without blocks (the session is idle)");
+        }
 
         // v2.109.0: the view keeps the measured instance measuring -
         // the sidebar's meters, spectrum and EQ measure follow it.

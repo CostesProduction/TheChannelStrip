@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.109.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.109.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,22 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.109.1** — *The walk remembers the gone.*
+  - A track that stops receiving blocks while the session still
+    plays elsewhere is marked gone once and for all: it stays out
+    of the walk even at a standstill, and an undo restore brings
+    it back with its first delivered block.
+  - At a standstill the live tracks are walkable again: nobody
+    receives blocks when the transport is down, so the staleness
+    gate proves nothing - a walk at a standstill keeps the
+    session's tracks reachable instead of emptying the walk.
+  - A held view now holds through a standstill, and falls home
+    only when it means something: the session plays without the
+    viewed track, or the walk already marked it gone.
+  - The Terminal now tells why a channel is skipped (stale and
+    marked gone, stale while the session plays, or editor open),
+    and when a held view walks home.
 
 - **2.109.0** — *The sidebar follows the view.*
   - While walking, the sidebar shows the viewed channel's

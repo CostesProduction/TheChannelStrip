@@ -794,6 +794,13 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     lastProcessMs.store (juce::Time::getMillisecondCounter(),
                          std::memory_order_relaxed);
 
+    // v2.109.1: a delivered block lifts the walk's gone verdict -
+    // the track is back in the graph (an undo restore re-feeds
+    // it). Runs before the empty-block bail-out, like the probe
+    // above: a silent block is still a delivered block.
+    if (walkerMarkedGone.load (std::memory_order_relaxed))
+        walkerMarkedGone.store (false, std::memory_order_relaxed);
+
     const int numSamples = buffer.getNumSamples();
     if (numSamples <= 0)
         return;
