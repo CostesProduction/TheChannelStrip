@@ -156,6 +156,38 @@ void SessionConsoleLink::publish (TheChannelStripAudioProcessor* sender, int sel
             processor->receiveSessionConsoleChange (selection);
 }
 
+// v2.108.0 (the channel walker): the membership query behind the
+// walker's fall-home rule.
+bool SessionConsoleLink::contains (TheChannelStripAudioProcessor* processor)
+{
+    const juce::SpinLock::ScopedLockType lock (registryLock);
+    return members.contains (processor);
+}
+
+// v2.108.0: the walk order. The snapshot is taken under the registry
+// lock and sorted outside it (a member call never touches the
+// registry), stable so equal numbers keep registration order - on a
+// fresh session load that is the host's track order.
+juce::Array<TheChannelStripAudioProcessor*>
+    SessionConsoleLink::instancesInChannelOrder()
+{
+    juce::Array<TheChannelStripAudioProcessor*> snapshot;
+    {
+        const juce::SpinLock::ScopedLockType lock (registryLock);
+        snapshot.addArray (members);
+    }
+
+    std::stable_sort (snapshot.begin(), snapshot.end(),
+                      [] (const TheChannelStripAudioProcessor* lhs,
+                          const TheChannelStripAudioProcessor* rhs)
+                      {
+                          return lhs->getChannelNumber()
+                               < rhs->getChannelNumber();
+                      });
+
+    return snapshot;
+}
+
 TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
     : AudioProcessor (BusesProperties()
                         .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -165,6 +197,33 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
     // v2.107.0: join the process-wide session link before anything else
     // can publish a console change to this instance.
     SessionConsoleLink::getInstance().add (this);
+
+    // v2.108.0 (the channel walker): take the lowest channel number no
+    // live instance holds. The hosts build a session's tracks top to
+    // bottom, so on load the creation order is the channel order; a
+    // reopened session overrides the number with the saved one, and
+    // the badge lets the user fix any drift in one click.
+    {
+        const auto live =
+            SessionConsoleLink::getInstance().instancesInChannelOrder();
+        int candidate = 1;
+        bool taken = true;
+        while (taken)
+        {
+            taken = false;
+            for (auto* other : live)
+            {
+                if (other != nullptr && other != this
+                        && other->getChannelNumber() == candidate)
+                {
+                    taken = true;
+                    ++candidate;
+                    break;
+                }
+            }
+        }
+        channelNumber.store (candidate, std::memory_order_relaxed);
+    }
     // v2.102.0: the automation bridge. A DAW reads a plugin's parameter
     // table ONCE, at load (the JUCE VST3 wrapper builds it in a single
     // pass and never revisits it - see AutomationProxyBank.h), so the
@@ -1145,6 +1204,28 @@ bool TheChannelStripAudioProcessor::isSessionLinkEnabled() const
 void TheChannelStripAudioProcessor::setSessionLinkEnabled (bool enabled)
 {
     sessionLinkEnabled.store (enabled, std::memory_order_relaxed);
+}
+
+// v2.108.0 (the channel walker): the channel number of this instance.
+// The clamp keeps the badge editable without a second validation
+// layer; duplicates are allowed - the walk order simply keeps them
+// adjacent in registration order.
+int TheChannelStripAudioProcessor::getChannelNumber() const
+{
+    return channelNumber.load (std::memory_order_relaxed);
+}
+
+void TheChannelStripAudioProcessor::setChannelNumber (int number)
+{
+    channelNumber.store (juce::jlimit (1, 999, number),
+                         std::memory_order_relaxed);
+}
+
+// v2.108.0: the walker's takeover rule reads this - an instance whose
+// own editor is open is never embedded by another instance's walker.
+bool TheChannelStripAudioProcessor::isEditorOpen() const
+{
+    return measuringEnabled.load (std::memory_order_relaxed);
 }
 
 // v2.107.0: the link's delivery point - message thread only. An
@@ -2886,6 +2967,10 @@ void TheChannelStripAudioProcessor::getStateInformation (juce::MemoryBlock& dest
     // so a reopened project keeps its linked instances linked.
     xml->setAttribute ("sessionLink",
                        sessionLinkEnabled.load (std::memory_order_relaxed) ? 1 : 0);
+    // v2.108.0 (the channel walker): the channel number rides the
+    // session state, so a reopened session keeps the walk order.
+    xml->setAttribute ("channelNum",
+                       channelNumber.load (std::memory_order_relaxed));
 
     if (auto* active = hostedStrip.getActivePlugin())
     {
@@ -3112,6 +3197,12 @@ void TheChannelStripAudioProcessor::setStateInformation (const void* data, int s
     // not a console change, it never publishes.
     sessionLinkEnabled.store (xml->getBoolAttribute ("sessionLink", false),
                               std::memory_order_relaxed);
+    // v2.108.0: restore the channel number - a missing attribute (an
+    // older session) keeps the auto-assigned number.
+    channelNumber.store (xml->getIntAttribute (
+                            "channelNum",
+                            channelNumber.load (std::memory_order_relaxed)),
+                         std::memory_order_relaxed);
 
     // v2.11: analyser response speed; missing attribute (older session)
     // keeps the Slow default (~1 s). v2.12 keeps only two speeds

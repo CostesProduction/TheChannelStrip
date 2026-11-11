@@ -51,6 +51,17 @@ public:
     // change can never race a processor being destroyed.
     void publish (TheChannelStripAudioProcessor* sender, int selection);
 
+    // v2.108.0 (the channel walker): the membership query behind the
+    // walker's fall-home rule - a viewed instance that left the
+    // registry (its track was deleted) is never embedded again.
+    // Message thread only.
+    bool contains (TheChannelStripAudioProcessor* processor);
+
+    // v2.108.0: the walk order - every live instance, sorted by
+    // channel number (a stable sort, so equal numbers keep
+    // registration order). Message thread only.
+    juce::Array<TheChannelStripAudioProcessor*> instancesInChannelOrder();
+
 private:
     SessionConsoleLink() = default;
 
@@ -199,6 +210,20 @@ public:
     // False by default: the pre-2.107 independence.
     bool isSessionLinkEnabled() const;
     void setSessionLinkEnabled (bool enabled);
+
+    // v2.108.0 (the channel walker): this instance's channel number -
+    // auto-assigned at construction as the lowest free number of the
+    // live registry, editable from the editor's badge, saved with the
+    // session state. The editor's arrows walk the session's instances
+    // in this order.
+    int getChannelNumber() const;
+    void setChannelNumber (int number);
+
+    // v2.108.0: a walker of another instance embeds this instance's
+    // console only while this instance's own editor is closed - this
+    // query is that rule's guard. The v2.8 flag already tracks the
+    // open editor for the meters, it is simply exposed here.
+    bool isEditorOpen() const;
 
     // the SessionConsoleLink's delivery point - message thread only
     void receiveSessionConsoleChange (int selection);
@@ -725,6 +750,9 @@ private:
     // state) and the re-entrancy guard that keeps a follow applied BY
     // the link from being re-published to it.
     std::atomic<bool> sessionLinkEnabled { false };
+    // v2.108.0 (the channel walker): the session-local channel number;
+    // 0 only during the constructor's auto-assignment.
+    std::atomic<int> channelNumber { 0 };
     bool applyingSessionLinkChange = false;   // message thread only
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).

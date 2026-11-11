@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.107.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.108.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,18 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.108.0** — *The channel walker.*
+  - Every instance carries a channel number: auto-assigned at
+    construction (the lowest free number of the session), editable
+    from the sidebar badge, saved with the session.
+  - Two arrows walk the session's TheChannelStrip instances in
+    channel-number order; while walking, the shell displays and
+    controls the viewed instance's hosted console. Click the badge
+    to come home.
+  - A remote embed rides the same destruction gate as the local
+    editor (v2.107.1): a viewed console is never destroyed under
+    the walking shell, and an instance with its own editor open is
+    never taken over.
 - **2.107.1** — *The editor lets go first.*
   - A console leaving the slot is no longer destroyed while
     the shell editor still embeds it. The session link can

@@ -2113,6 +2113,54 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     sessionLinkToggle.setToggleState (proc.isSessionLinkEnabled(),
                                       juce::dontSendNotification);
 
+    // ---- v2.108.0: the channel walker ----
+    // The arrows step through the session's instances in channel-
+    // number order; the badge shows which channel is on display (and
+    // edits this instance's own number at home); a click on the badge
+    // while walking returns home.
+    styleConsoleButton (walkerLeftButton);
+    styleConsoleButton (walkerRightButton);
+    addAndMakeVisible (walkerLeftButton);
+    addAndMakeVisible (walkerRightButton);
+    addAndMakeVisible (channelBadge);
+    channelBadge.addMouseListener (&badgeMouseListener, false);
+    badgeMouseListener.owner = this;
+
+    walkerLeftButton.onClick  = [this] { walkTo (-1); };
+    walkerRightButton.onClick = [this] { walkTo (1); };
+
+    channelBadge.setFont (juce::Font (juce::FontOptions (13.0f)));
+    channelBadge.setJustificationType (juce::Justification::centred);
+    channelBadge.setColour (juce::Label::backgroundColourId,
+                            juce::Colour (0xff23262e));
+    channelBadge.setColour (juce::Label::textColourId,
+                            juce::Colour (0xffc8cdd6));
+    channelBadge.setColour (juce::Label::outlineColourId,
+                            juce::Colour (0xff3a3f4a));
+    // v2.108.0: at home the badge doubles as the channel-number editor
+    // (click, type, enter - the digits are parsed and clamped 1..999).
+    channelBadge.onTextChange = [this]
+    {
+        const int parsed = channelBadge.getText()
+                               .retainCharacters ("0123456789")
+                               .getIntValue();
+        proc.setChannelNumber (parsed);
+        refreshWalkerBadge();
+    };
+
+    helpTexts[&walkerLeftButton] =
+        "Step to the previous TheChannelStrip instance of the session, "
+        "in channel-number order.";
+    helpTexts[&walkerRightButton] =
+        "Step to the next TheChannelStrip instance of the session, in "
+        "channel-number order.";
+    helpTexts[&channelBadge] =
+        "The channel number of this instance (click to edit). While "
+        "walking, the badge shows the viewed channel and its console; "
+        "click it to come home.";
+
+    refreshWalkerBadge();
+
     // ---- v2.26 (roadmap point 4): the presets section ----
     // One combo box listing every preset in the preset folder - the
     // ROOT and the album sub-folders alike (v2.30: albums are listed,
@@ -2437,6 +2485,13 @@ void TheChannelStripAudioProcessorEditor::resized()
     sessionLinkToggle.setBounds (sideX, y, sw, 24);
     y += 24 + 5;
 
+    // v2.108.0: the walker row - the two arrows around the channel
+    // badge.
+    walkerLeftButton.setBounds  (sideX, y, 24, 24);
+    channelBadge.setBounds      (sideX + 27, y, sw - 54, 24);
+    walkerRightButton.setBounds (sideX + sw - 24, y, 24, 24);
+    y += 24 + 5;
+
     // ---- v2.39.0 (Clement's blocks): the sidebar is FOUR blocks
     //      separated by an IDENTICAL vertical space - (1) title +
     //      presets + consoles, pinned at the top; (2) logo + analyser;
@@ -2660,6 +2715,7 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
 
     refreshConsoleButtons();
     tryEmbedHostedEditor();
+    refreshWalkerBadge();
     refreshLufs();
 
     // v2.57.0 (Clement's remark 3): the CPU readout refreshes calmly -
@@ -2900,11 +2956,34 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     }
 }
 
-void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
+void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor (
+    bool forceReembed)
 {
-    auto* hosted = proc.getHostedStrip().getActivePlugin();
+    // v2.108.0 (the channel walker): while walking, the embedded console
+    // belongs to the VIEWED instance - resolve the target first. A
+    // viewed instance that left the registry, or opened its own editor
+    // meanwhile, falls back home: the walker never fights a plugin's
+    // own shell for its editor.
+    TheChannelStripAudioProcessor* target = &proc;
 
-    if (hosted == lastEmbeddedInstance)
+    if (viewedProcessor != nullptr)
+    {
+        if (! SessionConsoleLink::getInstance().contains (viewedProcessor)
+                || viewedProcessor->isEditorOpen())
+        {
+            walkHome();
+            return;
+        }
+
+        target = viewedProcessor;
+    }
+
+    auto* hosted = target->getHostedStrip().getActivePlugin();
+
+    // v2.108.0: the walker forces the re-embed - a walk onto an EMPTY
+    // channel must still clear the holder (nullptr == nullptr would
+    // otherwise look like "nothing changed").
+    if (hosted == lastEmbeddedInstance && ! forceReembed)
         return;
 
     // the hosted instance changed: drop the old editor immediately
@@ -2912,8 +2991,10 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
     lastEmbeddedInstance = hosted;
     // v2.107.1: the editor now embeds this plugin - tell the strip, so
     // the outgoing console is destroyed only once this editor has let
-    // go of it.
-    proc.getHostedStrip().setEditorObservedPlugin (hosted);
+    // go of it. v2.108.0: in walker mode the same gate protects the
+    // VIEWED instance's strip, so a remotely viewed console is never
+    // destroyed under this shell either.
+    target->getHostedStrip().setEditorObservedPlugin (hosted);
 
     if (hosted == nullptr)
     {
@@ -2938,6 +3019,108 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor()
 
     layoutHostedHolder();
     fitWindowToHostedEditor();
+}
+
+// v2.108.0 (the channel walker): stop embedding the viewed instance's
+// console. The embedded editor goes down FIRST, then the gate opens
+// (the v2.107.1 order), and the gate is only cleared when the viewed
+// instance's own editor is closed - an open editor owns the embed and
+// manages the flag itself.
+void TheChannelStripAudioProcessorEditor::releaseViewedInstance()
+{
+    if (viewedProcessor == nullptr)
+        return;
+
+    embeddedHostedEditor.reset();
+
+    if (! viewedProcessor->isEditorOpen())
+        viewedProcessor->getHostedStrip().setEditorObservedPlugin (nullptr);
+
+    viewedProcessor = nullptr;
+}
+
+// v2.108.0: step to the previous/next instance of the session in
+// channel-number order, wrapping around. Instances with their own
+// editor open are skipped, and a walk that lands back on this instance
+// is simply home.
+void TheChannelStripAudioProcessorEditor::walkTo (int direction)
+{
+    const auto instances =
+        SessionConsoleLink::getInstance().instancesInChannelOrder();
+
+    if (instances.size() < 2)
+        return;
+
+    const int selfIndex = instances.indexOf (&proc);
+
+    if (selfIndex < 0)
+        return;
+
+    releaseViewedInstance();
+
+    for (int step = 1; step < instances.size(); ++step)
+    {
+        const int index = ((selfIndex + direction * step) % instances.size()
+                             + instances.size()) % instances.size();
+        auto* candidate = instances [index];
+
+        if (candidate == &proc)
+            break; // wrapped around to this instance: stay home
+
+        if (candidate == nullptr || candidate->isEditorOpen())
+            continue; // on display elsewhere - keep walking
+
+        viewedProcessor = candidate;
+        break;
+    }
+
+    lastEmbeddedInstance = nullptr; // force the re-embed below
+    refreshWalkerBadge();
+    tryEmbedHostedEditor (true);
+}
+
+// v2.108.0: return to this instance's own console.
+void TheChannelStripAudioProcessorEditor::walkHome()
+{
+    releaseViewedInstance();
+    lastEmbeddedInstance = nullptr; // force the re-embed below
+    refreshWalkerBadge();
+    tryEmbedHostedEditor (true);
+}
+
+// v2.108.0: the badge under the arrows - the walked channel (and its
+// console) while walking, this instance's own number at home, where
+// the badge doubles as the number editor (click, type, enter).
+void TheChannelStripAudioProcessorEditor::refreshWalkerBadge()
+{
+    juce::String text;
+
+    if (viewedProcessor != nullptr)
+    {
+        auto* plugin = viewedProcessor->getHostedStrip().getActivePlugin();
+        text = "CH " + juce::String (viewedProcessor->getChannelNumber())
+             + (plugin != nullptr ? " : " + plugin->getName()
+                                  : juce::String());
+    }
+    else
+    {
+        text = "CH " + juce::String (proc.getChannelNumber());
+    }
+
+    if (channelBadge.getText() != text)
+        channelBadge.setText (text, juce::dontSendNotification);
+
+    // at home the badge edits this instance's number; while walking it
+    // is a readout and its click returns home
+    channelBadge.setEditable (viewedProcessor == nullptr, true, false);
+}
+
+// v2.108.0: the badge's click rule (see the header struct).
+void TheChannelStripAudioProcessorEditor::BadgeMouseListener::mouseDown (
+    const juce::MouseEvent&)
+{
+    if (owner != nullptr && owner->viewedProcessor != nullptr)
+        owner->walkHome();
 }
 
 // v2.40.0: the editor's destructor moved to the END of this file: the
@@ -3782,6 +3965,9 @@ void TheChannelStripAudioProcessorEditor::TitleMouseListener::mouseDown (
 TheChannelStripAudioProcessorEditor::~TheChannelStripAudioProcessorEditor()
 {
     stopTimer();
+    // v2.108.0: if this shell was walking another instance's console,
+    // let go of it first - embedded editor down, then its gate.
+    releaseViewedInstance();
     // v2.107.1: this editor is gone - release the gate so a retiring
     // console behind it is not kept alive forever.
     proc.getHostedStrip().setEditorObservedPlugin (nullptr);

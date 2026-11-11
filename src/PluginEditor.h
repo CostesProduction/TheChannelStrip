@@ -532,7 +532,15 @@ private:
     void timerCallback() override;
     void refreshConsoleButtons();
     void refreshLufs();
-    void tryEmbedHostedEditor();
+    void tryEmbedHostedEditor (bool forceReembed = false);
+    // v2.108.0 (the channel walker): step through the session's
+    // instances in channel-number order (+1 right, -1 left, wrapping),
+    // return to this instance's own console, stop embedding the viewed
+    // instance, and the badge refresh.
+    void walkTo (int direction);
+    void walkHome();
+    void releaseViewedInstance();
+    void refreshWalkerBadge();
     void layoutHostedHolder();
     void fitWindowToHostedEditor(); // v2.4: frame the hosted editor exactly
     void applyAnalyserVisibility(); // v2.8: show/hide the analyser strip
@@ -742,6 +750,27 @@ private:
     // follows (and publishes) the console changes of the other linked
     // instances of the session.
     juce::TextButton sessionLinkToggle;
+
+    // v2.108.0 (the channel walker): the arrows walk the session's
+    // instances in channel-number order; while walking, the embedded
+    // area shows the VIEWED instance's console (a remote view - the
+    // sidebar's own controls keep driving this instance). The badge
+    // shows the walked channel and its console, and edits this
+    // instance's own number at home; a click on the badge while
+    // walking returns home.
+    juce::TextButton walkerLeftButton  { "<" };
+    juce::TextButton walkerRightButton { ">" };
+    juce::Label channelBadge;
+    TheChannelStripAudioProcessor* viewedProcessor = nullptr;
+
+    // v2.108.0: the badge's click rule - at home the click opens the
+    // number editor (the Label handles that itself), while walking it
+    // returns home.
+    struct BadgeMouseListener : public juce::MouseListener
+    {
+        TheChannelStripAudioProcessorEditor* owner = nullptr;
+        void mouseDown (const juce::MouseEvent&) override;
+    } badgeMouseListener;
 
     // v2.52 (point B): the tilt and response-speed buttons moved from
     // this sidebar ONTO the analyser strip itself - they are children

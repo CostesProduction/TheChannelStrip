@@ -13121,6 +13121,110 @@ static void testV21071OutgoingWaitsForEditor()
     proc.getHostedStrip().clearPlugin();
 }
 
+// ---------------------------------------------------------------------------
+// v2.108.0 (the channel walker): the session's instances carry a channel
+// number - auto-assigned at construction (the lowest free number of the
+// live registry), editable, saved with the session - and the editor's
+// arrows walk them in that order. A walker of another instance embeds
+// that instance's console only while its own editor is closed, and the
+// remote embed rides the v2.107.1 destruction gate exactly like the
+// local editor does.
+// ---------------------------------------------------------------------------
+static void testV21080ChannelWalker()
+{
+    TheChannelStripAudioProcessor a;
+    TheChannelStripAudioProcessor b;
+    TheChannelStripAudioProcessor c;
+
+    // auto-assignment: the lowest free numbers, in creation order
+    expectTrue (a.getChannelNumber() == 1 && b.getChannelNumber() == 2
+                    && c.getChannelNumber() == 3,
+                "fresh instances take the lowest free channel numbers");
+
+    // a taken number is kept; a freed one is reused
+    {
+        TheChannelStripAudioProcessor d;
+        expectTrue (d.getChannelNumber() == 4,
+                    "a live registry keeps the taken numbers");
+    }
+    TheChannelStripAudioProcessor e;
+    expectTrue (e.getChannelNumber() == 4,
+                "a destroyed instance frees its channel number");
+
+    // manual assignment clamps into 1..999
+    a.setChannelNumber (-5);
+    expectTrue (a.getChannelNumber() == 1,
+                "the channel number clamps at 1");
+    a.setChannelNumber (5000);
+    expectTrue (a.getChannelNumber() == 999,
+                "the channel number clamps at 999");
+
+    // the walk order follows the numbers, not the creation order
+    a.setChannelNumber (7);
+    b.setChannelNumber (5);
+    const auto order =
+        SessionConsoleLink::getInstance().instancesInChannelOrder();
+    expectTrue (order.size() == 4
+                    && order[0] == &c && order[0]->getChannelNumber() == 3
+                    && order[1] == &e && order[2] == &b
+                    && order[3] == &a,
+                "the walk order is the channel-number order");
+
+    // the number rides the session state (a fresh instance restores
+    // the saved number over its auto-assigned one)
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+    TheChannelStripAudioProcessor f;
+    f.setStateInformation (state.getData(), (int) state.getSize());
+    expectTrue (f.getChannelNumber() == 7,
+                "the channel number survives a state roundtrip");
+
+    // a fresh instance reports its editor closed - the walker's rule
+    expectTrue (! f.isEditorOpen(),
+                "a fresh instance reports no open editor");
+
+    // the remote embed rides the v2.107.1 gate: another instance's
+    // shell "embeds" y's console, and y's retire task waits exactly
+    // like it waits for y's own editor
+    {
+        class DyingConsole : public MockSilenceConsole
+        {
+        public:
+            std::shared_ptr<std::atomic<bool>> destroyed =
+                std::make_shared<std::atomic<bool>> (false);
+            ~DyingConsole() override { destroyed->store (true); }
+        };
+
+        TheChannelStripAudioProcessor y;
+        auto mock = std::make_unique<DyingConsole>();
+        auto* plugin = mock.get();
+        auto flag = plugin->destroyed; // the test keeps its own share
+        y.getHostedStrip().setPlugin (std::move (mock));
+
+        // the remote view: y's strip is told its console is embedded
+        y.getHostedStrip().setEditorObservedPlugin (plugin);
+
+        // the v2.107.1 retire shape: the second swap arms the first
+        // plugin's destruction
+        y.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+        y.getHostedStrip().setPlugin (std::make_unique<MockSilenceConsole>());
+
+        juce::Thread::sleep (400);
+        expectTrue (! flag->load(),
+                    "the remote embed holds the destruction gate");
+
+        y.getHostedStrip().setEditorObservedPlugin (nullptr);
+        bool gone = false;
+        for (int i = 0; i < 200 && ! gone; ++i)
+        {
+            juce::Thread::sleep (10);
+            gone = flag->load();
+        }
+        expectTrue (gone,
+                    "the gate release lets the remotely viewed console die");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13225,6 +13329,7 @@ int main (int argc, char* argv[])
     testV21040Console1Buttons();
     testV21070SessionLink();
     testV21071OutgoingWaitsForEditor();
+    testV21080ChannelWalker();
 
     if (integration)
         testIntegrationRealConsole();
