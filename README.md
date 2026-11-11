@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.108.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.108.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -310,6 +310,20 @@ Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
 
+- **2.108.1** — *The walker keeps walking.*
+  - The arrows now walk from the console you are looking
+    at, so every step moves on to the next channel instead
+    of re-testing the same one, and the far neighbour of
+    the walk is home itself.
+  - Instances whose track was deleted no longer appear in
+    the walk: a live track receives audio blocks
+    continuously, and the walker now reads that
+    freshness, stepping over the instances the host kept
+    alive for undo.
+  - A viewed console whose track is deleted (or that stops
+    receiving audio for any reason) falls back home on
+    the next heartbeat, like an instance that leaves the
+    session or opens its own editor.
 - **2.108.0** — *The channel walker.*
   - Every instance carries a channel number: auto-assigned at
     construction (the lowest free number of the session), editable

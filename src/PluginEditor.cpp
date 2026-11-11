@@ -2969,7 +2969,9 @@ void TheChannelStripAudioProcessorEditor::tryEmbedHostedEditor (
     if (viewedProcessor != nullptr)
     {
         if (! SessionConsoleLink::getInstance().contains (viewedProcessor)
-                || viewedProcessor->isEditorOpen())
+                || viewedProcessor->isEditorOpen()
+                || TheChannelStripAudioProcessor::isInstanceStale (
+                      *viewedProcessor, juce::Time::getMillisecondCounter()))
         {
             walkHome();
             return;
@@ -3051,16 +3053,29 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
     if (instances.size() < 2)
         return;
 
-    const int selfIndex = instances.indexOf (&proc);
+    // v2.108.1: the walk starts from where the arrows look, not
+    // from home - the v2.108.0 loop restarted at this instance
+    // on every click, so a second step re-tested the same
+    // channel and home was never a candidate again. A viewed
+    // instance that already left the registry (the click landed
+    // between two timer ticks) falls back to home as the base.
+    int baseIndex = instances.indexOf (viewedProcessor != nullptr
+                                          ? viewedProcessor
+                                          : &proc);
 
-    if (selfIndex < 0)
+    if (baseIndex < 0)
+        baseIndex = instances.indexOf (&proc);
+
+    if (baseIndex < 0)
         return;
 
     releaseViewedInstance();
 
+    const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+
     for (int step = 1; step < instances.size(); ++step)
     {
-        const int index = ((selfIndex + direction * step) % instances.size()
+        const int index = ((baseIndex + direction * step) % instances.size()
                              + instances.size()) % instances.size();
         auto* candidate = instances [index];
 
@@ -3069,6 +3084,13 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
 
         if (candidate == nullptr || candidate->isEditorOpen())
             continue; // on display elsewhere - keep walking
+
+        // v2.108.1: a removed track's processor can live on in
+        // the host's undo cache - the registry still lists it,
+        // but it no longer receives blocks. The walker steps
+        // over these ghosts.
+        if (TheChannelStripAudioProcessor::isInstanceStale (*candidate, nowMs))
+            continue; // the host stopped feeding it - keep walking
 
         viewedProcessor = candidate;
         break;

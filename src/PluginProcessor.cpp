@@ -224,6 +224,11 @@ TheChannelStripAudioProcessor::TheChannelStripAudioProcessor()
         }
         channelNumber.store (candidate, std::memory_order_relaxed);
     }
+
+    // v2.108.1: the freshness clock starts at construction, so a
+    // brand-new instance is probeable before its first block.
+    lastProcessMs.store (juce::Time::getMillisecondCounter(),
+                         std::memory_order_relaxed);
     // v2.102.0: the automation bridge. A DAW reads a plugin's parameter
     // table ONCE, at load (the JUCE VST3 wrapper builds it in a single
     // pass and never revisits it - see AutomationProxyBank.h), so the
@@ -781,6 +786,14 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // v2.108.1: every delivered block refreshes the freshness
+    // probe - a track removed from the graph stops receiving
+    // blocks, and the walker reads that as gone (see
+    // isStaleTimestamp). This runs before the empty-block
+    // bail-out: a silent block is still proof of life.
+    lastProcessMs.store (juce::Time::getMillisecondCounter(),
+                         std::memory_order_relaxed);
+
     const int numSamples = buffer.getNumSamples();
     if (numSamples <= 0)
         return;
@@ -1226,6 +1239,14 @@ void TheChannelStripAudioProcessor::setChannelNumber (int number)
 bool TheChannelStripAudioProcessor::isEditorOpen() const
 {
     return measuringEnabled.load (std::memory_order_relaxed);
+}
+
+// v2.108.1: the walker's freshness probe - see the header. The
+// load is relaxed: the probe answers "roughly how long ago",
+// never an ordering question.
+juce::uint32 TheChannelStripAudioProcessor::getLastProcessMs() const
+{
+    return lastProcessMs.load (std::memory_order_relaxed);
 }
 
 // v2.107.0: the link's delivery point - message thread only. An

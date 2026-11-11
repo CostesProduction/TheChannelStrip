@@ -13225,6 +13225,60 @@ static void testV21080ChannelWalker()
     }
 }
 
+// ---------------------------------------------------------------------------
+// v2.108.1 (the walker keeps walking): the v2.108.0 arrows restarted
+// the walk at home on every click, so a second step re-tested the
+// same channel and home was never a candidate again. The walk now
+// starts from the viewed console (that part lives in the editor).
+// And a removed track's processor lives on in the host's undo cache
+// - the walker tells it from a live track by the process timestamp:
+// a live track receives blocks continuously, a removed one stops.
+// These checks pin the probe itself, including the wrapping
+// millisecond arithmetic below.
+// ---------------------------------------------------------------------------
+static void testV21081WalkerFreshness()
+{
+    TheChannelStripAudioProcessor fresh;
+
+    // the clock starts at construction, before the first block
+    const auto now = juce::Time::getMillisecondCounter();
+    expectTrue (now >= fresh.getLastProcessMs()
+                    && now - fresh.getLastProcessMs() < 60000,
+                "a fresh instance starts with a fresh process timestamp");
+
+    // the staleness threshold, exact on both sides
+    expectTrue (! TheChannelStripAudioProcessor::isStaleTimestamp (
+                    fresh.getLastProcessMs(),
+                    fresh.getLastProcessMs() + 3000),
+                "a timestamp 3000 ms old is not stale yet");
+    expectTrue (TheChannelStripAudioProcessor::isStaleTimestamp (
+                    fresh.getLastProcessMs(),
+                    fresh.getLastProcessMs() + 3001),
+                "a timestamp 3001 ms old is stale");
+
+    // the millisecond clock wraps at 2^32: the unsigned
+    // subtraction must stay exact across the wrap
+    expectTrue (! TheChannelStripAudioProcessor::isStaleTimestamp (
+                    0xFFFFFF00u, 0xFFFFFF00u + 26u),
+                "a wrapped timestamp 26 ms old is not stale");
+    expectTrue (TheChannelStripAudioProcessor::isStaleTimestamp (
+                    0xFFFFFF00u, 0xFFFFFF00u + 4000u),
+                "a wrapped timestamp 4000 ms old is stale");
+
+    // a delivered block refreshes the timestamp - the 2 ms of
+    // margin beat the millisecond clock, so a missing store
+    // cannot pass as fresh
+    fresh.prepareToPlay (44100.0, 512);
+    juce::AudioBuffer<float> block (2, 512);
+    block.clear();
+    juce::MidiBuffer noMidi;
+    juce::Thread::sleep (2);
+    const auto t1 = juce::Time::getMillisecondCounter();
+    fresh.processBlock (block, noMidi);
+    expectTrue (fresh.getLastProcessMs() >= t1,
+                "a delivered block refreshes the process timestamp");
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13330,6 +13384,7 @@ int main (int argc, char* argv[])
     testV21070SessionLink();
     testV21071OutgoingWaitsForEditor();
     testV21080ChannelWalker();
+    testV21081WalkerFreshness();
 
     if (integration)
         testIntegrationRealConsole();

@@ -225,6 +225,28 @@ public:
     // open editor for the meters, it is simply exposed here.
     bool isEditorOpen() const;
 
+    // v2.108.1 (the walker keeps walking): the walker must skip
+    // instances whose track is gone - the host keeps a removed
+    // plugin's processor alive for undo, and the registry alone
+    // cannot tell those apart. A live track receives blocks
+    // continuously, so the freshness of this timestamp IS the
+    // connection to the graph. The age rides the wrapping
+    // millisecond clock, so the subtraction below stays modular.
+    static constexpr juce::uint32 walkerStaleAfterMs = 3000;
+
+    juce::uint32 getLastProcessMs() const;
+
+    static bool isStaleTimestamp (juce::uint32 lastMs, juce::uint32 nowMs)
+    {
+        return nowMs - lastMs > walkerStaleAfterMs;
+    }
+
+    static bool isInstanceStale (const TheChannelStripAudioProcessor& instance,
+                                 juce::uint32 nowMs)
+    {
+        return isStaleTimestamp (instance.getLastProcessMs(), nowMs);
+    }
+
     // the SessionConsoleLink's delivery point - message thread only
     void receiveSessionConsoleChange (int selection);
 
@@ -753,6 +775,9 @@ private:
     // v2.108.0 (the channel walker): the session-local channel number;
     // 0 only during the constructor's auto-assignment.
     std::atomic<int> channelNumber { 0 };
+    // v2.108.1: refreshed at the head of every processBlock - the
+    // walker's freshness probe (see isStaleTimestamp above).
+    std::atomic<juce::uint32> lastProcessMs { 0 };
     bool applyingSessionLinkChange = false;   // message thread only
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).
