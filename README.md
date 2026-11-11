@@ -1,6 +1,6 @@
 # TheChannelStrip
 
-**Version 2.108.1** — VST3 / AU / Standalone (macOS, Windows, Linux)
+**Version 2.109.0** — VST3 / AU / Standalone (macOS, Windows, Linux)
 
 TheChannelStrip is a **console-strip shell**: it *hosts* your own licensed
 bx_console plugins (SSL 4000 E, SSL 4000 G, SSL 9000 J, AMEK 9099,
@@ -309,6 +309,24 @@ Scan results and the scanner pedal file are stored in:
 Delete `scanned_plugins.xml` to redo a full scan.
 
 ## Changelog
+
+- **2.109.0** — *The sidebar follows the view.*
+  - While walking, the sidebar shows the viewed channel's
+    state: the console buttons follow the console on display,
+    and clicking one switches the VIEWED channel's console -
+    not the walking shell's own. Presets apply to the viewed
+    instance too. At home nothing changes.
+  - The measurement follows the walk: the LUFS meters, the
+    analyser, the EQ measure and the loudness anchor now read
+    the viewed instance. A walked instance keeps measuring
+    even with its own editor closed, and only while someone
+    is looking at it - the CPU cost stays bounded to the
+    instances on display.
+  - The channel badge shows the phase: the project's signature
+    cyan at home (in sync with this instance's plugin), the
+    muted shell look while walking.
+  - A Costes-mode instance viewed in the walker shows its
+    sidebar state; the walking shell's own strip stays local.
 
 - **2.108.1** — *The walker keeps walking.*
   - The arrows now walk from the console you are looking

@@ -785,7 +785,7 @@ int SpectrumPanel::binForX (float x) const
 
     for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
     {
-        const double dist = std::abs (processor.getAnalyzerIn().getBinFrequency (bin) - freq);
+        const double dist = std::abs (target().getAnalyzerIn().getBinFrequency (bin) - freq);
 
         if (dist < bestDist)
         {
@@ -813,7 +813,7 @@ void SpectrumPanel::drawHoverReadout (juce::Graphics& g) const
     g.setColour (juce::Colour (0x408f9bb0));
     g.drawVerticalLine (x, 0.0f, (float) getHeight());
 
-    const float binFreq = (float) processor.getAnalyzerIn().getBinFrequency (bin);
+    const float binFreq = (float) target().getAnalyzerIn().getBinFrequency (bin);
     const float tiltDb  = tilt * (std::log2 (binFreq / 1000.0f));
     const float dbIn    = smoothIn  [(size_t) bin] - tiltDb - lufsOffsetDb;
     const float dbOut   = smoothOut [(size_t) bin] - tiltDb - lufsOffsetDb;
@@ -862,8 +862,8 @@ void SpectrumPanel::updateBallistics()
     float in[SpectrumAnalyzer::numScopeBins];
     float out[SpectrumAnalyzer::numScopeBins];
 
-    processor.getAnalyzerIn().copyScopeData  (in, SpectrumAnalyzer::numScopeBins);
-    processor.getAnalyzerOut().copyScopeData (out, SpectrumAnalyzer::numScopeBins);
+    target().getAnalyzerIn().copyScopeData  (in, SpectrumAnalyzer::numScopeBins);
+    target().getAnalyzerOut().copyScopeData (out, SpectrumAnalyzer::numScopeBins);
 
     // v2.21.1: the EQ curve and its validity gate read the RAW band
     // energies, not the display-smoothed ones (the spatial pass is a
@@ -872,8 +872,8 @@ void SpectrumPanel::updateBallistics()
     float rawIn[SpectrumAnalyzer::numScopeBins];
     float rawOut[SpectrumAnalyzer::numScopeBins];
 
-    processor.getAnalyzerIn().copyRawScopeData  (rawIn, SpectrumAnalyzer::numScopeBins);
-    processor.getAnalyzerOut().copyRawScopeData (rawOut, SpectrumAnalyzer::numScopeBins);
+    target().getAnalyzerIn().copyRawScopeData  (rawIn, SpectrumAnalyzer::numScopeBins);
+    target().getAnalyzerOut().copyRawScopeData (rawOut, SpectrumAnalyzer::numScopeBins);
 
     // v2.41 (the "bonus joli"): ASYMMETRIC ballistics - the rise is
     // 4x faster than the fall, so a transient shows immediately while
@@ -979,7 +979,7 @@ void SpectrumPanel::updateBallistics()
         float eqDb        [SpectrumAnalyzer::numScopeBins];
         float eqCoherence [SpectrumAnalyzer::numScopeBins];
 
-        processor.getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
+        target().getTransferAnalyzer().copyTransferData (eqDb, eqCoherence,
                                                           SpectrumAnalyzer::numScopeBins);
 
         const float eqAlpha = 1.0f / (1.0f + 30.0f * 0.5f);
@@ -1108,7 +1108,7 @@ void SpectrumPanel::updateBallistics()
     // v2.13: the reference is no longer hardcoded -23; it is the
     // selectable lufsTargetDb (Record -37 / Mix -23 / Master -14),
     // cycled by clicking the label at the 0 dB line.
-    const float lufs = processor.getLufsIn().getShortTermLufs();
+    const float lufs = target().getLufsIn().getShortTermLufs();
 
     if (lufs > -60.0f)
     {
@@ -1122,7 +1122,7 @@ void SpectrumPanel::updateBallistics()
             if (in[b] <= -90.0f)
                 continue;
 
-            const float freq = (float) processor.getAnalyzerIn().getBinFrequency (b);
+            const float freq = (float) target().getAnalyzerIn().getBinFrequency (b);
             const float db = in[b] - tilt * (std::log2 (freq / 1000.0f));
 
             const double w = std::pow (10.0, (double) db / 10.0);
@@ -1393,7 +1393,7 @@ float SpectrumPanel::yForEqDb (float db) const
 
 float SpectrumPanel::xForBin (int bin) const
 {
-    return xForFrequency (processor.getAnalyzerIn().getBinFrequency (bin));
+    return xForFrequency (target().getAnalyzerIn().getBinFrequency (bin));
 }
 
 // v2.9: the horizontal axis now runs from 16 Hz to 24 kHz (log). The
@@ -1422,7 +1422,7 @@ void SpectrumPanel::drawCurve (juce::Graphics& g,
     for (int bin = 0; bin < SpectrumAnalyzer::numScopeBins; ++bin)
     {
         const float x = xForBin (bin);
-        const float freq = (float) processor.getAnalyzerIn().getBinFrequency (bin);
+        const float freq = (float) target().getAnalyzerIn().getBinFrequency (bin);
 
         // weighting tilt (dB/octave, referenced at 1 kHz). SPAN convention:
         // a NEGATIVE tilt flattens a naturally falling spectrum, so -4.5
@@ -2088,7 +2088,7 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
         styleConsoleButton (b);
         addAndMakeVisible (b);
 
-        b.onClick = [this, i] { proc.selectConsole ((int) i); };
+        b.onClick = [this, i] { sidebarTarget().selectConsole ((int) i); };
     }
 
     // ---- v2.107.0: the session link toggle ----
@@ -2157,7 +2157,8 @@ TheChannelStripAudioProcessorEditor::TheChannelStripAudioProcessorEditor (TheCha
     helpTexts[&channelBadge] =
         "The channel number of this instance (click to edit). While "
         "walking, the badge shows the viewed channel and its console; "
-        "click it to come home.";
+        "click it to come home. The cyan fill means home - in phase "
+        "with this instance's plugin.";
 
     refreshWalkerBadge();
 
@@ -2716,6 +2717,9 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
     refreshConsoleButtons();
     tryEmbedHostedEditor();
     refreshWalkerBadge();
+    // v2.109.0: the measurement follows the walk - the panel reads
+    // the viewed instance's analyser, transfer and loudness.
+    spectrumPanel.setViewedInstance (walkerViewedInstance());
     refreshLufs();
 
     // v2.57.0 (Clement's remark 3): the CPU readout refreshes calmly -
@@ -2812,7 +2816,12 @@ void TheChannelStripAudioProcessorEditor::timerCallback()
 
 void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
 {
-    const auto slots = proc.getConsoleSlots();
+    // v2.109.0 (the sidebar follows the view): while walking, the
+    // sidebar shows and drives the VIEWED instance - the buttons
+    // follow the console on display, and a click switches the viewed
+    // channel's console, not this walking shell's own.
+    auto& target = sidebarTarget();
+    const auto slots = target.getConsoleSlots();
     juce::String activeName;
 
     for (size_t i = 0; i < slots.size(); ++i)
@@ -2856,7 +2865,7 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
         helpTexts[&btn] = tip;
 
         const bool active = slot.found
-                                && proc.identFor (slot.desc) == proc.getCurrentPluginIdent();
+                                && target.identFor (slot.desc) == target.getCurrentPluginIdent();
         btn.setToggleState (active, juce::dontSendNotification);
 
         if (active)
@@ -2881,7 +2890,7 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
     // v2.3: the sidebar shows the hosted console's name under the buttons.
     // v2.55.0: the internal Costes strip has no slot button, but it is a
     // hosted plugin like any console - it gets the same name line.
-    if (activeName.isEmpty() && proc.isCostesStripActive())
+    if (activeName.isEmpty() && target.isCostesStripActive())
         activeName = "Costes Strip";
 
     hostedNameLabel.setText (activeName.isEmpty() ? juce::String ("--") : activeName,
@@ -2890,8 +2899,11 @@ void TheChannelStripAudioProcessorEditor::refreshConsoleButtons()
 
 void TheChannelStripAudioProcessorEditor::refreshLufs()
 {
-    const float inLufs  = proc.getLufsIn().getShortTermLufs();
-    const float outLufs = proc.getLufsOut().getShortTermLufs();
+    // v2.109.0: the meters follow the walk - while walking they read
+    // the viewed instance's loudness, at home this shell's own.
+    auto& target = sidebarTarget();
+    const float inLufs  = target.getLufsIn().getShortTermLufs();
+    const float outLufs = target.getLufsOut().getShortTermLufs();
 
     lufsInLabel.setText  ("IN "  + fmtLufs (inLufs),   juce::dontSendNotification);
     lufsOutLabel.setText ("OUT " + fmtLufs (outLufs),  juce::dontSendNotification);
@@ -2901,7 +2913,7 @@ void TheChannelStripAudioProcessorEditor::refreshLufs()
     // only formats it now (the old v2.1 editor-side 1.5 s dB EMA and its
     // hold-on-invalid bookkeeping are gone; the meters hold and gate).
     float delta = 0.0f;
-    const bool valid = proc.getGainCorrectionDb (delta);
+    const bool valid = target.getGainCorrectionDb (delta);
 
     // v2.42.1 (Clement's remark): even a settled average flutters between
     // two adjacent display values when the 30 Hz timer reformats the
@@ -3038,6 +3050,12 @@ void TheChannelStripAudioProcessorEditor::releaseViewedInstance()
     if (! viewedProcessor->isEditorOpen())
         viewedProcessor->getHostedStrip().setEditorObservedPlugin (nullptr);
 
+    // v2.109.0: the viewed instance can stop measuring - unless it
+    // already left the registry, in which case its counter died with
+    // it and must not be touched through a stale pointer.
+    if (SessionConsoleLink::getInstance().contains (viewedProcessor))
+        viewedProcessor->releaseWalkerView();
+
     viewedProcessor = nullptr;
 }
 
@@ -3092,6 +3110,9 @@ void TheChannelStripAudioProcessorEditor::walkTo (int direction)
         if (TheChannelStripAudioProcessor::isInstanceStale (*candidate, nowMs))
             continue; // the host stopped feeding it - keep walking
 
+        // v2.109.0: the view keeps the measured instance measuring -
+        // the sidebar's meters, spectrum and EQ measure follow it.
+        candidate->acquireWalkerView();
         viewedProcessor = candidate;
         break;
     }
@@ -3129,12 +3150,54 @@ void TheChannelStripAudioProcessorEditor::refreshWalkerBadge()
         text = "CH " + juce::String (proc.getChannelNumber());
     }
 
+    // v2.109.0 (Clement's remark 3): the badge shows the phase - the
+    // project's signature cyan at home, the same fill as the active
+    // console button, so "in sync with this instance's plugin" reads
+    // at a glance; the muted shell look while walking.
+    channelBadge.setColour (juce::Label::backgroundColourId,
+                            viewedProcessor == nullptr
+                                ? juce::Colour (0xff54c8e8)
+                                : juce::Colour (0xff23262e));
+    channelBadge.setColour (juce::Label::textColourId,
+                            viewedProcessor == nullptr
+                                ? juce::Colour (0xff0e1522)
+                                : juce::Colour (0xffc8cdd6));
+    channelBadge.setColour (juce::Label::outlineColourId,
+                            viewedProcessor == nullptr
+                                ? juce::Colour (0xff54c8e8)
+                                : juce::Colour (0xff3a3f4a));
+
     if (channelBadge.getText() != text)
         channelBadge.setText (text, juce::dontSendNotification);
 
     // at home the badge edits this instance's number; while walking it
     // is a readout and its click returns home
     channelBadge.setEditable (viewedProcessor == nullptr, true, false);
+}
+
+// v2.109.0: the validated viewed instance - nullptr at home, and also
+// nullptr in the tick-sized window where the viewed instance already
+// left the registry (the heartbeat's walkHome is about to clean it
+// up; nothing may dereference it in the meantime).
+TheChannelStripAudioProcessor* TheChannelStripAudioProcessorEditor::walkerViewedInstance()
+{
+    if (viewedProcessor == nullptr)
+        return nullptr;
+
+    if (! SessionConsoleLink::getInstance().contains (viewedProcessor))
+        return nullptr;
+
+    return viewedProcessor;
+}
+
+// v2.109.0: the instance the sidebar drives and displays - the viewed
+// one while walking, this shell's own at home.
+TheChannelStripAudioProcessor& TheChannelStripAudioProcessorEditor::sidebarTarget()
+{
+    if (auto* viewed = walkerViewedInstance())
+        return *viewed;
+
+    return proc;
 }
 
 // v2.108.0: the badge's click rule (see the header struct).
@@ -3353,7 +3416,7 @@ void TheChannelStripAudioProcessorEditor::onPresetSelected()
     // at the root and in an album, and the name-based load only ever
     // reached the root. applyPresetFile posts its own success/failure
     // to the status area.
-    if (! proc.applyPresetFile (presetList[id - 1].file))
+    if (! sidebarTarget().applyPresetFile (presetList[id - 1].file))
     {
         // v2.27: a failed load (missing console, corrupt file) must
         // not leave the failed entry selected - snap back to whatever

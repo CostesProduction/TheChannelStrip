@@ -133,6 +133,13 @@ class SpectrumPanel : public juce::Component,
 public:
     explicit SpectrumPanel (TheChannelStripAudioProcessor& p);
 
+    // v2.109.0: the editor repoints the measured instance on every
+    // heartbeat - the viewed instance while walking, nullptr at home.
+    void setViewedInstance (TheChannelStripAudioProcessor* instance)
+    {
+        viewedInstance = instance;
+    }
+
     void paint (juce::Graphics& g) override;
     void resized() override; // v2.52: places the tilt / speed buttons;
                              // v2.53: places the scale +/- buttons too
@@ -286,6 +293,22 @@ private:
     float eqRangeDb() const { return 3.0f * eqDbPerDiv; }
 
     TheChannelStripAudioProcessor& processor;
+    // v2.109.0 (the sidebar follows the view): while a walker walks,
+    // the MEASUREMENT follows the viewed instance - the spectrum, the
+    // EQ measure and the loudness readout below read target(); the
+    // panel's own display settings (tilt, scales, speed) stay local.
+    // The measurement entry points (copyScopeData etc.) are non-const
+    // and the panel measures from const paint passes (see xForBin),
+    // so the const here guards the panel's own state, never the
+    // measured instance's meters.
+    TheChannelStripAudioProcessor* viewedInstance = nullptr;
+
+    TheChannelStripAudioProcessor& target() const
+    {
+        return viewedInstance != nullptr
+                   ? *viewedInstance
+                   : const_cast<TheChannelStripAudioProcessor&> (processor);
+    }
     float tilt = -4.5f; // dB/oct, SPAN convention: negative flattens a falling spectrum
 
     // v2.8: selectable scales (see setDbPerDiv / setEqDbPerDiv).
@@ -541,6 +564,12 @@ private:
     void walkHome();
     void releaseViewedInstance();
     void refreshWalkerBadge();
+    // v2.109.0 (the sidebar follows the view): the validated viewed
+    // instance (nullptr at home, and nullptr in the tick-sized window
+    // where the viewed instance already left the registry), and the
+    // instance the sidebar drives - this shell's own at home.
+    TheChannelStripAudioProcessor* walkerViewedInstance();
+    TheChannelStripAudioProcessor& sidebarTarget();
     void layoutHostedHolder();
     void fitWindowToHostedEditor(); // v2.4: frame the hosted editor exactly
     void applyAnalyserVisibility(); // v2.8: show/hide the analyser strip

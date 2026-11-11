@@ -13279,6 +13279,94 @@ static void testV21081WalkerFreshness()
                 "a delivered block refreshes the process timestamp");
 }
 
+// ---------------------------------------------------------------------------
+// v2.109.0 (the sidebar follows the view): while walking, the sidebar
+// shows and drives the VIEWED instance, and the measurement follows it
+// too - so a walked instance must keep measuring with its own editor
+// closed. The walker-view refcount drives the same processBlock gates
+// as the editor-open flag: the LUFS meters on the measure gate, the
+// spectrum and the EQ measure on the stricter analyser gate, which a
+// held view forces on whatever the viewed instance's own strip shows.
+// ---------------------------------------------------------------------------
+static void testV21090SidebarFollowsView()
+{
+    // the refcount: per instance, balanced, multi-walker capable
+    {
+        TheChannelStripAudioProcessor a;
+        TheChannelStripAudioProcessor b;
+
+        expectTrue (! a.isViewedByWalkers() && ! b.isViewedByWalkers(),
+                    "a fresh instance is not viewed by any walker");
+
+        a.acquireWalkerView();
+        a.acquireWalkerView();
+        b.acquireWalkerView();
+        expectTrue (a.isViewedByWalkers() && b.isViewedByWalkers(),
+                    "two walkers can view the same instance");
+
+        a.releaseWalkerView();
+        expectTrue (a.isViewedByWalkers(),
+                    "a second walker keeps the view alive");
+
+        a.releaseWalkerView();
+        b.releaseWalkerView();
+        expectTrue (! a.isViewedByWalkers() && ! b.isViewedByWalkers(),
+                    "the last walker releases the view");
+    }
+
+    // the LUFS gate: a walker makes a closed instance measure
+    {
+        TheChannelStripAudioProcessor viewed;
+        viewed.prepareToPlay (48000.0, 512);
+
+        juce::AudioBuffer<float> block (2, 512);
+
+        // no walker: a closed instance measures nothing (the LUFS
+        // floor of -120 means "never measured")
+        SineSource quiet (1000.0, 48000.0, 0.1f);
+        processBlocks (viewed, quiet, (int) (1.0 * 48000.0 / 512.0), block);
+        expectTrue (viewed.getLufsIn().getShortTermLufs() < -60.0f,
+                    "a closed editor measures nothing without a walker");
+
+        // a held view measures: ~ -20 LUFS for the harness sine
+        viewed.acquireWalkerView();
+        SineSource loud (1000.0, 48000.0, 0.1f);
+        processBlocks (viewed, loud, (int) (4.0 * 48000.0 / 512.0), block);
+        expectTrue (viewed.getLufsIn().getShortTermLufs() > -30.0f,
+                    "a walked instance measures LUFS with its editor closed");
+        viewed.releaseWalkerView();
+    }
+
+    // the analyser gate: a held view forces the spectrum on even when
+    // the viewed instance's own strip hides the analyser
+    {
+        TheChannelStripAudioProcessor viewed;
+        viewed.prepareToPlay (48000.0, 512);
+        viewed.setAnalyserVisible (false);
+
+        juce::AudioBuffer<float> block (2, 512);
+
+        viewed.acquireWalkerView();
+        SineSource src (1000.0, 48000.0, 0.3f);
+        processBlocks (viewed, src, (int) (2.0 * 48000.0 / 512.0), block);
+        viewed.releaseWalkerView();
+
+        float bins[SpectrumAnalyzer::numScopeBins];
+        viewed.getAnalyzerIn().copyScopeData (bins, SpectrumAnalyzer::numScopeBins);
+
+        int peakBin = 0;
+        for (int b = 1; b < SpectrumAnalyzer::numScopeBins; ++b)
+            if (bins[b] > bins[peakBin])
+                peakBin = b;
+
+        const double peakHz = viewed.getAnalyzerIn().getBinFrequency (peakBin);
+        expectTrue (peakHz > 700.0 && peakHz < 1400.0,
+                    "a viewed instance keeps its analyser running even "
+                    "with the analyser strip hidden (got "
+                    + juce::String (peakHz, 1) + " Hz)");
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -13385,6 +13473,7 @@ int main (int argc, char* argv[])
     testV21071OutgoingWaitsForEditor();
     testV21080ChannelWalker();
     testV21081WalkerFreshness();
+    testV21090SidebarFollowsView();
 
     if (integration)
         testIntegrationRealConsole();

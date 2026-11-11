@@ -827,9 +827,16 @@ void TheChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     // watch, whose warning must keep firing even with the analyser
     // strip hidden. pushInput/pushOutput always run under the SAME
     // analyserOn flag, so the transfer frames stay sample-aligned.
-    const bool measure = measuringEnabled.load (std::memory_order_relaxed);
+    // v2.109.0 (the sidebar follows the view): a walked instance
+    // measures too - its meters, spectrum and EQ measure are on the
+    // walking shell's display, so the measurement must run with its
+    // own editor closed. The refcount is message-thread driven; the
+    // read here is a relaxed snapshot, free on the audio thread.
+    const bool walkerViewed = viewedByWalkers.load (std::memory_order_relaxed) > 0;
+    const bool measure = measuringEnabled.load (std::memory_order_relaxed)
+                             || walkerViewed;
     const bool analyserOn = measure
-        && analyserVisible.load (std::memory_order_relaxed);
+        && (analyserVisible.load (std::memory_order_relaxed) || walkerViewed);
 
     if (measure)
         lufsIn.process (buffer);

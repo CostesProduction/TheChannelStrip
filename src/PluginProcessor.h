@@ -247,6 +247,18 @@ public:
         return isStaleTimestamp (instance.getLastProcessMs(), nowMs);
     }
 
+    // v2.109.0 (the sidebar follows the view): how many walker editors
+    // view this instance right now. Each held view keeps the
+    // measurement path running (see processBlock) so a walked console
+    // still feeds the walking shell's meters, spectrum and EQ measure
+    // with its own editor closed. Message thread only, like the walk.
+    void acquireWalkerView()  { viewedByWalkers.fetch_add (1, std::memory_order_relaxed); }
+    void releaseWalkerView()  { viewedByWalkers.fetch_sub (1, std::memory_order_relaxed); }
+    bool isViewedByWalkers() const
+    {
+        return viewedByWalkers.load (std::memory_order_relaxed) > 0;
+    }
+
     // the SessionConsoleLink's delivery point - message thread only
     void receiveSessionConsoleChange (int selection);
 
@@ -778,6 +790,8 @@ private:
     // v2.108.1: refreshed at the head of every processBlock - the
     // walker's freshness probe (see isStaleTimestamp above).
     std::atomic<juce::uint32> lastProcessMs { 0 };
+    // v2.109.0: the walker-view refcount (see acquireWalkerView).
+    std::atomic<int> viewedByWalkers { 0 };
     bool applyingSessionLinkChange = false;   // message thread only
     std::atomic<bool> measuringEnabled { false };
     // v2.11: analyser response speed (IN/OUT smoothing time constant).
